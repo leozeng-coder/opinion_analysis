@@ -1,20 +1,22 @@
 @echo off
 setlocal
-title opinion-crawler
+title opinion-crawler (MindSpider)
 
-REM GORM-style DSN (same as backend config database.dsn, query string optional).
-REM Override before run: set DATABASE_DSN=user:pass@tcp(127.0.0.1:3306)/opinion_analysis
-if not defined DATABASE_DSN (
-    set "DATABASE_DSN=root:123456@tcp(127.0.0.1:3306)/opinion_analysis"
-)
+REM MindSpider config: set DB credentials before running
+REM These must match backend\config\config.yaml DSN values
+if not defined MINDSPIDER_DB_HOST set "MINDSPIDER_DB_HOST=127.0.0.1"
+if not defined MINDSPIDER_DB_PORT set "MINDSPIDER_DB_PORT=3306"
+if not defined MINDSPIDER_DB_USER set "MINDSPIDER_DB_USER=root"
+if not defined MINDSPIDER_DB_PASSWORD set "MINDSPIDER_DB_PASSWORD=123456"
+if not defined MINDSPIDER_DB_NAME set "MINDSPIDER_DB_NAME=opinion_analysis"
 
-cd /d "%~dp0..\crawler"
+cd /d "%~dp0..\MindSpider-main"
 if not exist "scheduler.py" (
-    echo [ERROR] crawler\scheduler.py not found.
+    echo [ERROR] MindSpider-main\scheduler.py not found.
     goto END
 )
 
-REM Prefer stable Python (Scrapy/twisted/sqlalchemy): try py -3.13, then 3.12, 3.11, else plain python.
+REM Prefer stable Python: try py -3.13, then 3.12, 3.11, else plain python.
 set "PYRUN="
 py -3.13 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.13"
 if not defined PYRUN py -3.12 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.12"
@@ -31,8 +33,6 @@ if not defined PYRUN (
 echo [crawler] cwd=%CD%
 echo [crawler] Python launcher: %PYRUN%
 %PYRUN% --version
-echo [crawler] DATABASE_DSN is set (host/db must match MySQL).
-echo [crawler] If you changed Python version, delete folder .venv once then rerun.
 
 if not exist ".venv\Scripts\python.exe" (
     echo [crawler] creating .venv ...
@@ -41,11 +41,9 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 call .venv\Scripts\activate.bat
-echo [crawler] pip sync (upgrades SQLAlchemy etc. after git pull) ...
-REM --no-cache-dir: avoid corrupt pip cache after Python upgrade.
+echo [crawler] pip sync ...
 REM Default: Tsinghua mirror + 120s timeout (files.pythonhosted.org often times out from CN).
 REM Use official PyPI: set PIP_USE_OFFICIAL=1 before running this script.
-REM Custom mirror: set PIP_INDEX_URL=... and PIP_TRUSTED_HOST=hostname
 if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
 if not defined PIP_TRUSTED_HOST set "PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn"
 if "%PIP_USE_OFFICIAL%"=="1" (
@@ -62,7 +60,7 @@ if errorlevel 1 (
     goto END
 )
 
-echo [crawler] starting scheduler (Ctrl+C to stop) ...
+echo [crawler] starting MindSpider scheduler (Ctrl+C to stop) ...
 python scheduler.py
 echo [crawler] exited with code %ERRORLEVEL%
 

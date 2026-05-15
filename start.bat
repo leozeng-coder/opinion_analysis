@@ -88,11 +88,11 @@ start "Frontend :5173" /D "%~dp0frontend" cmd /k call "%~dp0scripts\run-frontend
 
 timeout /t 2 /nobreak >nul
 
-echo [5/5] Starting crawler (new window)...
+echo [5/5] Starting MindSpider crawler (new window)...
 if not exist "%~dp0scripts\run-crawler.cmd" (
     echo [WARN] scripts\run-crawler.cmd missing; skip crawler.
 ) else (
-    start "Crawler" /D "%~dp0" cmd /k call "%~dp0scripts\run-crawler.cmd"
+    start "MindSpider Crawler" /D "%~dp0" cmd /k call "%~dp0scripts\run-crawler.cmd"
 )
 
 timeout /t 4 /nobreak >nul
@@ -103,7 +103,7 @@ echo ==========================================
 echo   Launched
 echo   Frontend: http://localhost:5173
 echo   Backend:  http://localhost:8080
-echo   Crawler:  Scrapy scheduler (see Crawler window)
+echo   Crawler:  MindSpider scheduler (see Crawler window)
 echo ==========================================
 echo Closing this window does not stop servers; use the other windows.
 echo.

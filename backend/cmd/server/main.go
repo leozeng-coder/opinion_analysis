@@ -14,20 +14,37 @@ import (
 )
 
 func seedCrawlerSpiderConfigs(db *gorm.DB) {
-	var n int64
-	if err := db.Model(&model.CrawlerSpiderConfig{}).Count(&n).Error; err != nil {
-		log.Fatalf("count crawler spider config: %v", err)
+	// 迁移旧 key（rss/zhihu/tieba/search）到新 key（broad-topic/deep-sentiment）
+	oldKeys := []string{"rss", "zhihu", "tieba", "search"}
+	for _, old := range oldKeys {
+		db.Where("spider_key = ?", old).Delete(&model.CrawlerSpiderConfig{})
 	}
-	if n > 0 {
-		return
+
+	desired := []struct {
+		Key         string
+		DisplayName string
+		Interval    int
+		Enabled     int8
+	}{
+		{"broad-topic", "新闻收集 + AI关键词提取", 60, 1},
+		{"deep-sentiment", "深度情感爬取", 180, 0},
 	}
-	seeds := []model.CrawlerSpiderConfig{
-		{SpiderKey: "rss", DisplayName: "RSS", IntervalMinutes: 30, Enabled: 1},
-		{SpiderKey: "zhihu", DisplayName: "知乎", IntervalMinutes: 60, Enabled: 1},
-		{SpiderKey: "tieba", DisplayName: "贴吧", IntervalMinutes: 120, Enabled: 1},
-	}
-	if err := db.Create(&seeds).Error; err != nil {
-		log.Fatalf("seed crawler spider config: %v", err)
+
+	for _, d := range desired {
+		var existing model.CrawlerSpiderConfig
+		err := db.Where("spider_key = ?", d.Key).First(&existing).Error
+		if err == nil {
+			continue // 已存在，不覆盖用户配置
+		}
+		seed := model.CrawlerSpiderConfig{
+			SpiderKey:       d.Key,
+			DisplayName:     d.DisplayName,
+			IntervalMinutes: d.Interval,
+			Enabled:         d.Enabled,
+		}
+		if err := db.Create(&seed).Error; err != nil {
+			log.Fatalf("seed crawler spider config %q: %v", d.Key, err)
+		}
 	}
 }
 

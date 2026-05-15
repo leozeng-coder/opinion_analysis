@@ -24,11 +24,11 @@ import (
 )
 
 var allowedSpiderKeys = map[string]struct{}{
-	"rss": {}, "zhihu": {}, "tieba": {}, "search": {},
+	"broad-topic": {}, "deep-sentiment": {},
 }
 
-// defaultBasicSpiders 用于「立即运行全部」（不包含 search，避免没有关键词时跑空）
-var defaultBasicSpiders = []string{"rss", "zhihu", "tieba"}
+// defaultBasicSpiders 用于「立即运行全部」（不包含 deep-sentiment，避免没有关键词时跑空）
+var defaultBasicSpiders = []string{"broad-topic"}
 
 type CrawlerHandler struct {
 	db *gorm.DB
@@ -129,7 +129,7 @@ func (h *CrawlerHandler) RunNow(c *gin.Context) {
 
 	keys := normalizeSpiderKeys(body.Spiders, hasFilter)
 	if len(keys) == 0 {
-		response.Fail(c, 400, "no valid spiders (allowed: rss, zhihu, tieba, search)")
+		response.Fail(c, 400, "no valid spiders (allowed: broad-topic, deep-sentiment)")
 		return
 	}
 	if hasFilter && filter.StartAt != "" && filter.EndAt != "" {
@@ -348,7 +348,7 @@ func resolveCrawlerExec() (root, python string, err error) {
 		}
 	}
 	if _, e := os.Stat(python); e != nil {
-		return "", "", fmt.Errorf("Python not found at %s (create crawler/.venv first)", python)
+		return "", "", fmt.Errorf("Python not found at %s (create MindSpider-main/.venv first)", python)
 	}
 	script := filepath.Join(root, "run_once.py")
 	if _, e := os.Stat(script); e != nil {
@@ -360,7 +360,7 @@ func resolveCrawlerExec() (root, python string, err error) {
 func normalizeSpiderKeys(in []string, hasFilter bool) []string {
 	if len(in) == 0 {
 		if hasFilter {
-			return []string{"search"}
+			return []string{"deep-sentiment"}
 		}
 		return append([]string(nil), defaultBasicSpiders...)
 	}

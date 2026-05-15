@@ -114,34 +114,27 @@ class NewsCollector:
             }
     
     async def get_popular_news(self, sources: List[str] = None) -> List[dict]:
-        """获取热门新闻"""
+        """获取热门新闻（并发请求所有源）"""
         if sources is None:
             sources = list(SOURCE_NAMES.keys())
-        
-        print(f"正在获取 {len(sources)} 个新闻源的最新内容...")
+
+        print(f"正在并发获取 {len(sources)} 个新闻源的最新内容...")
         print("=" * 80)
-        
-        results = []
-        for source in sources:
+
+        tasks = [self.fetch_news(source) for source in sources]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
+            source = result["source"]
             source_name = SOURCE_NAMES.get(source, source)
-            print(f"正在获取 {source_name} 的新闻...")
-            result = await self.fetch_news(source)
-            results.append(result)
-            
             if result["status"] == "success":
                 data = result["data"]
-                if 'items' in data and isinstance(data['items'], list):
-                    count = len(data['items'])
-                    print(f"✓ {source_name}: 获取成功，共 {count} 条新闻")
-                else:
-                    print(f"✓ {source_name}: 获取成功")
+                count = len(data['items']) if isinstance(data.get('items'), list) else 0
+                print(f"✓ {source_name}: {count} 条新闻")
             else:
                 print(f"✗ {source_name}: {result.get('error', '获取失败')}")
-            
-            # 避免请求过快
-            await asyncio.sleep(0.5)
-        
-        return results
+
+        return list(results)
     
     # ==================== 数据处理和存储 ====================
     
