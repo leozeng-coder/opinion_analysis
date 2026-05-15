@@ -55,9 +55,10 @@ class BroadTopicExtraction:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self.close()
     
-    async def run_daily_extraction(self, 
+    async def run_daily_extraction(self,
                                   news_sources: Optional[List[str]] = None,
-                                  max_keywords: int = 100) -> Dict:
+                                  max_keywords: int = 100,
+                                  keywords: Optional[List[str]] = None) -> Dict:
         """
         运行每日话题提取流程
         
@@ -98,7 +99,8 @@ class BroadTopicExtraction:
             # 步骤1: 收集新闻
             print("\n【步骤1】收集热点新闻...")
             news_result = await self.news_collector.collect_and_save_news(
-                sources=news_sources
+                sources=news_sources,
+                keywords=keywords or None
             )
             
             extraction_result['news_collection'] = {

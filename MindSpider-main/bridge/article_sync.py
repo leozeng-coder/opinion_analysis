@@ -185,12 +185,16 @@ class ArticleSyncBridge:
 
         return cursor.lastrowid
 
-    def sync_daily_news_to_articles(self, crawl_date: date = None) -> int:
+    def sync_daily_news_to_articles(self, crawl_date: date = None, keywords: list = None,
+                                    start_at: str = None, end_at: str = None) -> int:
         """
         同步每日新闻到 articles 表
 
         Args:
-            crawl_date: 爬取日期，默认为今天
+            crawl_date: 爬取日期，默认为今天；当 start_at/end_at 指定时忽略此参数
+            keywords: 关键词列表，非空时只同步标题包含任一关键词的新闻
+            start_at: ISO 8601 起始时间字符串，按 crawl_date 过滤
+            end_at: ISO 8601 结束时间字符串，按 crawl_date 过滤
 
         Returns:
             同步的文章数量
@@ -198,17 +202,54 @@ class ArticleSyncBridge:
         if not crawl_date:
             crawl_date = date.today()
 
-        print(f"\n开始同步 {crawl_date} 的新闻到 articles 表...")
+        # 解析时间范围（取日期部分与 crawl_date 比较）
+        start_date = None
+        end_date = None
+        if start_at:
+            try:
+                start_date = datetime.fromisoformat(start_at.replace('Z', '+00:00')).date()
+            except (ValueError, AttributeError):
+                start_date = None
+        if end_at:
+            try:
+                end_date = datetime.fromisoformat(end_at.replace('Z', '+00:00')).date()
+            except (ValueError, AttributeError):
+                end_date = None
+
+        print(f"\n开始同步新闻到 articles 表...")
 
         # 从 mindspider.daily_news 读取数据
         source_cursor = self.source_conn.cursor()
-        query = """
+        conditions = []
+        params = []
+
+        if start_date and end_date:
+            conditions.append("crawl_date BETWEEN %s AND %s")
+            params.extend([start_date, end_date])
+        elif start_date:
+            conditions.append("crawl_date >= %s")
+            params.append(start_date)
+        elif end_date:
+            conditions.append("crawl_date <= %s")
+            params.append(end_date)
+        else:
+            conditions.append("crawl_date = %s")
+            params.append(crawl_date)
+
+        if keywords:
+            kw_conditions = " OR ".join(["title LIKE %s"] * len(keywords))
+            conditions.append(f"({kw_conditions})")
+            params.extend([f"%{kw}%" for kw in keywords])
+            print(f"关键词过滤: {keywords}")
+
+        where_clause = " AND ".join(conditions)
+        query = f"""
             SELECT news_id, source_platform, title, url, crawl_date, rank_position
             FROM daily_news
-            WHERE crawl_date = %s
+            WHERE {where_clause}
             ORDER BY rank_position ASC
         """
-        source_cursor.execute(query, (crawl_date,))
+        source_cursor.execute(query, params)
         news_items = source_cursor.fetchall()
 
         if not news_items:

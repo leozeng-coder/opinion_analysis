@@ -165,14 +165,22 @@ async def run_broad_topic(bridge: ArticleSyncBridge, run_id: Optional[int],
     运行 Stage 1: BroadTopicExtraction
     收集新闻 → AI关键词提取 → 同步到 opinion_analysis.articles
     """
+    keywords = filter_data.get('keywords', []) or filter_data.get('topics', [])
+    start_at = filter_data.get('startAt', '')
+    end_at = filter_data.get('endAt', '')
+
     print("[run_once] 启动 BroadTopicExtraction (Stage 1)...")
+    if keywords:
+        print(f"[run_once] 关键词过滤: {keywords}")
+    if start_at or end_at:
+        print(f"[run_once] 时间过滤: {start_at or '不限'} ~ {end_at or '不限'}")
     update_run_progress(bridge, run_id, 5, "collecting_news",
                         {"description": "正在收集13个平台新闻"})
 
     try:
         async with BroadTopicExtraction() as extractor:
             # Stage 1: 收集新闻 + 提取关键词 + 保存到 mindspider DB
-            result = await extractor.run_daily_extraction(max_keywords=100)
+            result = await extractor.run_daily_extraction(max_keywords=100, keywords=keywords or None)
 
             if not result['success']:
                 print(f"[run_once] BroadTopicExtraction 失败: {result.get('error')}")
@@ -189,9 +197,13 @@ async def run_broad_topic(bridge: ArticleSyncBridge, run_id: Optional[int],
                 "keywordsCount": keywords_count
             })
 
-        # Stage 2: 同步到 opinion_analysis.articles
+        # Stage 2: 同步到 opinion_analysis.articles（按关键词过滤）
         print("[run_once] 同步新闻到 opinion_analysis.articles...")
-        synced = bridge.sync_daily_news_to_articles(date.today())
+        synced = bridge.sync_daily_news_to_articles(
+            date.today(),
+            start_at=start_at or None,
+            end_at=end_at or None,
+        )
 
         update_run_progress(bridge, run_id, 90, "done", {
             "newsCount": news_count,

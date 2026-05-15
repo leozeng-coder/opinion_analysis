@@ -3,7 +3,7 @@ import {
   Table, Input, Select, DatePicker, Space, Tag, Button,
   Typography, Drawer, Descriptions, Card,
 } from 'antd'
-import { SearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { articleApi, type ArticleQuery } from '@/api/article'
@@ -113,13 +113,17 @@ const OpinionPage: React.FC = () => {
 
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space wrap>
-          <Input
+          <Input.Search
             placeholder="搜索关键词"
-            prefix={<SearchOutlined />}
             style={{ width: 200 }}
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            onPressEnter={() => setQuery(q => ({ ...q, page: 1, keyword }))}
+            onChange={(e) => {
+              setKeyword(e.target.value)
+              if (!e.target.value) {
+                setQuery(q => ({ ...q, page: 1, keyword: undefined }))
+              }
+            }}
+            onSearch={(v) => setQuery(q => ({ ...q, page: 1, keyword: v || undefined }))}
             allowClear
           />
           <Select

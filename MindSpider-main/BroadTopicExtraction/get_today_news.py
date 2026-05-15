@@ -138,7 +138,8 @@ class NewsCollector:
     
     # ==================== 数据处理和存储 ====================
     
-    async def collect_and_save_news(self, sources: Optional[List[str]] = None) -> Dict:
+    async def collect_and_save_news(self, sources: Optional[List[str]] = None,
+                                    keywords: Optional[List[str]] = None) -> Dict:
         """
         收集并保存每日热点新闻
         
@@ -167,7 +168,17 @@ class NewsCollector:
             
             # 处理结果
             processed_data = self._process_news_results(results)
-            
+
+            # 关键词过滤：在写入 DB 前过滤，AI 提取也只处理匹配项
+            if keywords and processed_data['news_list']:
+                before = len(processed_data['news_list'])
+                processed_data['news_list'] = [
+                    item for item in processed_data['news_list']
+                    if any(kw.lower() in item['title'].lower() for kw in keywords)
+                ]
+                after = len(processed_data['news_list'])
+                print(f"关键词过滤: {before} → {after} 条新闻")
+
             # 保存到数据库（覆盖模式）
             if processed_data['news_list']:
                 saved_count = self.db_manager.save_daily_news(
