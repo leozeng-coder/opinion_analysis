@@ -110,8 +110,18 @@ class BroadTopicExtraction:
                 'total_sources': news_result.get('total_sources', 0)
             }
             
-            if not news_result['success'] or not news_result['news_list']:
+            if not news_result['success']:
                 raise Exception("新闻收集失败或没有获取到新闻")
+
+            if not news_result['news_list']:
+                print("关键词过滤后无匹配新闻，跳过关键词提取")
+                extraction_result['topic_extraction'] = {
+                    'success': True, 'keywords_count': 0, 'keywords': [], 'summary': ''
+                }
+                extraction_result['database_save'] = {'success': True}
+                extraction_result['success'] = True
+                extraction_result['end_time'] = datetime.now().isoformat()
+                return extraction_result
             
             # 步骤2: 提取关键词和生成总结
             print("\n【步骤2】提取关键词和生成总结...")
