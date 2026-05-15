@@ -18,13 +18,33 @@ const SENTIMENT_TAG: Record<string, { color: string; label: string }> = {
   negative: { color: 'error', label: '负面' },
 }
 
-const PLATFORM_OPTIONS = [
-  { value: '', label: '全部平台' },
-  { value: 'weibo', label: '微博' },
-  { value: 'weixin', label: '微信' },
-  { value: 'news', label: '新闻' },
-  { value: 'forum', label: '论坛' },
-]
+const PLATFORM_LABEL: Record<string, string> = {
+  // BroadTopicExtraction 新闻源
+  weibo: '微博热搜',
+  zhihu: '知乎热榜',
+  'bilibili-hot-search': 'B站热搜',
+  toutiao: '今日头条',
+  douyin: '抖音热榜',
+  coolapk: '酷安热榜',
+  tieba: '百度贴吧',
+  wallstreetcn: '华尔街见闻',
+  thepaper: '澎湃新闻',
+  'cls-hot': '财联社',
+  xueqiu: '雪球热榜',
+  kuaishou: '快手热榜',
+  // DeepSentimentCrawling / MediaCrawler
+  xhs: '小红书',
+  dy: '抖音',
+  ks: '快手',
+  bili: 'B站',
+  wb: '微博',
+  // DataSource 旧字段值
+  weixin: '微信',
+  news: '新闻',
+  forum: '论坛',
+}
+
+const platformLabel = (p: string) => PLATFORM_LABEL[p] ?? p
 
 const OpinionPage: React.FC = () => {
   const [data, setData] = useState<Article[]>([])
@@ -33,6 +53,18 @@ const OpinionPage: React.FC = () => {
   const [query, setQuery] = useState<ArticleQuery>({ page: 1, pageSize: 20 })
   const [keyword, setKeyword] = useState('')
   const [detail, setDetail] = useState<Article | null>(null)
+  const [platformOptions, setPlatformOptions] = useState<{ value: string; label: string }[]>([
+    { value: '', label: '全部平台' },
+  ])
+
+  useEffect(() => {
+    articleApi.platforms().then((list) => {
+      setPlatformOptions([
+        { value: '', label: '全部平台' },
+        ...list.map((p) => ({ value: p, label: platformLabel(p) })),
+      ])
+    })
+  }, [])
 
   const fetchData = useCallback(async (q: ArticleQuery) => {
     setLoading(true)
@@ -52,7 +84,7 @@ const OpinionPage: React.FC = () => {
       title: '标题', dataIndex: 'title', ellipsis: true, width: '30%',
       render: (t, r) => <a onClick={() => setDetail(r)}>{t}</a>,
     },
-    { title: '平台', dataIndex: 'platform', width: 80 },
+    { title: '平台', dataIndex: 'platform', width: 80, render: (p: string) => platformLabel(p) },
     {
       title: '情感', dataIndex: 'sentiment', width: 80,
       render: (s) => {
@@ -92,7 +124,7 @@ const OpinionPage: React.FC = () => {
           />
           <Select
             style={{ width: 140 }}
-            options={PLATFORM_OPTIONS}
+            options={platformOptions}
             defaultValue=""
             onChange={(v) => setQuery(q => ({ ...q, page: 1, platform: v || undefined }))}
           />
@@ -143,7 +175,7 @@ const OpinionPage: React.FC = () => {
         {detail && (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label="平台">{detail.platform}</Descriptions.Item>
+              <Descriptions.Item label="平台">{platformLabel(detail.platform)}</Descriptions.Item>
               <Descriptions.Item label="情感">
                 <Tag color={SENTIMENT_TAG[detail.sentiment]?.color}>{SENTIMENT_TAG[detail.sentiment]?.label}</Tag>
               </Descriptions.Item>

@@ -20,4 +20,7 @@ export const articleApi = {
 
   stats: (params?: { startAt?: string; endAt?: string }) =>
     request.get<never, ArticleStats>('/articles/stats', { params }),
+
+  platforms: () =>
+    request.get<never, string[]>('/articles/platforms'),
 }

@@ -32,7 +32,6 @@ SOURCE_NAMES = {
     "bilibili-hot-search": "B站热搜",
     "toutiao": "今日头条",
     "douyin": "抖音热榜",
-    "github-trending-today": "GitHub趋势",
     "coolapk": "酷安热榜",
     "tieba": "百度贴吧",
     "wallstreetcn": "华尔街见闻",

@@ -52,6 +52,7 @@ func NewRouter(db *gorm.DB, logger *zap.Logger) *gin.Engine {
 			{
 				articles.GET("", articleH.List)
 				articles.GET("/stats", articleH.Stats)
+				articles.GET("/platforms", articleH.Platforms)
 				articles.GET("/:id", articleH.Detail)
 			}
 

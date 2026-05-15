@@ -27,7 +27,8 @@ func (h *ArticleHandler) List(c *gin.Context) {
 	startAt := c.Query("startAt")
 	endAt := c.Query("endAt")
 
-	query := h.db.Model(&model.Article{}).Preload("Source")
+	query := h.db.Model(&model.Article{}).Preload("Source").
+		Where("platform != ?", "github-trending-today")
 	if platform != "" {
 		query = query.Where("platform = ?", platform)
 	}
@@ -65,6 +66,20 @@ func (h *ArticleHandler) Detail(c *gin.Context) {
 		return
 	}
 	response.OK(c, article)
+}
+
+// Platforms 返回数据库中实际存在的平台列表
+func (h *ArticleHandler) Platforms(c *gin.Context) {
+	var platforms []string
+	if err := h.db.Model(&model.Article{}).
+		Distinct("platform").
+		Where("platform != '' AND platform != ?", "github-trending-today").
+		Order("platform asc").
+		Pluck("platform", &platforms).Error; err != nil {
+		response.ServerError(c)
+		return
+	}
+	response.OK(c, platforms)
 }
 
 // Stats 舆情统计（情感分布、平台分布、时间趋势）
