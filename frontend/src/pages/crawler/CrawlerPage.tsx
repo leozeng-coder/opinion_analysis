@@ -18,10 +18,8 @@ const { Title, Paragraph, Text } = Typography
 const { RangePicker } = DatePicker
 
 const SPIDER_OPTIONS = [
-  { label: 'RSS 新闻', value: 'rss' },
-  { label: '知乎热榜', value: 'zhihu' },
-  { label: '贴吧热榜', value: 'tieba' },
-  { label: '搜索（百度新闻）', value: 'search' },
+  { label: '新闻收集 + AI关键词提取', value: 'broad-topic' },
+  { label: '社交平台深度爬取', value: 'deep-sentiment' },
 ]
 
 type AdvancedFormValues = {
@@ -73,10 +71,22 @@ function formatProgressDetail(
   }
   if (!d) return '准备中…'
   const parts: string[] = []
-  if (d.phase === 'closing') parts.push('阶段: 爬虫已结束，正在收尾…')
-  else if (d.phase === 'finished') parts.push('阶段: 已完成')
-  else if (d.phase === 'failed') parts.push('阶段: 失败（见运行日志）')
-  else if (d.phase) parts.push(`阶段: ${d.phase}`)
+  const phaseMap: Record<string, string> = {
+    queued: '排队等待',
+    starting: '正在启动',
+    running: '运行中',
+    collecting_news: '正在收集13平台新闻',
+    syncing_articles: '正在同步文章到数据库',
+    extracting_keywords: '正在AI提取关键词',
+    deep_sentiment_starting: '深度爬取启动中',
+    deep_sentiment_done: '深度爬取完成',
+    deep_sentiment_failed: '深度爬取失败',
+    done: '已完成',
+    closing: '爬虫已结束，正在收尾…',
+    finished: '已完成',
+    failed: '失败（见运行日志）',
+  }
+  if (d.phase) parts.push(`阶段: ${phaseMap[d.phase] ?? d.phase}`)
   if (d.totalSpiders != null) parts.push(`计划爬虫: ${d.totalSpiders}`)
   if (d.currentSpider) parts.push(`当前: ${d.currentSpider}`)
   if (d.completedSpiders?.length) parts.push(`已完成: ${d.completedSpiders.join(', ')}`)
@@ -221,7 +231,7 @@ const CrawlerPage: React.FC = () => {
 
   const openAdvanced = () => {
     advancedForm.resetFields()
-    advancedForm.setFieldsValue({ spiders: ['search'] })
+    advancedForm.setFieldsValue({ spiders: ['broad-topic'] })
     setAdvancedOpen(true)
   }
 
@@ -518,13 +528,14 @@ const CrawlerPage: React.FC = () => {
         destroyOnClose
       >
         <Paragraph type="secondary" style={{ marginTop: 0 }}>
-          「搜索」爬虫会按关键词调用百度新闻搜索；其余爬虫拉取自己源后，再按关键词 / 时间范围过滤入库。
+          「新闻收集 + AI关键词提取」会从13个平台收集热点新闻，并通过DeepSeek AI提取关键词；
+          「社交平台深度爬取」会基于已提取的关键词，在小红书/抖音/快手/B站/微博/贴吧/知乎等平台进行深度爬取。
           至少填写一个关键词或话题。
         </Paragraph>
         <Form<AdvancedFormValues>
           form={advancedForm}
           layout="vertical"
-          initialValues={{ spiders: ['search'] }}
+          initialValues={{ spiders: ['broad-topic'] }}
         >
           <Form.Item label="爬虫" name="spiders" rules={[{ required: true, message: '至少选择一个爬虫' }]}>
             <Select

@@ -160,12 +160,12 @@ class BroadTopicExtraction:
         print("=" * 80)
         
         if not extraction_result['success']:
-            print(f"❌ 提取失败: {extraction_result.get('error', '未知错误')}")
+            print(f"[失败] 提取失败: {extraction_result.get('error', '未知错误')}")
             return
         
         # 新闻收集结果
         news_data = extraction_result.get('news_collection', {})
-        print(f"📰 新闻收集: {news_data.get('total_news', 0)} 条新闻")
+        print(f"新闻收集: {news_data.get('total_news', 0)} 条新闻")
         print(f"   成功源数: {news_data.get('successful_sources', 0)}/{news_data.get('total_sources', 0)}")
         
         # 话题提取结果
@@ -173,22 +173,22 @@ class BroadTopicExtraction:
         keywords = topic_data.get('keywords', [])
         summary = topic_data.get('summary', '')
         
-        print(f"\n🔑 提取关键词: {len(keywords)} 个")
+        print(f"\n提取关键词: {len(keywords)} 个")
         if keywords:
             # 每行显示5个关键词
             for i in range(0, len(keywords), 5):
                 keyword_group = keywords[i:i+5]
                 print(f"   {', '.join(keyword_group)}")
         
-        print(f"\n📝 新闻总结:")
+        print(f"\n新闻总结:")
         print(f"   {summary}")
         
         # 数据库保存结果
         db_data = extraction_result.get('database_save', {})
         if db_data.get('success'):
-            print(f"\n💾 数据库保存: 成功")
+            print(f"\n数据库保存: 成功")
         else:
-            print(f"\n💾 数据库保存: 失败")
+            print(f"\n数据库保存: 失败")
         
         print("\n" + "=" * 80)
     
@@ -260,7 +260,7 @@ async def run_extraction_command(sources=None, keywords_count=100, show_details=
                     news_data = result.get('news_collection', {})
                     topic_data = result.get('topic_extraction', {})
                     
-                    print(f"✅ 话题提取成功完成!")
+                    print(f"[成功] 话题提取成功完成!")
                     print(f"   收集新闻: {news_data.get('total_news', 0)} 条")
                     print(f"   提取关键词: {len(topic_data.get('keywords', []))} 个")
                     print(f"   生成总结: {len(topic_data.get('summary', ''))} 字符")
@@ -269,7 +269,7 @@ async def run_extraction_command(sources=None, keywords_count=100, show_details=
                 crawling_keywords = extractor.get_keywords_for_crawling()
                 
                 if crawling_keywords:
-                    print(f"\n🔑 为DeepSentimentCrawling准备的搜索关键词:")
+                    print(f"\n为 DeepSentimentCrawling 准备的搜索关键词:")
                     print(f"   {', '.join(crawling_keywords)}")
                     
                     # 保存关键词到文件
@@ -284,11 +284,11 @@ async def run_extraction_command(sources=None, keywords_count=100, show_details=
                 return True
                 
             else:
-                print(f"❌ 话题提取失败: {result.get('error', '未知错误')}")
+                print(f"[失败] 话题提取失败: {result.get('error', '未知错误')}")
                 return False
                 
     except Exception as e:
-        print(f"❌ 执行过程中发生错误: {e}")
+        print(f"[失败] 执行过程中发生错误: {e}")
         return False
 
 def main():

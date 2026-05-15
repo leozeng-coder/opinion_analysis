@@ -215,6 +215,8 @@ func (h *CrawlerHandler) runSubprocess(logID uint, root, py, spiders, filterJSON
 	env := append(os.Environ(), "DATABASE_DSN="+config.Cfg.Database.DSN)
 	env = append(env, fmt.Sprintf("CRAWLER_RUN_LOG_ID=%d", logID))
 	env = append(env, "CRAWLER_SPIDER_NAMES="+spiders)
+	env = append(env, "PYTHONIOENCODING=utf-8")
+	env = append(env, "PYTHONUTF8=1")
 	if filterFile != "" {
 		env = append(env, "CRAWLER_FILTER_FILE="+filterFile)
 	} else if hasFilterPayload {

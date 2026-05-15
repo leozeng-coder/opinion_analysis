@@ -217,7 +217,7 @@ class TopicExtractor:
         if not summary:
             summary = "今日热点新闻内容丰富，涵盖了社会各个层面的关注点。"
         
-        return clean_keywords[:max_keywords], summary
+        return clean_keywords, summary
     
     def _extract_simple_keywords(self, news_list: List[Dict]) -> List[str]:
         """简单关键词提取（fallback方案）"""

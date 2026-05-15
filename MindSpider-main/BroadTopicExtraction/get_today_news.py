@@ -130,9 +130,10 @@ class NewsCollector:
             if result["status"] == "success":
                 data = result["data"]
                 count = len(data['items']) if isinstance(data.get('items'), list) else 0
-                print(f"✓ {source_name}: {count} 条新闻")
+                # ASCII markers: Windows cp936/gbk consoles cannot print U+2713/U+2717
+                print(f"[OK] {source_name}: {count} 条新闻")
             else:
-                print(f"✗ {source_name}: {result.get('error', '获取失败')}")
+                print(f"[ERR] {source_name}: {result.get('error', '获取失败')}")
 
         return list(results)
     

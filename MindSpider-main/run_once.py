@@ -26,7 +26,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -131,6 +131,34 @@ def bootstrap_progress(bridge: ArticleSyncBridge, run_id: Optional[int],
         print(f"[run_once] 初始化进度失败: {e}", file=sys.stderr)
 
 
+def _save_keywords_to_db(source_conn, keywords: List[str], target_date: date) -> int:
+    """将用户提供的关键词写入 mindspider.daily_topics，供 KeywordManager 读取"""
+    if not keywords:
+        return 0
+    import hashlib
+    import time
+    now_ts = int(time.time() * 1000)
+    cursor = source_conn.cursor()
+    saved = 0
+    for kw in keywords:
+        topic_id = hashlib.md5(f"user:{kw}:{target_date}".encode()).hexdigest()[:32]
+        try:
+            cursor.execute(
+                """INSERT INTO daily_topics
+                   (topic_id, topic_name, keywords, extract_date, relevance_score,
+                    processing_status, add_ts, last_modify_ts)
+                   VALUES (%s, %s, %s, %s, 1.0, 'completed', %s, %s)
+                   ON DUPLICATE KEY UPDATE
+                     topic_name = VALUES(topic_name),
+                     last_modify_ts = VALUES(last_modify_ts)""",
+                (topic_id, kw, json.dumps([kw], ensure_ascii=False), target_date, now_ts, now_ts)
+            )
+            saved += 1
+        except Exception as e:
+            print(f"[run_once] 关键词写入失败 {kw!r}: {e}", file=sys.stderr)
+    return saved
+
+
 async def run_broad_topic(bridge: ArticleSyncBridge, run_id: Optional[int],
                           filter_data: Dict) -> bool:
     """
@@ -148,6 +176,8 @@ async def run_broad_topic(bridge: ArticleSyncBridge, run_id: Optional[int],
 
             if not result['success']:
                 print(f"[run_once] BroadTopicExtraction 失败: {result.get('error')}")
+                update_run_progress(bridge, run_id, 100, "failed",
+                                    {"error": str(result.get('error', '新闻收集失败'))})
                 return False
 
             news_count = result.get('news_collection', {}).get('total_news', 0)
@@ -176,6 +206,7 @@ async def run_broad_topic(bridge: ArticleSyncBridge, run_id: Optional[int],
         print(f"[run_once] broad-topic 执行失败: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc(file=sys.stderr)
+        update_run_progress(bridge, run_id, 100, "failed", {"error": str(e)})
         return False
 
 
@@ -193,6 +224,11 @@ def run_deep_sentiment(bridge: ArticleSyncBridge, run_id: Optional[int],
     update_run_progress(bridge, run_id, 5, "deep_sentiment_starting",
                         {"keywords": keywords[:5] if keywords else []})
 
+    # 将用户提供的关键词写入 mindspider.daily_topics，使 KeywordManager 能读取
+    if keywords:
+        saved = _save_keywords_to_db(bridge.source_conn, keywords, date.today())
+        print(f"[run_once] 已写入 {saved} 个用户关键词到 daily_topics")
+
     try:
         cmd = [sys.executable, str(project_root / 'main.py'), '--deep-sentiment', '--test']
         result = subprocess.run(
@@ -208,6 +244,9 @@ def run_deep_sentiment(bridge: ArticleSyncBridge, run_id: Optional[int],
             print(f"[run_once] deep-sentiment 失败 (code={result.returncode})", file=sys.stderr)
             if result.stderr:
                 print(result.stderr[:2000], file=sys.stderr)
+            update_run_progress(bridge, run_id, 100, "deep_sentiment_failed",
+                                {"exitCode": result.returncode,
+                                 "stderr": result.stderr[:500] if result.stderr else ""})
             return False
 
         update_run_progress(bridge, run_id, 90, "deep_sentiment_done")
@@ -215,9 +254,11 @@ def run_deep_sentiment(bridge: ArticleSyncBridge, run_id: Optional[int],
 
     except subprocess.TimeoutExpired:
         print("[run_once] deep-sentiment 超时 (10分钟)", file=sys.stderr)
+        update_run_progress(bridge, run_id, 100, "deep_sentiment_failed", {"error": "timeout"})
         return False
     except Exception as e:
         print(f"[run_once] deep-sentiment 执行失败: {e}", file=sys.stderr)
+        update_run_progress(bridge, run_id, 100, "deep_sentiment_failed", {"error": str(e)})
         return False
 
 
