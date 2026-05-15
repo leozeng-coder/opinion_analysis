@@ -1,0 +1,33 @@
+# 后端
+backend/bin/
+backend/logs/
+backend/*.log
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# 系统
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# 环境变量
+.env
+.env.local
+.env.production
+
+# Docker volumes（本地）
+mysql-data/
+redis-data/
+
+# Python / crawler
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# AI-generated docs (see ai_docs/). Keep Windows quickstart tracked for new machines.
+ai_docs/*

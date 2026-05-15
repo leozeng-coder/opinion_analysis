@@ -1,0 +1,9 @@
+# 2.11.x allows Twisted 26, which removed _setAcceptableProtocols (breaks downloader). 2.15 pins Twisted<=25.5.
+Scrapy==2.15.2
+APScheduler==3.10.4
+# 2.0.30 crashes on Python 3.13+ (TypeError __firstlineno__ in FastIntFlag). Use >=2.0.36.
+SQLAlchemy>=2.0.36,<2.1.0
+PyMySQL==1.1.1
+snownlp==0.12.3
+jieba==0.42.1
+feedparser==6.0.11
