@@ -24,4 +24,4 @@ log:
 crawler:
   enabled: true
   root: "../MindSpider-main"
-  python: "C:\\Users\\leozeng\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+  python: ""   # empty = auto-detect MindSpider-main/.venv/Scripts/python.exe

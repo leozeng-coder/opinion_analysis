@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
@@ -12,6 +15,50 @@ import (
 	"opinion-analysis/internal/api/handler"
 	"opinion-analysis/internal/model"
 )
+
+// runMindSpiderSQL 执行 MindSpider-main/schema/mindspider_tables.sql，幂等：已存在/重复键等错误静默跳过。
+func runMindSpiderSQL(db *gorm.DB) {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Printf("[mindspider-sql] getwd: %v", err)
+		return
+	}
+	sqlPath := filepath.Join(wd, config.Cfg.Crawler.Root, "schema", "mindspider_tables.sql")
+	data, err := os.ReadFile(sqlPath)
+	if err != nil {
+		log.Printf("[mindspider-sql] read %s: %v (skipped)", sqlPath, err)
+		return
+	}
+
+	sqlDB, _ := db.DB()
+	stmts := strings.Split(string(data), ";")
+	ok, skipped, failed := 0, 0, 0
+	for _, raw := range stmts {
+		stmt := strings.TrimSpace(raw)
+		if stmt == "" || strings.HasPrefix(stmt, "--") {
+			continue
+		}
+		if _, err := sqlDB.Exec(stmt); err != nil {
+			msg := err.Error()
+			// 幂等：表已存在、列已存在、索引已存在、外键缺失等均跳过
+			if strings.Contains(msg, "already exists") ||
+				strings.Contains(msg, "Duplicate") ||
+				strings.Contains(msg, "1060") || // duplicate column
+				strings.Contains(msg, "1061") || // duplicate key name
+				strings.Contains(msg, "1050") || // table already exists
+				strings.Contains(msg, "6125") || // FK missing unique key
+				strings.Contains(msg, "1146") { // table doesn't exist (ALTER on missing table)
+				skipped++
+			} else {
+				log.Printf("[mindspider-sql] warn: %v", err)
+				failed++
+			}
+		} else {
+			ok++
+		}
+	}
+	log.Printf("[mindspider-sql] done: ok=%d skipped=%d failed=%d", ok, skipped, failed)
+}
 
 func seedCrawlerSpiderConfigs(db *gorm.DB) {
 	// 迁移旧 key（rss/zhihu/tieba/search）到新 key（broad-topic/deep-sentiment）
@@ -79,6 +126,8 @@ func main() {
 	}
 
 	seedCrawlerSpiderConfigs(db)
+
+	runMindSpiderSQL(db)
 
 	if n, err := handler.RecoverStaleCrawlerRuns(db); err != nil {
 		log.Fatalf("recover stale crawler runs: %v", err)

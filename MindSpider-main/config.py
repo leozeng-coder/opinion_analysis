@@ -8,7 +8,7 @@ DB_HOST = "localhost"
 DB_PORT = 3306
 DB_USER = "root"
 DB_PASSWORD = "123456"
-DB_NAME = "mindspider"
+DB_NAME = "opinion_analysis"
 DB_CHARSET = "utf8mb4"
 
 # DeepSeek API密钥

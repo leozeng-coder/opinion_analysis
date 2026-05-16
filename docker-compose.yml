@@ -56,18 +56,6 @@ services:
       - backend
     restart: unless-stopped
 
-  crawler:
-    build:
-      context: ./crawler
-      dockerfile: Dockerfile
-    container_name: opinion-crawler
-    depends_on:
-      mysql:
-        condition: service_healthy
-    environment:
-      - DATABASE_DSN=root:password@tcp(opinion-mysql:3306)/opinion_analysis
-    restart: unless-stopped
-
 volumes:
   mysql_data:
   redis_data:

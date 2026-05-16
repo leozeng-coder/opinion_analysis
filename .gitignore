@@ -2,6 +2,8 @@
 backend/bin/
 backend/logs/
 backend/*.log
+backend/server.exe
+backend/cmd/server/server.exe
 
 # 前端
 frontend/node_modules/
