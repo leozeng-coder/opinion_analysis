@@ -12,6 +12,7 @@ type Config struct {
 	JWT      JWTConfig
 	Log      LogConfig
 	Crawler  CrawlerConfig `mapstructure:"crawler"`
+	Tagger   TaggerConfig  `mapstructure:"tagger"`
 }
 
 // CrawlerConfig controls on-demand runs from the API (local subprocess).
@@ -20,6 +21,17 @@ type CrawlerConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Root    string `mapstructure:"root"`    // relative to process working directory (run backend from backend/)
 	Python  string `mapstructure:"python"`  // optional absolute path; empty = .venv in Root
+}
+
+// TaggerConfig 控制后台 AI 自动打标任务。
+type TaggerConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	DeepseekAPIKey  string `mapstructure:"deepseekApiKey"`
+	DeepseekBaseURL string `mapstructure:"deepseekBaseUrl"`
+	Model           string `mapstructure:"model"`
+	IntervalSeconds int    `mapstructure:"intervalSeconds"`
+	BatchSize       int    `mapstructure:"batchSize"`
+	MaxPerTick      int    `mapstructure:"maxPerTick"`
 }
 
 type ServerConfig struct {
@@ -54,6 +66,12 @@ var Cfg *Config
 func Load(path string) {
 	viper.SetDefault("crawler.enabled", true)
 	viper.SetDefault("crawler.root", "../crawler")
+	viper.SetDefault("tagger.enabled", true)
+	viper.SetDefault("tagger.deepseekBaseUrl", "https://api.deepseek.com")
+	viper.SetDefault("tagger.model", "deepseek-chat")
+	viper.SetDefault("tagger.intervalSeconds", 120)
+	viper.SetDefault("tagger.batchSize", 20)
+	viper.SetDefault("tagger.maxPerTick", 200)
 	viper.SetConfigFile(path)
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err != nil {

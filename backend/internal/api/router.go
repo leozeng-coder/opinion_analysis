@@ -1,12 +1,17 @@
 package api
 
 import (
+	"context"
+	"net/http"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"opinion-analysis/config"
 	"opinion-analysis/internal/api/handler"
 	"opinion-analysis/internal/middleware"
+	"opinion-analysis/internal/service/tagger"
 )
 
 func NewRouter(db *gorm.DB, logger *zap.Logger) *gin.Engine {
@@ -24,7 +29,7 @@ func NewRouter(db *gorm.DB, logger *zap.Logger) *gin.Engine {
 	}))
 
 	// 健康检查
-	r.GET("/health", func(c *gin.Context) { c.JSON(200, gin.H{"status": "ok"}) })
+	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 
 	// 初始化 handlers
 	authH := handler.NewAuthHandler(db)
@@ -32,18 +37,19 @@ func NewRouter(db *gorm.DB, logger *zap.Logger) *gin.Engine {
 	topicH := handler.NewTopicHandler(db)
 	alertH := handler.NewAlertHandler(db)
 	crawlerH := handler.NewCrawlerHandler(db)
+	taggerSvc := tagger.New(db, config.Cfg.Tagger)
 
-	api := r.Group("/api")
+	apiGroup := r.Group("/api")
 	{
 		// 认证（公开）
-		auth := api.Group("/auth")
+		auth := apiGroup.Group("/auth")
 		{
 			auth.POST("/login", authH.Login)
 			auth.POST("/register", authH.Register)
 		}
 
 		// 需要登录
-		authorized := api.Group("", middleware.Auth())
+		authorized := apiGroup.Group("", middleware.Auth())
 		{
 			authorized.GET("/auth/profile", authH.Profile)
 
@@ -53,6 +59,7 @@ func NewRouter(db *gorm.DB, logger *zap.Logger) *gin.Engine {
 				articles.GET("", articleH.List)
 				articles.GET("/stats", articleH.Stats)
 				articles.GET("/platforms", articleH.Platforms)
+				articles.GET("/tags", articleH.Tags)
 				articles.GET("/:id", articleH.Detail)
 			}
 
@@ -63,7 +70,7 @@ func NewRouter(db *gorm.DB, logger *zap.Logger) *gin.Engine {
 				topics.GET("/:id", topicH.Detail)
 			}
 
-			// 预警管理（需要分析师或管理员）
+			// 预警管理
 			alerts := authorized.Group("/alerts")
 			{
 				alerts.GET("/rules", alertH.ListRules)
@@ -72,16 +79,38 @@ func NewRouter(db *gorm.DB, logger *zap.Logger) *gin.Engine {
 				alerts.GET("/records", alertH.ListRecords)
 			}
 
-			// 爬虫（定时配置 + 立即执行）
+			// 爬虫
 			crawler := authorized.Group("/crawler")
 			{
 				crawler.GET("/spiders", crawlerH.ListSpiders)
 				crawler.PUT("/spiders", crawlerH.PutSpiders)
 				crawler.POST("/run", crawlerH.RunNow)
 				crawler.GET("/runs", crawlerH.ListRuns)
-				// 单独路径，避免与 /runs/:id 在部分环境下的匹配歧义
 				crawler.GET("/progress/:id", crawlerH.GetRunProgress)
 				crawler.GET("/runs/:id", crawlerH.GetRun)
+			}
+
+			// AI 打标后台任务管理（管理员用）
+			taggerGroup := authorized.Group("/tagger")
+			{
+				// 手动触发一轮（用于调试，不阻塞）
+				taggerGroup.POST("/run", middleware.RequireRole("admin", "analyst"), func(c *gin.Context) {
+					go func() {
+						n, err := taggerSvc.RunOnce(context.Background())
+						if err != nil {
+							logger.Warn("manual tagger run failed", zap.Error(err))
+						} else {
+							logger.Info("manual tagger run done", zap.Int("tagged", n))
+						}
+					}()
+					c.JSON(http.StatusOK, gin.H{"message": "tagger started in background"})
+				})
+				// 查询当前待打标条数
+				taggerGroup.GET("/pending", middleware.RequireRole("admin", "analyst"), func(c *gin.Context) {
+					var count int64
+					db.Table("articles").Where("ai_tags IS NULL AND deleted_at IS NULL").Count(&count)
+					c.JSON(http.StatusOK, gin.H{"pending": count})
+				})
 			}
 		}
 	}

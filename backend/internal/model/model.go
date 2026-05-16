@@ -44,7 +44,8 @@ type Article struct {
 	Platform    string         `gorm:"size:32;index" json:"platform"`
 	Sentiment   string         `gorm:"size:16;index" json:"sentiment"` // positive | neutral | negative
 	SentScore   float64        `json:"sentScore"`                       // 情感分值 -1~1
-	Keywords    string         `gorm:"type:json" json:"keywords"`       // JSON数组
+	Keywords    string         `gorm:"type:json" json:"keywords"`       // JSON数组（jieba 抽词）
+	AITags      *string        `gorm:"column:ai_tags;type:json" json:"aiTags"` // JSON 字符串数组；NULL=未打标
 	PublishedAt time.Time      `gorm:"index" json:"publishedAt"`
 	CreatedAt   time.Time      `json:"createdAt"`
 	UpdatedAt   time.Time      `json:"updatedAt"`

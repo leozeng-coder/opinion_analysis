@@ -31,5 +31,9 @@ __pycache__/
 .venv/
 venv/
 
+# 含有密钥的配置文件（参见 *.example 副本）
+backend/config/config.yaml
+crawler/config.py
+
 # AI-generated docs (see ai_docs/). Keep Windows quickstart tracked for new machines.
 ai_docs/*

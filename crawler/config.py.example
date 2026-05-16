@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 存储数据库连接信息和API密钥
+复制此文件为 config.py 并填入真实值
 """
 
 # MySQL数据库配置
 DB_HOST = "localhost"
 DB_PORT = 3306
 DB_USER = "root"
-DB_PASSWORD = "123456"
+DB_PASSWORD = "YOUR_DB_PASSWORD"
 DB_NAME = "opinion_analysis"
 DB_CHARSET = "utf8mb4"
 
-# DeepSeek API密钥
-DEEPSEEK_API_KEY = "sk-ebcae2681b534d8a9e8b5a735c8e85e9"
+# DeepSeek API密钥（从 https://platform.deepseek.com 获取）
+DEEPSEEK_API_KEY = "sk-YOUR_DEEPSEEK_API_KEY"

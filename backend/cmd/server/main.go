@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -14,9 +15,10 @@ import (
 	"opinion-analysis/internal/api"
 	"opinion-analysis/internal/api/handler"
 	"opinion-analysis/internal/model"
+	"opinion-analysis/internal/service/tagger"
 )
 
-// runMindSpiderSQL 执行 MindSpider-main/schema/mindspider_tables.sql，幂等：已存在/重复键等错误静默跳过。
+// runMindSpiderSQL 执行 crawler/schema/mindspider_tables.sql，幂等：已存在/重复键等错误静默跳过。
 func runMindSpiderSQL(db *gorm.DB) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -134,6 +136,10 @@ func main() {
 	} else if n > 0 {
 		log.Printf("[crawler task] startup_recovered stale_run_count=%d (marked failed, see crawler_run_logs.message)", n)
 	}
+
+	// 启动 AI 自动打标后台任务
+	ctx := context.Background()
+	go tagger.New(db, config.Cfg.Tagger).Start(ctx)
 
 	r := api.NewRouter(db, logger)
 

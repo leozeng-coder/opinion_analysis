@@ -350,7 +350,7 @@ func resolveCrawlerExec() (root, python string, err error) {
 		}
 	}
 	if _, e := os.Stat(python); e != nil {
-		return "", "", fmt.Errorf("Python not found at %s (create MindSpider-main/.venv first)", python)
+		return "", "", fmt.Errorf("Python not found at %s (create %s\\.venv first)", python, config.Cfg.Crawler.Root)
 	}
 	script := filepath.Join(root, "run_once.py")
 	if _, e := os.Stat(script); e != nil {

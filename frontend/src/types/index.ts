@@ -43,8 +43,15 @@ export interface Article {
   sentiment: 'positive' | 'neutral' | 'negative'
   sentScore: number
   keywords: string[]
+  aiTags?: string | null   // 后端返回的 JSON 字符串，例如 '["科技创新","人工智能"]'；NULL=未打标
   publishedAt: string
   createdAt: string
+}
+
+// AI 标签词频
+export interface TagCount {
+  tag: string
+  count: number
 }
 
 // 热点话题
