@@ -1,78 +1,86 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Row, Col, Tag, Typography, Spin, Progress, Space } from 'antd'
-import { FireOutlined, RiseOutlined, FallOutlined, MinusOutlined } from '@ant-design/icons'
-import { topicApi } from '@/api/topic'
-import type { Topic } from '@/types'
+import { Card, Row, Col, Tag, Typography, Spin, Progress, Input, Empty } from 'antd'
+import { FireOutlined, SearchOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
+import { articleApi } from '@/api/article'
+import type { TagCount } from '@/types'
 
 const { Title, Text } = Typography
 
-const TREND_CONFIG = {
-  rising: { icon: <RiseOutlined />, color: '#ff4d4f', label: '上升' },
-  stable: { icon: <MinusOutlined />, color: '#faad14', label: '稳定' },
-  falling: { icon: <FallOutlined />, color: '#52c41a', label: '下降' },
-}
-
 const TopicsPage: React.FC = () => {
-  const [topics, setTopics] = useState<Topic[]>([])
+  const [tags, setTags] = useState<TagCount[]>([])
   const [loading, setLoading] = useState(true)
-  const [total, setTotal] = useState(0)
+  const [keyword, setKeyword] = useState('')
+  const navigate = useNavigate()
 
   useEffect(() => {
-    topicApi.list({ page: 1, pageSize: 30 })
-      .then(res => { setTopics(res.list); setTotal(res.total) })
+    articleApi.tags({ limit: 100 })
+      .then(res => setTags(res))
       .finally(() => setLoading(false))
   }, [])
 
-  const maxHeat = Math.max(...topics.map(t => t.heatScore), 1)
+  const filtered = keyword
+    ? tags.filter(t => t.tag.includes(keyword))
+    : tags
+
+  const maxCount = Math.max(...filtered.map(t => t.count), 1)
 
   if (loading) return <Spin size="large" style={{ display: 'block', marginTop: 80 }} />
 
   return (
     <div>
-      <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>
-        热点话题 <Text type="secondary" style={{ fontSize: 14 }}>共 {total} 个</Text>
-      </Title>
-      <Row gutter={[16, 16]}>
-        {topics.map((topic, idx) => {
-          const trend = TREND_CONFIG[topic.trend] ?? TREND_CONFIG.stable
-          return (
-            <Col xs={24} sm={12} lg={8} key={topic.id}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+        <Title level={4} style={{ margin: 0 }}>
+          热点话题 <Text type="secondary" style={{ fontSize: 14 }}>共 {filtered.length} 个</Text>
+        </Title>
+        <Input
+          placeholder="搜索标签"
+          prefix={<SearchOutlined />}
+          allowClear
+          style={{ width: 200 }}
+          onChange={e => setKeyword(e.target.value.trim())}
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <Empty description="暂无热点话题，待 AI 打标完成后自动更新" />
+      ) : (
+        <Row gutter={[16, 16]}>
+          {filtered.map((item, idx) => (
+            <Col xs={24} sm={12} lg={8} xl={6} key={item.tag}>
               <Card
                 size="small"
                 hoverable
+                onClick={() => navigate(`/opinion?tags=${encodeURIComponent(item.tag)}`)}
                 title={
-                  <Space>
-                    <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>#{idx + 1}</span>
-                    <FireOutlined style={{ color: '#fa8c16' }} />
-                    <Text ellipsis style={{ maxWidth: 180 }}>{topic.name}</Text>
-                  </Space>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span style={{ color: idx < 3 ? '#ff4d4f' : '#faad14', fontWeight: 'bold', flexShrink: 0 }}>
+                      #{idx + 1}
+                    </span>
+                    <FireOutlined style={{ color: '#fa8c16', flexShrink: 0 }} />
+                    <Text ellipsis style={{ flex: 1 }} title={item.tag}>{item.tag}</Text>
+                  </div>
                 }
                 extra={
-                  <Tag color={trend.color} icon={trend.icon}>{trend.label}</Tag>
+                  <Tag color={idx < 3 ? 'red' : idx < 10 ? 'orange' : 'default'}>
+                    {item.count} 篇
+                  </Tag>
                 }
               >
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>热度</Text>
-                  <Progress
-                    percent={Math.round((topic.heatScore / maxHeat) * 100)}
-                    size="small"
-                    strokeColor={{ from: '#fa8c16', to: '#ff4d4f' }}
-                  />
+                <div style={{ marginBottom: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>相关文章热度</Text>
                 </div>
-                <div style={{ marginBottom: 8 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>相关文章：</Text>
-                  <Text strong>{topic.articleCount}</Text>
-                </div>
-                <div>
-                  {(topic.keywords ?? []).slice(0, 5).map((kw) => (
-                    <Tag key={kw} style={{ marginBottom: 4 }}>{kw}</Tag>
-                  ))}
-                </div>
+                <Progress
+                  percent={Math.round((item.count / maxCount) * 100)}
+                  size="small"
+                  strokeColor={idx < 3 ? { from: '#ff4d4f', to: '#fa8c16' } : { from: '#1677ff', to: '#36cfc9' }}
+                  format={() => `${item.count}`}
+                />
               </Card>
             </Col>
-          )
-        })}
-      </Row>
+          ))}
+        </Row>
+      )}
     </div>
   )
 }

@@ -148,4 +148,5 @@ export interface ArticleStats {
   sentiment: { sentiment: string; count: number }[]
   platform: { platform: string; count: number }[]
   trend: { date: string; count: number }[]
+  hotTopicCount?: number
 }

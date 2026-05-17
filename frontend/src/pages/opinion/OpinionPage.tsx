@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Table, Input, Select, DatePicker, Space, Tag, Button,
   Typography, Drawer, Descriptions, Card, Empty, Tooltip,
@@ -46,6 +47,7 @@ const parseTags = (raw?: string | null): string[] => {
 }
 
 const OpinionPage: React.FC = () => {
+  const [searchParams] = useSearchParams()
   const [data, setData] = useState<Article[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -56,7 +58,10 @@ const OpinionPage: React.FC = () => {
     { value: '', label: '全部平台' },
   ])
   const [tagCounts, setTagCounts] = useState<TagCount[]>([])
-  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [selectedTags, setSelectedTags] = useState<string[]>(() => {
+    const t = searchParams.get('tags')
+    return t ? t.split(',').filter(Boolean) : []
+  })
 
   // 平台列表
   useEffect(() => {

@@ -68,6 +68,7 @@ func runCrawlerSQL(db *gorm.DB) {
 func seedSystemSettings(db *gorm.DB) {
 	desired := []model.SystemSetting{
 		{Key: "registration_enabled", Value: "true", Desc: "是否允许开放注册（关闭后 /api/auth/register 拒绝）"},
+		{Key: "dashboard.hot_topic_threshold", Value: "2", Desc: "热点话题最低出现次数阈值（AI 标签在文章中出现 ≥ 该值视为热点）"},
 		// 大模型配置默认值（实际值请通过管理后台 → 系统状态 → 大模型配置维护）
 		{Key: "tagger.enabled", Value: "true", Desc: "AI 自动打标后台任务是否启用"},
 		{Key: "tagger.llm_api_key", Value: "", Desc: "LLM API Key（敏感）"},

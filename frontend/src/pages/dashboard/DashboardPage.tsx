@@ -6,6 +6,7 @@ import {
 } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import { articleApi } from '@/api/article'
+import { alertApi } from '@/api/alert'
 import type { ArticleStats } from '@/types'
 
 const { Title } = Typography
@@ -24,15 +25,22 @@ const SENTIMENT_LABEL: Record<string, string> = {
 
 const DashboardPage: React.FC = () => {
   const [stats, setStats] = useState<ArticleStats | null>(null)
+  const [topicCount, setTopicCount] = useState<number>(0)
+  const [todayAlertCount, setTodayAlertCount] = useState<number>(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    articleApi.stats()
-      .then(setStats)
-      .catch(() => {
-        setStats({ sentiment: [], platform: [], trend: [] })
-      })
-      .finally(() => setLoading(false))
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+
+    Promise.all([
+      articleApi.stats().catch(() => ({ sentiment: [], platform: [], trend: [], hotTopicCount: 0 })),
+      alertApi.listRecords({ pageSize: 1, startAt: todayStart.toISOString() }).catch(() => ({ total: 0, list: [] })),
+    ]).then(([s, a]) => {
+      setStats(s)
+      setTopicCount(s.hotTopicCount ?? 0)
+      setTodayAlertCount(a.total)
+    }).finally(() => setLoading(false))
   }, [])
 
   if (loading) return <Spin size="large" style={{ display: 'block', marginTop: 80 }} />
@@ -87,8 +95,8 @@ const DashboardPage: React.FC = () => {
       <Row gutter={[16, 16]}>
         {[
           { title: '舆情总量', value: totalCount, icon: <FileTextOutlined />, color: '#1677ff' },
-          { title: '热点话题', value: 28, icon: <FireOutlined />, color: '#fa8c16' },
-          { title: '今日预警', value: 3, icon: <BellOutlined />, color: '#ff4d4f' },
+          { title: '热点话题', value: topicCount, icon: <FireOutlined />, color: '#fa8c16' },
+          { title: '今日预警', value: todayAlertCount, icon: <BellOutlined />, color: '#ff4d4f' },
           { title: '负面舆情', value: sentiment.find(s => s.sentiment === 'negative')?.count ?? 0, icon: <AlertOutlined />, color: '#ff7875', suffix: <ArrowDownOutlined /> },
         ].map((item, idx) => (
           <Col xs={24} sm={12} lg={6} key={idx}>

@@ -96,7 +96,7 @@ func (h *ArticleHandler) Platforms(c *gin.Context) {
 	response.OK(c, platforms)
 }
 
-// Stats 舆情统计（情感分布、平台分布、时间趋势）
+// Stats 舆情统计（情感分布、平台分布、时间趋势、热点话题数）
 func (h *ArticleHandler) Stats(c *gin.Context) {
 	startAt := c.DefaultQuery("startAt", "")
 	endAt := c.DefaultQuery("endAt", "")
@@ -131,11 +131,80 @@ func (h *ArticleHandler) Stats(c *gin.Context) {
 	query.Select("DATE(published_at) as date, count(*) as count").
 		Group("DATE(published_at)").Order("date asc").Scan(&trend)
 
+	// 热点话题：读取阈值配置，统计出现次数 ≥ 阈值的 AI 标签数
+	threshold := int64(2)
+	var threshSetting model.SystemSetting
+	if h.db.Where("`key` = ?", "dashboard.hot_topic_threshold").First(&threshSetting).Error == nil {
+		if n, err := strconv.ParseInt(strings.TrimSpace(threshSetting.Value), 10, 64); err == nil && n > 0 {
+			threshold = n
+		}
+	}
+	hotTopicCount := countHotTopics(h.db, threshold)
+
 	response.OK(c, gin.H{
-		"sentiment": sentDist,
-		"platform":  platDist,
-		"trend":     trend,
+		"sentiment":     sentDist,
+		"platform":      platDist,
+		"trend":         trend,
+		"hotTopicCount": hotTopicCount,
 	})
+}
+
+// countHotTopics 统计出现次数 ≥ threshold 的 AI 标签数量
+func countHotTopics(db *gorm.DB, threshold int64) int64 {
+	// 尝试 JSON_TABLE（MySQL 8.0+）
+	sql := `
+		SELECT COUNT(DISTINCT jt.tag) AS hot_count
+		FROM (
+			SELECT jt.tag, COUNT(*) AS cnt
+			FROM articles a,
+			     JSON_TABLE(a.ai_tags, '$[*]' COLUMNS (tag VARCHAR(64) PATH '$')) jt
+			WHERE a.ai_tags IS NOT NULL
+			  AND a.deleted_at IS NULL
+			  AND a.platform != 'github-trending-today'
+			GROUP BY jt.tag
+			HAVING cnt >= ?
+		) sub`
+	var count int64
+	if err := db.Raw(sql, threshold).Scan(&count).Error; err != nil {
+		// 回退：内存聚合
+		return countHotTopicsInMemory(db, threshold)
+	}
+	return count
+}
+
+func countHotTopicsInMemory(db *gorm.DB, threshold int64) int64 {
+	type row struct {
+		AITags *string
+	}
+	var raws []row
+	db.Table("articles").
+		Select("ai_tags").
+		Where("ai_tags IS NOT NULL AND deleted_at IS NULL AND platform != ?", "github-trending-today").
+		Scan(&raws)
+
+	counter := map[string]int64{}
+	for _, r := range raws {
+		if r.AITags == nil {
+			continue
+		}
+		var tags []string
+		if err := json.Unmarshal([]byte(*r.AITags), &tags); err != nil {
+			continue
+		}
+		for _, t := range tags {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				counter[t]++
+			}
+		}
+	}
+	hotCount := int64(0)
+	for _, cnt := range counter {
+		if cnt >= threshold {
+			hotCount++
+		}
+	}
+	return hotCount
 }
 
 // Tags 聚合 AI 标签词频，用于词云 / 下拉筛选

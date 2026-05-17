@@ -9,6 +9,6 @@ export const alertApi = {
 
   deleteRule: (id: number) => request.delete(`/alerts/rules/${id}`),
 
-  listRecords: (params?: { page?: number; pageSize?: number }) =>
+  listRecords: (params?: { page?: number; pageSize?: number; startAt?: string }) =>
     request.get<never, PageData<AlertRecord>>('/alerts/records', { params }),
 }

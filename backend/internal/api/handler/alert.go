@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 	"opinion-analysis/internal/model"
 	"opinion-analysis/pkg/response"
-	"gorm.io/gorm"
 	"strconv"
 )
 
@@ -72,12 +74,19 @@ func (h *AlertHandler) ListRecords(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 
+	q := h.db.Model(&model.AlertRecord{})
+	if s := c.Query("startAt"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			q = q.Where("created_at >= ?", t)
+		}
+	}
+
 	var total int64
-	h.db.Model(&model.AlertRecord{}).Count(&total)
+	q.Count(&total)
 
 	var list []model.AlertRecord
 	offset := (page - 1) * pageSize
-	if err := h.db.Preload("Rule").Order("created_at desc").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+	if err := q.Preload("Rule").Order("created_at desc").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
 		response.ServerError(c)
 		return
 	}

@@ -31,7 +31,8 @@ type updateSettingReq struct {
 }
 
 var allowedSettingKeys = map[string]struct{}{
-	"registration_enabled": {},
+	"registration_enabled":          {},
+	"dashboard.hot_topic_threshold": {},
 }
 
 func (h *AdminSettingHandler) Update(c *gin.Context) {
