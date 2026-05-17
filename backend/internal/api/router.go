@@ -11,6 +11,7 @@ import (
 	"opinion-analysis/internal/api/handler"
 	"opinion-analysis/internal/middleware"
 	"opinion-analysis/internal/service/tagger"
+	"opinion-analysis/pkg/response"
 )
 
 func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.Engine {
@@ -120,12 +121,12 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 								logger.Info("manual tagger run done", zap.Int("tagged", n))
 							}
 						}()
-						c.JSON(http.StatusOK, gin.H{"message": "tagger started in background"})
+						response.OK(c, gin.H{"message": "tagger started in background"})
 					})
 				taggerGroup.GET("/pending", middleware.RequireRole("admin", "analyst"), func(c *gin.Context) {
 					var count int64
 					db.Table("articles").Where("ai_tags IS NULL AND deleted_at IS NULL").Count(&count)
-					c.JSON(http.StatusOK, gin.H{"pending": count})
+					response.OK(c, gin.H{"pending": count})
 				})
 			}
 
