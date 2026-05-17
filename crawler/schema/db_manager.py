@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MindSpider AI爬虫项目 - 数据库管理工具
+舆情分析爬虫项目 - 数据库管理工具
 提供数据库状态查看、数据统计、清理等功能
 """
 
@@ -64,18 +64,18 @@ class DatabaseManager:
             return
         
         # 分类显示表
-        mindspider_tables = []
+        crawler_tables = []
         mediacrawler_tables = []
-        
+
         for table in tables:
             table_name = table[0]
             if table_name in ['daily_news', 'daily_topics', 'topic_news_relation', 'crawling_tasks']:
-                mindspider_tables.append(table_name)
+                crawler_tables.append(table_name)
             else:
                 mediacrawler_tables.append(table_name)
-        
-        print("MindSpider核心表:")
-        for table in mindspider_tables:
+
+        print("爬虫核心表:")
+        for table in crawler_tables:
             cursor.execute(f"SELECT COUNT(*) FROM {table}")
             count = cursor.fetchone()[0]
             print(f"  - {table:<25} ({count:>6} 条记录)")
@@ -229,7 +229,7 @@ class DatabaseManager:
             print("\n这是预览模式，没有实际删除数据。使用 --execute 参数执行实际清理。")
 
 def main():
-    parser = argparse.ArgumentParser(description="MindSpider数据库管理工具")
+    parser = argparse.ArgumentParser(description="舆情分析数据库管理工具")
     parser.add_argument("--tables", action="store_true", help="显示所有表")
     parser.add_argument("--stats", action="store_true", help="显示数据统计")
     parser.add_argument("--recent", type=int, default=7, help="显示最近N天的数据 (默认7天)")

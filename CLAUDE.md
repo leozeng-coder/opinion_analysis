@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**MindSpider** is an AI-powered public opinion (舆情) analysis system — a sub-module of the [BettaFish](https://github.com/666ghj/BettaFish) multi-agent system. It has two sequential pipeline stages:
+**舆情分析系统** is an AI-powered public opinion (舆情) analysis system — a sub-module of the [BettaFish](https://github.com/666ghj/BettaFish) multi-agent system. It has two sequential pipeline stages:
 
 1. **BroadTopicExtraction** — Polls 13 Chinese news/social platforms via a third-party API, then calls DeepSeek LLM to extract trending keywords and generate a daily news summary.
 2. **DeepSentimentCrawling** — Uses those keywords to perform Playwright-automated crawling across 7 social platforms (XHS, Douyin, Kuaishou, Bilibili, Weibo, Baidu Tieba, Zhihu), storing posts and comments in MySQL.
 
-All code lives under `MindSpider-main/`.
+All code lives under `crawler/`.
 
 ## Setup
 
@@ -17,30 +17,30 @@ All code lives under `MindSpider-main/`.
 # Conda environment (Python 3.11 recommended; .python-version pins 3.9)
 conda create -n pytorch_python11 python=3.11
 conda activate pytorch_python11
-pip install -r MindSpider-main/requirements.txt
+pip install -r crawler/requirements.txt
 playwright install
 
 # Alternative: uv (for MediaCrawler sub-package only)
-cd MindSpider-main/DeepSentimentCrawling/MediaCrawler
+cd crawler/DeepSentimentCrawling/MediaCrawler
 uv sync
 ```
 
 ### Required Configuration
 
-Edit `MindSpider-main/config.py` before running anything:
+Edit `crawler/config.py` before running anything:
 
 ```python
 DB_HOST = "..."
 DB_USER = "..."
 DB_PASSWORD = "..."
-DB_NAME = "mindspider"
+DB_NAME = "opinion_analysis"
 DEEPSEEK_API_KEY = "..."
 ```
 
 ### Database Initialization
 
 ```bash
-cd MindSpider-main
+cd crawler
 python main.py --setup          # checks config, deps, DB connection, creates tables
 # or directly:
 python schema/init_database.py
@@ -70,14 +70,14 @@ Key CLI flags: `--date YYYY-MM-DD`, `--platforms xhs dy ks bili wb tieba zhihu`,
 ### Running MediaCrawler Directly
 
 ```bash
-cd MindSpider-main/DeepSentimentCrawling/MediaCrawler
+cd crawler/DeepSentimentCrawling/MediaCrawler
 python main.py --platform xhs --lt qrcode --type search --save_data_option db
 ```
 
 ## Type Checking
 
 ```bash
-cd MindSpider-main/DeepSentimentCrawling/MediaCrawler
+cd crawler/DeepSentimentCrawling/MediaCrawler
 mypy .   # config in mypy.ini; ignores missing stubs for cv2 and execjs
 ```
 
@@ -118,4 +118,4 @@ Register the platform shortcode in `CrawlerFactory` (`MediaCrawler/main.py`) and
 
 ### Database Schema
 
-All DDL is in `schema/mindspider_tables.sql`. The `DatabaseManager` in `BroadTopicExtraction/database_manager.py` handles `daily_news` and `daily_topics` tables. Platform-specific tables are created by each platform's store module under `MediaCrawler/store/`.
+All DDL is in `schema/crawler_tables.sql`. The `DatabaseManager` in `BroadTopicExtraction/database_manager.py` handles `daily_news` and `daily_topics` tables. Platform-specific tables are created by each platform's store module under `MediaCrawler/store/`.

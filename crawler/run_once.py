@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MindSpider - Go 后端集成入口点
+舆情分析 - Go 后端集成入口点
 
 替换原 crawler/run_once.py，供 Go 后端通过子进程调用。
 
@@ -35,7 +35,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root.parent))
 
-# 导入 MindSpider 模块
+# 导入爬虫模块
 try:
     from BroadTopicExtraction.main import BroadTopicExtraction
     from bridge.article_sync import ArticleSyncBridge
@@ -132,7 +132,7 @@ def bootstrap_progress(bridge: ArticleSyncBridge, run_id: Optional[int],
 
 
 def _save_keywords_to_db(source_conn, keywords: List[str], target_date: date) -> int:
-    """将用户提供的关键词写入 mindspider.daily_topics，供 KeywordManager 读取"""
+    """将用户提供的关键词写入 opinion_analysis.daily_topics，供 KeywordManager 读取"""
     if not keywords:
         return 0
     import hashlib
@@ -179,7 +179,7 @@ async def run_broad_topic(bridge: ArticleSyncBridge, run_id: Optional[int],
 
     try:
         async with BroadTopicExtraction() as extractor:
-            # Stage 1: 收集新闻 + 提取关键词 + 保存到 mindspider DB
+            # Stage 1: 收集新闻 + 提取关键词 + 保存到 opinion_analysis DB
             result = await extractor.run_daily_extraction(max_keywords=100, keywords=keywords or None)
 
             if not result['success']:
@@ -236,7 +236,7 @@ def run_deep_sentiment(bridge: ArticleSyncBridge, run_id: Optional[int],
     update_run_progress(bridge, run_id, 5, "deep_sentiment_starting",
                         {"keywords": keywords[:5] if keywords else []})
 
-    # 将用户提供的关键词写入 mindspider.daily_topics，使 KeywordManager 能读取
+    # 将用户提供的关键词写入 opinion_analysis.daily_topics，使 KeywordManager 能读取
     if keywords:
         saved = _save_keywords_to_db(bridge.source_conn, keywords, date.today())
         print(f"[run_once] 已写入 {saved} 个用户关键词到 daily_topics")
@@ -287,7 +287,7 @@ def normalize_keys(raw_keys: List[str]) -> List[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MindSpider run_once entry point")
+    parser = argparse.ArgumentParser(description="舆情分析 run_once 入口点")
     parser.add_argument(
         "--spiders",
         default="broad-topic",

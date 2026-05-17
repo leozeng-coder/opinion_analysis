@@ -1,16 +1,16 @@
 > [!tip]
-> MindSpider是 多Agent舆情分析系统 [BettaFish](https://github.com/666ghj/BettaFish) 的子模块，本仓库已停止单独更新。开发者如需获取最新代码和完整功能，请访问 BettaFish 开源页面并定位至其中的 MindSpider 目录。
+> 本爬虫模块衍生自 [BettaFish](https://github.com/666ghj/BettaFish) 多 Agent 舆情分析系统的 MindSpider 子模块，已集成进本项目作为舆情分析系统的爬虫子模块。
 
-# MindSpider - 专为舆情分析设计的AI爬虫
+# 舆情分析爬虫 - 专为舆情分析设计的AI爬虫
 
-<img src="https://github.com/666ghj/MindSpider/blob/main/logo.png?raw=true" style="width: 25%;" alt="MindSpider Logo"/>
+<img src="https://github.com/666ghj/MindSpider/blob/main/logo.png?raw=true" style="width: 25%;" alt="爬虫 Logo"/>
 
 > 免责声明：
 > 本仓库的所有内容仅供学习和参考之用，禁止用于商业用途。任何人或组织不得将本仓库的内容用于非法用途或侵犯他人合法权益。本仓库所涉及的爬虫技术仅用于学习和研究，不得用于对其他平台进行大规模爬虫或其他非法行为。对于因使用本仓库内容而引起的任何法律责任，本仓库不承担任何责任。使用本仓库的内容即表示您同意本免责声明的所有条款和条件。
 
 ## 项目概述
 
-MindSpider是一个基于Agent技术的智能舆情爬虫系统，通过AI自动识别热点话题，并在多个社交媒体平台进行精准的内容爬取。系统采用模块化设计，能够实现从话题发现到内容收集的全自动化流程。
+本爬虫是一个基于Agent技术的智能舆情爬虫系统，通过AI自动识别热点话题，并在多个社交媒体平台进行精准的内容爬取。系统采用模块化设计，能够实现从话题发现到内容收集的全自动化流程。
 
 项目参考知名爬虫MediaCrawler，在其基础上进行改进，实现全自动AI爬取：https://github.com/NanmiCoder/MediaCrawler
 
@@ -30,7 +30,7 @@ MindSpider是一个基于Agent技术的智能舆情爬虫系统，通过AI自动
 ## 项目结构
 
 ```
-MindSpider/
+crawler/
 ├── BroadTopicExtraction/           # 话题提取模块
 │   ├── database_manager.py         # 数据库管理器
 │   ├── get_today_news.py          # 新闻采集器
@@ -61,7 +61,7 @@ MindSpider/
 ├── schema/                       # 数据库架构
 │   ├── db_manager.py            # 数据库管理
 │   ├── init_database.py         # 初始化脚本
-│   └── mindspider_tables.sql    # 表结构定义
+│   └── crawler_tables.sql    # 表结构定义
 │
 ├── config.py                    # 全局配置文件
 ├── main.py                      # 系统主入口
@@ -202,11 +202,10 @@ flowchart TB
 - Conda环境：pytorch_python11（推荐）
 - 操作系统：Windows/Linux/macOS
 
-### 1. 克隆项目
+### 1. 进入爬虫模块目录
 
 ```bash
-git clone https://github.com/yourusername/MindSpider.git
-cd MindSpider
+cd crawler
 ```
 
 ### 2. 创建并激活Conda环境
@@ -236,7 +235,7 @@ DB_HOST = "your_database_host"
 DB_PORT = 3306
 DB_USER = "your_username"
 DB_PASSWORD = "your_password"
-DB_NAME = "mindspider"
+DB_NAME = "opinion_analysis"
 DB_CHARSET = "utf8mb4"
 
 # DeepSeek API密钥
@@ -453,7 +452,7 @@ async def get_new_platform_news(self) -> List[Dict]:
 
 ### 数据库扩展
 
-如需添加新的数据表或字段，请更新 `schema/mindspider_tables.sql` 并运行：
+如需添加新的数据表或字段，请更新 `schema/crawler_tables.sql` 并运行：
 
 ```bash
 python schema/init_database.py
@@ -501,10 +500,6 @@ def crawl_content():
     return result
 ```
 
-## 许可证
-
-本项目仅供学习研究使用，请勿用于商业用途。使用本项目时请遵守相关法律法规和平台服务条款。
-
 ---
 
-**MindSpider** - 让AI助力舆情洞察，智能化内容分析的得力助手
+**舆情分析爬虫** - 让AI助力舆情洞察，智能化内容分析的得力助手

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MindSpider - AI爬虫项目主程序
+舆情分析爬虫 - AI爬虫项目主程序
 集成BroadTopicExtraction和DeepSentimentCrawling两个核心模块
 """
 
@@ -25,17 +25,17 @@ except ImportError:
     print("请确保项目根目录下存在config.py文件，并包含数据库和API配置信息")
     sys.exit(1)
 
-class MindSpider:
-    """MindSpider主程序"""
-    
+class OpinionCrawler:
+    """舆情分析爬虫主程序"""
+
     def __init__(self):
-        """初始化MindSpider"""
+        """初始化爬虫"""
         self.project_root = project_root
         self.broad_topic_path = self.project_root / "BroadTopicExtraction"
         self.deep_sentiment_path = self.project_root / "DeepSentimentCrawling"
         self.schema_path = self.project_root / "schema"
-        
-        print("MindSpider AI爬虫项目")
+
+        print("舆情分析爬虫项目")
         print(f"项目路径: {self.project_root}")
     
     def check_config(self) -> bool:
@@ -264,7 +264,7 @@ class MindSpider:
                              keywords_count: int = 100, max_keywords: int = 50,
                              max_notes: int = 50, test_mode: bool = False) -> bool:
         """运行完整工作流程"""
-        print(f"\n开始完整的MindSpider工作流程")
+        print(f"\n开始完整的舆情分析爬虫工作流程")
         
         if not target_date:
             target_date = date.today()
@@ -290,7 +290,7 @@ class MindSpider:
     
     def show_status(self):
         """显示项目状态"""
-        print(f"\nMindSpider项目状态:")
+        print(f"\n舆情分析爬虫项目状态:")
         print(f"项目路径: {self.project_root}")
         
         # 配置状态
@@ -318,7 +318,7 @@ class MindSpider:
     
     def setup_project(self) -> bool:
         """项目初始化设置"""
-        print(f"\n开始MindSpider项目初始化...")
+        print(f"\n开始爬虫项目初始化...")
         
         # 1. 检查配置
         if not self.check_config():
@@ -338,12 +338,12 @@ class MindSpider:
             if not self.initialize_database():
                 return False
         
-        print(f"\nMindSpider项目初始化完成！")
+        print(f"\n爬虫项目初始化完成！")
         return True
 
 def main():
     """命令行入口"""
-    parser = argparse.ArgumentParser(description="MindSpider - AI爬虫项目主程序")
+    parser = argparse.ArgumentParser(description="舆情分析爬虫 - AI爬虫项目主程序")
     
     # 基本操作
     parser.add_argument("--setup", action="store_true", help="初始化项目设置")
@@ -376,8 +376,8 @@ def main():
             print("错误：日期格式不正确，请使用 YYYY-MM-DD 格式")
             return
     
-    # 创建MindSpider实例
-    spider = MindSpider()
+    # 创建爬虫实例
+    spider = OpinionCrawler()
     
     try:
         # 显示状态
@@ -388,7 +388,7 @@ def main():
         # 项目设置
         if args.setup:
             if spider.setup_project():
-                print("项目设置完成，可以开始使用MindSpider！")
+                print("项目设置完成，可以开始使用舆情分析爬虫！")
             else:
                 print("项目设置失败，请检查配置和环境")
             return
@@ -415,7 +415,7 @@ def main():
             )
         else:
             # 默认运行完整工作流程
-            print("运行完整MindSpider工作流程...")
+            print("运行完整舆情分析爬虫工作流程...")
             spider.run_complete_workflow(
                 target_date, args.platforms, args.keywords_count,
                 args.max_keywords, args.max_notes, args.test

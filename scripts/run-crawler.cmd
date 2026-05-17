@@ -1,18 +1,18 @@
 @echo off
 setlocal
-title opinion-crawler (MindSpider)
+title opinion-crawler
 
-REM MindSpider config: set DB credentials before running
+REM crawler config: set DB credentials before running
 REM These must match backend\config\config.yaml DSN values
-if not defined MINDSPIDER_DB_HOST set "MINDSPIDER_DB_HOST=127.0.0.1"
-if not defined MINDSPIDER_DB_PORT set "MINDSPIDER_DB_PORT=3306"
-if not defined MINDSPIDER_DB_USER set "MINDSPIDER_DB_USER=root"
-if not defined MINDSPIDER_DB_PASSWORD set "MINDSPIDER_DB_PASSWORD=123456"
-if not defined MINDSPIDER_DB_NAME set "MINDSPIDER_DB_NAME=opinion_analysis"
+if not defined CRAWLER_DB_HOST set "CRAWLER_DB_HOST=127.0.0.1"
+if not defined CRAWLER_DB_PORT set "CRAWLER_DB_PORT=3306"
+if not defined CRAWLER_DB_USER set "CRAWLER_DB_USER=root"
+if not defined CRAWLER_DB_PASSWORD set "CRAWLER_DB_PASSWORD=123456"
+if not defined CRAWLER_DB_NAME set "CRAWLER_DB_NAME=opinion_analysis"
 
-cd /d "%~dp0..\MindSpider-main"
+cd /d "%~dp0..\crawler"
 if not exist "scheduler.py" (
-    echo [ERROR] MindSpider-main\scheduler.py not found.
+    echo [ERROR] crawler\scheduler.py not found. Ensure you are running from the repo root.
     goto END
 )
 
@@ -60,7 +60,7 @@ if errorlevel 1 (
     goto END
 )
 
-echo [crawler] starting MindSpider scheduler (Ctrl+C to stop) ...
+echo [crawler] starting scheduler (Ctrl+C to stop) ...
 python scheduler.py
 echo [crawler] exited with code %ERRORLEVEL%
 

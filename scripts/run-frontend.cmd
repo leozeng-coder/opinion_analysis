@@ -4,24 +4,20 @@ title Frontend :5173
 
 if exist "C:\Program Files\nodejs\node.exe" set "PATH=C:\Program Files\nodejs;%PATH%"
 
-echo [frontend] cwd=%CD%
-echo [frontend] node:
-where node 2>nul
+where node >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] node not found. Install Node.js or add it to PATH.
     goto :END
 )
-node -v
-echo [frontend] npm:
-where npm 2>nul
-if errorlevel 1 (
-    echo [ERROR] npm not found.
-    goto :END
+
+if not exist "node_modules" (
+    echo [frontend] installing deps ...
+    call npm install
+    if errorlevel 1 goto :END
 )
 
-echo [frontend] npm run dev ...
+echo [frontend] starting on :5173 ...
 call npm run dev
-echo [frontend] npm exited with code %ERRORLEVEL%
 
 :END
 echo.

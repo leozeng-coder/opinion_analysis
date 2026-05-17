@@ -50,9 +50,9 @@ npm install
 
 在仓库**根目录**双击 **`start.bat`**（或在该目录打开 CMD 后执行 `start.bat`）。
 
-- 会新开窗口：**后端（8080）**、**前端（5173）**、**爬虫（MindSpider 定时任务）**。  
-- 爬虫需要本机 **Python 3** 在 PATH 中；首次会在 `MindSpider-main\.venv` 创建虚拟环境并安装依赖。  
-- 若修改了 `backend/config/config.yaml` 里的数据库密码，请同步修改 `scripts/run-crawler.cmd` 中的 `MINDSPIDER_DB_PASSWORD`，或在运行前 `set MINDSPIDER_DB_PASSWORD=...`。  
+- 会新开窗口：**后端（8080）**、**前端（5173）**、**爬虫（定时任务）**。  
+- 爬虫需要本机 **Python 3** 在 PATH 中；首次会在 `crawler\.venv` 创建虚拟环境并安装依赖。  
+- 若修改了 `backend/config/config.yaml` 里的数据库密码，请同步修改 `scripts/run-crawler.cmd` 中的 `CRAWLER_DB_PASSWORD`，或在运行前 `set CRAWLER_DB_PASSWORD=...`。  
 - 是否启动成功以**各子窗口**里的日志为准。
 
 ### 方式 B：命令行（两个终端）
@@ -115,7 +115,7 @@ docker-compose up -d --build
 | `start.bat` | Windows 一键启动入口 |
 | `scripts/run-backend.cmd` | 后端子进程脚本 |
 | `scripts/run-frontend.cmd` | 前端子进程脚本 |
-| `scripts/run-crawler.cmd` | 爬虫：venv、`pip install`、`python scheduler.py`（MindSpider） |
+| `scripts/run-crawler.cmd` | 爬虫：venv、`pip install`、`python scheduler.py` |
 | `backend/config/config.yaml` | 端口、MySQL DSN、JWT 等 |
 | `backend/cmd/createdb` | 按配置创建数据库 |
 

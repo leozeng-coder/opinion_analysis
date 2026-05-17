@@ -43,6 +43,20 @@ services:
         condition: service_started
     environment:
       - GIN_MODE=release
+      # 首次启动时的默认 admin 密码，留空则自动随机生成并打到日志
+      # - ADMIN_INIT_PASSWORD=change-me-now
+    restart: unless-stopped
+
+  # 管理后台（独立 nginx，主 frontend nginx 通过 /admin/ proxy 调用）
+  admin-frontend:
+    build:
+      context: ./frontend-admin
+      dockerfile: Dockerfile
+    container_name: opinion-admin-frontend
+    # 仅 docker 内部暴露；通过 frontend nginx /admin/ 代理访问
+    # 如需直接访问管理后台（例如独立部署），打开下行注释：
+    # ports:
+    #   - "5174:80"
     restart: unless-stopped
 
   frontend:
@@ -54,8 +68,10 @@ services:
       - "80:80"
     depends_on:
       - backend
+      - admin-frontend
     restart: unless-stopped
 
 volumes:
   mysql_data:
   redis_data:
+

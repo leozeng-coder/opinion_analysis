@@ -79,6 +79,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Success 200 {object} response.Response
 // @Router /api/auth/register [post]
 func (h *AuthHandler) Register(c *gin.Context) {
+	if !GetRegistrationEnabled(h.db) {
+		response.Fail(c, 1004, "开放注册已关闭，请联系管理员")
+		return
+	}
 	var req registerReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())

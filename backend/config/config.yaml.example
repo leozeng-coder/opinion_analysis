@@ -20,7 +20,7 @@ log:
   level: "info"
   filename: "logs/app.log"
 
-# 前端「立即爬取」由后端在本机拉起 MindSpider/run_once.py；Docker 纯后端镜像无 Python 时请改为 enabled: false
+# 前端「立即爬取」由后端在本机拉起 crawler/run_once.py；Docker 纯后端镜像无 Python 时请改为 enabled: false
 crawler:
   enabled: true
   root: "../crawler"

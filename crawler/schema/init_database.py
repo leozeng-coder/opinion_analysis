@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MindSpider AI爬虫项目 - 数据库初始化脚本
+舆情分析爬虫项目 - 数据库初始化脚本
 用于创建项目所需的所有数据库表
 """
 
@@ -88,7 +88,7 @@ def execute_sql_file(connection, sql_file_path, description=""):
 def main():
     """主函数"""
     print("=" * 60)
-    print("MindSpider AI爬虫项目 - 数据库初始化")
+    print("舆情分析爬虫项目 - 数据库初始化")
     print("=" * 60)
     
     # 检查配置
@@ -116,7 +116,7 @@ def main():
         # 获取SQL文件路径
         schema_dir = Path(__file__).parent
         mediacrawler_sql = schema_dir.parent / "DeepSentimentCrawling" / "MediaCrawler" / "schema" / "tables.sql"
-        mindspider_sql = schema_dir / "mindspider_tables.sql"
+        crawler_sql = schema_dir / "crawler_tables.sql"
         
         print()
         print("开始执行SQL脚本...")
@@ -128,12 +128,12 @@ def main():
         else:
             print("警告: MediaCrawler SQL文件不存在，跳过基础表创建")
         
-        # 2. 执行MindSpider扩展表结构
-        print("2. 创建MindSpider扩展表...")
-        if mindspider_sql.exists():
-            execute_sql_file(connection, str(mindspider_sql), "MindSpider扩展表")
+        # 2. 执行爬虫扩展表结构
+        print("2. 创建爬虫扩展表...")
+        if crawler_sql.exists():
+            execute_sql_file(connection, str(crawler_sql), "爬虫扩展表")
         else:
-            print("错误: MindSpider SQL文件不存在")
+            print("错误: 爬虫 SQL 文件不存在")
             return False
         
         print()
@@ -151,7 +151,7 @@ def main():
             print(f"  - {table[0]}")
         
         print()
-        print("数据库初始化成功完成！您现在可以开始使用MindSpider了。")
+        print("数据库初始化成功完成！您现在可以开始使用舆情分析爬虫了。")
         return True
         
     except Exception as e:

@@ -1,4 +1,4 @@
-# MindSpider AI爬虫项目依赖包
+# 舆情分析爬虫项目依赖包
 # 整合BroadTopicExtraction和DeepSentimentCrawling模块的核心依赖
 
 # ===============================

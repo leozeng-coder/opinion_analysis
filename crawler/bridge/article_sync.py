@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-数据桥接模块 - 将 MindSpider 数据同步到 opinion_analysis.articles 表
+数据桥接模块 - 将爬虫数据同步到 opinion_analysis.articles 表
 情感分析：批量调用 DeepSeek LLM，失败时回退到 SnowNLP，再失败置 neutral。
 """
 
@@ -241,7 +241,7 @@ class ArticleSyncBridge:
             print(f"目标数据库连接失败: {e}")
             raise
 
-        # 连接源数据库 (mindspider)
+        # 连接源数据库 (opinion_analysis)
         try:
             self.source_conn = pymysql.connect(
                 host=config.DB_HOST,
@@ -355,7 +355,7 @@ class ArticleSyncBridge:
 
         print(f"\n开始同步新闻到 articles 表...")
 
-        # 从 mindspider.daily_news 读取数据
+        # 从 opinion_analysis.daily_news 读取数据
         source_cursor = self.source_conn.cursor()
         conditions = []
         params = []

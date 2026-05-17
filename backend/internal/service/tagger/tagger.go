@@ -5,7 +5,8 @@
 //   - 增量：以 ai_tags IS NULL 作为待处理标记，无需额外状态表
 //   - 批量：单次 LLM 调用处理 batchSize 条，显著降低 token 与延迟开销
 //   - 节流：单次 tick 处理上限 maxPerTick，避免历史积压时把后台 goroutine 占满
-//   - 失败隔离：单批失败仅跳过该批次，剩余批次继续；写回时按条容错
+//   - 失败隔离:单批失败仅跳过该批次，剩余批次继续；写回时按条容错
+//   - 配置热更新：通过 UpdateConfig 可在运行期替换 cfg/apiKey；Start 循环每 tick 读取最新值
 package tagger
 
 import (
@@ -19,6 +20,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -29,42 +31,57 @@ import (
 
 type Service struct {
 	db     *gorm.DB
+	client *http.Client
+
+	mu     sync.RWMutex
 	cfg    config.TaggerConfig
 	apiKey string
-	client *http.Client
 }
 
 func New(db *gorm.DB, cfg config.TaggerConfig) *Service {
+	s := &Service{
+		db:     db,
+		client: &http.Client{Timeout: 60 * time.Second},
+	}
+	s.applyConfig(cfg)
+	return s
+}
+
+// snapshot 返回当前生效的配置和已解析的 apiKey 拷贝。
+func (s *Service) snapshot() (config.TaggerConfig, string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg, s.apiKey
+}
+
+// GetConfig 给 handler 用：返回当前生效配置以及 apiKey 是否已配置。
+func (s *Service) GetConfig() (cfg config.TaggerConfig, apiKeySet bool) {
+	cfg, key := s.snapshot()
+	return cfg, key != ""
+}
+
+// UpdateConfig 替换当前配置。下一轮 tick 自动生效。
+func (s *Service) UpdateConfig(cfg config.TaggerConfig) {
+	s.applyConfig(cfg)
+}
+
+func (s *Service) applyConfig(cfg config.TaggerConfig) {
 	apiKey := strings.TrimSpace(cfg.DeepseekAPIKey)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
 	}
-	return &Service{
-		db:     db,
-		cfg:    cfg,
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 60 * time.Second},
-	}
+	s.mu.Lock()
+	s.cfg = cfg
+	s.apiKey = apiKey
+	s.mu.Unlock()
 }
 
 // Start 启动后台定时任务。ctx 取消时优雅退出。
+// 当前 Enabled=false 或 apiKey 缺失时 goroutine 不退出，仅跳过本轮，
+// 以便管理员后续通过 UpdateConfig 启用时无需重启服务。
 func (s *Service) Start(ctx context.Context) {
-	if !s.cfg.Enabled {
-		log.Printf("[tagger] disabled by config")
-		return
-	}
-	if s.apiKey == "" {
-		log.Printf("[tagger] deepseekApiKey 未配置（也未在 DEEPSEEK_API_KEY 环境变量找到），后台任务不会运行")
-		return
-	}
-	interval := time.Duration(s.cfg.IntervalSeconds) * time.Second
-	if interval <= 0 {
-		interval = 2 * time.Minute
-	}
-	log.Printf("[tagger] started: interval=%s batch=%d maxPerTick=%d model=%s",
-		interval, s.cfg.BatchSize, s.cfg.MaxPerTick, s.cfg.Model)
+	log.Printf("[tagger] service goroutine started")
 
-	// 启动后 5 秒先跑一次，避免要等满一个 interval
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 
@@ -74,6 +91,20 @@ func (s *Service) Start(ctx context.Context) {
 			log.Printf("[tagger] stopped: %v", ctx.Err())
 			return
 		case <-timer.C:
+			cfg, apiKey := s.snapshot()
+			interval := time.Duration(cfg.IntervalSeconds) * time.Second
+			if interval <= 0 {
+				interval = 2 * time.Minute
+			}
+			if !cfg.Enabled {
+				timer.Reset(interval)
+				continue
+			}
+			if apiKey == "" {
+				log.Printf("[tagger] skip tick: deepseekApiKey 未配置")
+				timer.Reset(interval)
+				continue
+			}
 			n, err := s.RunOnce(ctx)
 			if err != nil {
 				log.Printf("[tagger] tick error: %v", err)
@@ -87,11 +118,16 @@ func (s *Service) Start(ctx context.Context) {
 
 // RunOnce 处理一轮：查询待打标文章 → 批量调用 LLM → 写回。返回成功打标的条数。
 func (s *Service) RunOnce(ctx context.Context) (int, error) {
-	batchSize := s.cfg.BatchSize
+	cfg, apiKey := s.snapshot()
+	if apiKey == "" {
+		return 0, fmt.Errorf("deepseek api key not configured")
+	}
+
+	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
 		batchSize = 20
 	}
-	maxPerTick := s.cfg.MaxPerTick
+	maxPerTick := cfg.MaxPerTick
 	if maxPerTick <= 0 {
 		maxPerTick = 200
 	}
@@ -115,14 +151,13 @@ func (s *Service) RunOnce(ctx context.Context) (int, error) {
 			end = len(pending)
 		}
 		chunk := pending[start:end]
-		tagsByIndex, err := s.callDeepSeek(ctx, chunk)
+		tagsByIndex, err := s.callDeepSeek(ctx, chunk, cfg, apiKey)
 		if err != nil {
 			log.Printf("[tagger] batch %d-%d LLM failed: %v", start, end, err)
 			continue
 		}
 		for i, art := range chunk {
 			tags := tagsByIndex[i]
-			// 即使模型对该条目返回空数组，也写入 "[]"，以避免下一轮重复处理
 			payload, _ := json.Marshal(tags)
 			s.db.WithContext(ctx).
 				Model(&model.Article{}).
@@ -135,12 +170,11 @@ func (s *Service) RunOnce(ctx context.Context) (int, error) {
 }
 
 // callDeepSeek 让模型对一批文章打标，返回 [][]string，外层下标 = chunk 的下标。
-func (s *Service) callDeepSeek(ctx context.Context, chunk []model.Article) ([][]string, error) {
+func (s *Service) callDeepSeek(ctx context.Context, chunk []model.Article, cfg config.TaggerConfig, apiKey string) ([][]string, error) {
 	if len(chunk) == 0 {
 		return nil, nil
 	}
 
-	// 构造编号文本：仅用 title + content 前 200 字，控制 token
 	var b strings.Builder
 	for i, art := range chunk {
 		text := art.Title
@@ -165,8 +199,12 @@ func (s *Service) callDeepSeek(ctx context.Context, chunk []model.Article) ([][]
 
 输出格式示例：[{"i":1,"tags":["科技创新","人工智能"]},{"i":2,"tags":["资本市场","政策利好"]}]`, len(chunk), b.String())
 
+	model := cfg.Model
+	if strings.TrimSpace(model) == "" {
+		model = "deepseek-chat"
+	}
 	reqBody := map[string]any{
-		"model": s.cfg.Model,
+		"model": model,
 		"messages": []map[string]string{
 			{"role": "system", "content": "你是专业的中文内容打标助手，只输出严格的 JSON。"},
 			{"role": "user", "content": userPrompt},
@@ -177,13 +215,17 @@ func (s *Service) callDeepSeek(ctx context.Context, chunk []model.Article) ([][]
 	}
 	payload, _ := json.Marshal(reqBody)
 
-	url := strings.TrimRight(s.cfg.DeepseekBaseURL, "/") + "/chat/completions"
+	baseURL := cfg.DeepseekBaseURL
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = "https://api.deepseek.com"
+	}
+	url := strings.TrimRight(baseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -225,7 +267,6 @@ func parseTagsResponse(raw string, expectedLen int) [][]string {
 
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(text), &arr); err != nil {
-		// 试 {"results":[...]}
 		var wrap map[string]any
 		if jerr := json.Unmarshal([]byte(text), &wrap); jerr == nil {
 			for _, k := range []string{"results", "data", "items", "tags"} {

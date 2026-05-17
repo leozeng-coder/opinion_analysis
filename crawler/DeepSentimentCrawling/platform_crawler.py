@@ -62,7 +62,7 @@ class PlatformCrawler:
 
 import os
 
-# mysql config - 使用MindSpider的数据库配置
+# mysql config - 使用opinion_analysis数据库配置
 MYSQL_DB_PWD = "{config.DB_PASSWORD}"
 MYSQL_DB_USER = "{config.DB_USER}"
 MYSQL_DB_HOST = "{config.DB_HOST}"
@@ -87,7 +87,7 @@ SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "schem
             with open(db_config_path, 'w', encoding='utf-8') as f:
                 f.write(new_config)
             
-            print("已配置MediaCrawler使用MindSpider数据库")
+            print("已配置MediaCrawler使用opinion_analysis数据库")
             return True
             
         except Exception as e:

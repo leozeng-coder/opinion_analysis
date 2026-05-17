@@ -70,7 +70,7 @@ class BroadTopicExtraction:
             包含完整提取结果的字典
         """
         print("\n" + "=" * 80)
-        print("MindSpider AI爬虫 - 每日话题提取")
+        print("舆情分析爬虫 - 每日话题提取")
         print("=" * 80)
         print(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"目标日期: {date.today()}")
@@ -305,7 +305,7 @@ async def run_extraction_command(sources=None, keywords_count=100, show_details=
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description="MindSpider每日话题提取工具")
+    parser = argparse.ArgumentParser(description="舆情分析每日话题提取工具")
     parser.add_argument("--sources", nargs="+", help="指定新闻源平台", 
                        choices=list(SOURCE_NAMES.keys()))
     parser.add_argument("--keywords", type=int, default=100, help="最大关键词数量 (默认100)")

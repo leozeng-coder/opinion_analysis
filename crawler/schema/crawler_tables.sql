@@ -1,4 +1,4 @@
--- MindSpider AI爬虫项目 - 数据库表结构
+-- 舆情分析爬虫项目 - 数据库表结构
 -- 基于MediaCrawler表结构扩展，添加BroadTopicExtraction模块所需表
 
 -- ===============================
@@ -109,7 +109,7 @@ CREATE TABLE `crawling_tasks` (
 -- MediaCrawler表结构扩展字段
 -- ===============================
 
--- 为MediaCrawler现有表添加话题关联字段，支持MindSpider功能
+-- 为MediaCrawler现有表添加话题关联字段，支持爬虫功能
 -- 注意：这些字段是可选的，不影响MediaCrawler原有功能
 
 -- 为小红书笔记表添加话题关联字段
@@ -194,7 +194,7 @@ CREATE INDEX `idx_news_date_platform` ON `daily_news` (`crawl_date`, `source_pla
 -- ===============================
 
 -- 设置合适的字符集和排序规则
--- ALTER DATABASE mindspider CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- ALTER DATABASE opinion_analysis CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- 建议的数据保留策略（可选）
 -- 可以根据需要创建事件调度器来清理历史数据

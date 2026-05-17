@@ -11,12 +11,12 @@
 
 import os
 
-# mysql config - 使用MindSpider的数据库配置
+# mysql config - 使用opinion_analysis数据库配置
 MYSQL_DB_PWD = "mneDccc7sHHANtFk"
 MYSQL_DB_USER = "root"
 MYSQL_DB_HOST = "rm-2zeib6b13f6tt9kncoo.mysql.rds.aliyuncs.com"
 MYSQL_DB_PORT = 3306
-MYSQL_DB_NAME = "mindspider"
+MYSQL_DB_NAME = "opinion_analysis"
 
 
 # redis config

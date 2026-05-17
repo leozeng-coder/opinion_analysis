@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MindSpider - 定时调度器
+舆情分析 - 定时调度器
 
 替换原 crawler/scheduler.py，作为长期运行的调度守护进程。
 从 opinion_analysis.crawler_spider_configs 表读取调度配置。
@@ -28,7 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
 )
-logger = logging.getLogger("mindspider.scheduler")
+logger = logging.getLogger("opinion.scheduler")
 
 DATABASE_DSN = os.environ.get(
     "DATABASE_DSN",
@@ -173,7 +173,7 @@ if __name__ == "__main__":
         logger.error("APScheduler 未安装，请运行: pip install APScheduler")
         sys.exit(1)
 
-    logger.info("MindSpider 调度器启动...")
+    logger.info("舆情分析调度器启动...")
     logger.info(f"项目目录: {project_root}")
     logger.info(f"数据库: {DATABASE_DSN.split('@')[-1] if '@' in DATABASE_DSN else DATABASE_DSN}")
 
