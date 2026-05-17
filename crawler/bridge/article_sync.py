@@ -23,6 +23,13 @@ try:
 except ImportError:
     raise ImportError("无法导入config.py配置文件")
 
+# 大模型配置统一从数据库 system_settings 读取
+try:
+    from llm_config import load as load_llm_config
+    _LLM_CONFIG_AVAILABLE = True
+except ImportError:
+    _LLM_CONFIG_AVAILABLE = False
+
 # 关键词提取（本地、便宜）
 try:
     import jieba.analyse
@@ -50,14 +57,24 @@ def _get_deepseek_client():
         return None
     if _deepseek_client is not None:
         return _deepseek_client
-    api_key = getattr(config, "DEEPSEEK_API_KEY", "") or ""
+
+    if _LLM_CONFIG_AVAILABLE:
+        llm = load_llm_config()
+        api_key = llm.api_key
+        base_url = llm.base_url
+    else:
+        # 降级：读环境变量 / config 文件
+        api_key = (getattr(config, "DEEPSEEK_API_KEY", "") or "").strip()
+        base_url = "https://api.deepseek.com"
+
     if not api_key or api_key.startswith("your_") or api_key.startswith("sk-xxx"):
-        print("[警告] config.DEEPSEEK_API_KEY 未配置，将退回 SnowNLP/neutral。", flush=True)
+        print("[警告] DeepSeek API Key 未配置，将退回 SnowNLP/neutral。"
+              "请到管理后台 → 系统状态 → 大模型配置中填入。", flush=True)
         _deepseek_disabled = True
         return None
     try:
         from openai import OpenAI
-        _deepseek_client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        _deepseek_client = OpenAI(api_key=api_key, base_url=base_url)
         return _deepseek_client
     except Exception as e:
         print(f"[警告] DeepSeek 客户端初始化失败: {e}", flush=True)

@@ -24,11 +24,12 @@ type CrawlerConfig struct {
 }
 
 // TaggerConfig 控制后台 AI 自动打标任务。
+// LLM 相关字段（Key/BaseURL/Model）不再从 YAML 读取，以数据库 system_settings 为准。
 type TaggerConfig struct {
 	Enabled         bool   `mapstructure:"enabled"`
-	DeepseekAPIKey  string `mapstructure:"deepseekApiKey"`
-	DeepseekBaseURL string `mapstructure:"deepseekBaseUrl"`
-	Model           string `mapstructure:"model"`
+	LLMApiKey       string `mapstructure:"llmApiKey"`
+	LLMBaseURL      string `mapstructure:"llmBaseUrl"`
+	LLMModel        string `mapstructure:"llmModel"`
 	IntervalSeconds int    `mapstructure:"intervalSeconds"`
 	BatchSize       int    `mapstructure:"batchSize"`
 	MaxPerTick      int    `mapstructure:"maxPerTick"`
@@ -67,8 +68,8 @@ func Load(path string) {
 	viper.SetDefault("crawler.enabled", true)
 	viper.SetDefault("crawler.root", "../crawler")
 	viper.SetDefault("tagger.enabled", true)
-	viper.SetDefault("tagger.deepseekBaseUrl", "https://api.deepseek.com")
-	viper.SetDefault("tagger.model", "deepseek-chat")
+	viper.SetDefault("tagger.llmBaseUrl", "https://api.deepseek.com")
+	viper.SetDefault("tagger.llmModel", "deepseek-chat")
 	viper.SetDefault("tagger.intervalSeconds", 120)
 	viper.SetDefault("tagger.batchSize", 20)
 	viper.SetDefault("tagger.maxPerTick", 200)

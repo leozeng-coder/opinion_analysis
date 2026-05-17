@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
   Form,
   Input,
   InputNumber,
@@ -20,6 +21,7 @@ import {
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  KeyOutlined,
   ReloadOutlined,
   SaveOutlined,
   ThunderboltOutlined,
@@ -30,38 +32,20 @@ import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
 
-interface ProbeCardProps {
-  title: string
-  probe?: { ok: boolean; message?: string; latencyMs: number }
-}
-
-const ProbeCard: React.FC<ProbeCardProps> = ({ title, probe }) => (
-  <Card size="small">
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <Text strong>{title}</Text>
-      {probe ? (
-        probe.ok ? (
-          <Tag icon={<CheckCircleOutlined />} color="success">正常 {probe.latencyMs}ms</Tag>
-        ) : (
-          <Tooltip title={probe.message}>
-            <Tag icon={<CloseCircleOutlined />} color="error">异常</Tag>
-          </Tooltip>
-        )
-      ) : (
-        <Tag>-</Tag>
-      )}
-    </div>
-    {probe?.message && !probe.ok && (
-      <Text type="danger" style={{ fontSize: 12 }}>{probe.message}</Text>
-    )}
-  </Card>
-)
+// Provider presets ─ any OpenAI-compatible endpoint
+const PRESETS = [
+  { label: 'DeepSeek',  baseUrl: 'https://api.deepseek.com',                          model: 'deepseek-chat' },
+  { label: 'OpenAI',    baseUrl: 'https://api.openai.com',                            model: 'gpt-4o' },
+  { label: '百炼/Qwen', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  { label: 'Kimi',      baseUrl: 'https://api.moonshot.cn/v1',                        model: 'moonshot-v1-8k' },
+  { label: '智谱/GLM',  baseUrl: 'https://open.bigmodel.cn/api/paas/v4',              model: 'glm-4-flash' },
+]
 
 interface FormValues {
   enabled: boolean
-  model: string
-  deepseekBaseUrl: string
-  deepseekApiKey: string
+  llmModel: string
+  llmBaseUrl: string
+  llmApiKey: string
   intervalSeconds: number
   batchSize: number
   maxPerTick: number
@@ -77,10 +61,9 @@ const SystemPage: React.FC = () => {
   const applyToForm = useCallback((t: TaggerConfig) => {
     form.setFieldsValue({
       enabled: t.enabled,
-      model: t.model,
-      deepseekBaseUrl: t.deepseekBaseUrl,
-      // API Key 字段后端只回脱敏值；编辑表单留空，由 placeholder 暗示「不填则保留现有」
-      deepseekApiKey: '',
+      llmModel: t.llmModel,
+      llmBaseUrl: t.llmBaseUrl,
+      llmApiKey: '',
       intervalSeconds: t.intervalSeconds,
       batchSize: t.batchSize,
       maxPerTick: t.maxPerTick,
@@ -104,15 +87,14 @@ const SystemPage: React.FC = () => {
   const handleSave = async (values: FormValues) => {
     const payload: UpdateTaggerPayload = {
       enabled: values.enabled,
-      model: values.model,
-      deepseekBaseUrl: values.deepseekBaseUrl,
+      llmModel: values.llmModel,
+      llmBaseUrl: values.llmBaseUrl,
       intervalSeconds: values.intervalSeconds,
       batchSize: values.batchSize,
       maxPerTick: values.maxPerTick,
     }
-    // 只有用户在输入框里填了内容才传 apiKey（避免把脱敏占位符写回）
-    const trimmed = (values.deepseekApiKey ?? '').trim()
-    if (trimmed) payload.deepseekApiKey = trimmed
+    const trimmed = (values.llmApiKey ?? '').trim()
+    if (trimmed) payload.llmApiKey = trimmed
 
     setSaving(true)
     try {
@@ -122,17 +104,22 @@ const SystemPage: React.FC = () => {
       message.success('已保存，后台任务下一轮 tick 生效')
       void adminSystemApi.health().then(setHealth)
     } catch (e) {
-      // request 拦截器一般已弹错，这里保底
       console.error(e)
     } finally {
       setSaving(false)
     }
   }
 
+  const applyPreset = (preset: typeof PRESETS[number]) => {
+    form.setFieldsValue({ llmBaseUrl: preset.baseUrl, llmModel: preset.model })
+  }
+
   const tagger = cfg?.tagger
   const apiKeyHint = tagger?.apiKeySet
-    ? `已配置（${tagger.deepseekApiKey || '***'}），留空则保留`
+    ? `已配置（${tagger.llmApiKey || '***'}），留空则保留`
     : '尚未配置，必须填写后台任务才能运行'
+
+  const llmProbe = health?.llm
 
   return (
     <div>
@@ -150,24 +137,100 @@ const SystemPage: React.FC = () => {
       ) : (
         <>
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-            <Col xs={24} sm={12} md={6}>
-              <ProbeCard title="数据库 (MySQL)" probe={health?.database} />
+            {/* DB probe */}
+            <Col xs={24} sm={12} md={6} style={{ display: 'flex' }}>
+              <Card size="small" style={{ flex: 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text strong>数据库 (MySQL)</Text>
+                  {health?.database ? (
+                    health.database.ok ? (
+                      <Tag icon={<CheckCircleOutlined />} color="success">正常 {health.database.latencyMs}ms</Tag>
+                    ) : (
+                      <Tooltip title={health.database.message}>
+                        <Tag icon={<CloseCircleOutlined />} color="error">异常</Tag>
+                      </Tooltip>
+                    )
+                  ) : <Tag>-</Tag>}
+                </div>
+                {health?.database?.message && !health.database.ok && (
+                  <Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+                    {health.database.message}
+                  </Text>
+                )}
+              </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
-              <ProbeCard title="DeepSeek API" probe={health?.deepseek} />
+
+            {/* LLM config summary + probe */}
+            <Col xs={24} sm={24} md={12} style={{ display: 'flex' }}>
+              <Card
+                size="small"
+                style={{ flex: 1 }}
+                styles={{ body: { padding: '12px 16px' } }}
+                extra={
+                  llmProbe ? (
+                    llmProbe.ok ? (
+                      <Tag icon={<CheckCircleOutlined />} color="success">
+                        连通 {llmProbe.latencyMs}ms
+                      </Tag>
+                    ) : (
+                      <Tooltip title={llmProbe.message}>
+                        <Tag icon={<CloseCircleOutlined />} color="error">异常</Tag>
+                      </Tooltip>
+                    )
+                  ) : <Tag>-</Tag>
+                }
+                title={<Text strong>大模型 API</Text>}
+              >
+                {tagger ? (
+                  <Descriptions size="small" column={2} style={{ marginBottom: 0 }}>
+                    <Descriptions.Item label="模型">
+                      <Text code>{tagger.llmModel || '-'}</Text>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="状态">
+                      {tagger.enabled
+                        ? <Badge status="processing" text="后台任务运行中" />
+                        : <Badge status="default" text="后台任务已停用" />
+                      }
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Base URL" span={2}>
+                      <Text type="secondary" style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                        {tagger.llmBaseUrl || '-'}
+                      </Text>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="API Key">
+                      {tagger.apiKeySet
+                        ? <Tag icon={<KeyOutlined />} color="blue">已配置 {tagger.llmApiKey}</Tag>
+                        : <Tag color="warning">未配置</Tag>
+                      }
+                    </Descriptions.Item>
+                    <Descriptions.Item label="轮询间隔">
+                      {tagger.intervalSeconds}s &nbsp;|&nbsp; 批量 {tagger.batchSize} 条
+                    </Descriptions.Item>
+                  </Descriptions>
+                ) : (
+                  <Text type="secondary">加载中…</Text>
+                )}
+                {llmProbe?.message && !llmProbe.ok && (
+                  <Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                    {llmProbe.message}
+                  </Text>
+                )}
+              </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card size="small">
+
+            {/* Pending tagging */}
+            <Col xs={12} sm={12} md={3} style={{ display: 'flex' }}>
+              <Card size="small" style={{ flex: 1 }}>
                 <Statistic title="待打标文章" value={health?.pendingTagging ?? '-'} suffix="篇" />
               </Card>
             </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Card size="small" title="最近爬取">
+
+            {/* Last crawler run */}
+            <Col xs={12} sm={12} md={3} style={{ display: 'flex' }}>
+              <Card size="small" style={{ flex: 1 }} title="最近爬取">
                 {health?.lastCrawlerRun ? (
                   <div style={{ fontSize: 12 }}>
-                    <div>
-                      <Text type="secondary">{health.lastCrawlerRun.spiders}</Text>
-                    </div>
+                    <div><Text type="secondary">{health.lastCrawlerRun.spiders}</Text></div>
                     <div>
                       <Badge
                         status={
@@ -191,6 +254,7 @@ const SystemPage: React.FC = () => {
             </Col>
           </Row>
 
+          {/* LLM config edit form */}
           <Card
             title="大模型配置（AI 自动打标）"
             extra={
@@ -199,15 +263,26 @@ const SystemPage: React.FC = () => {
               </Text>
             }
           >
+            <div style={{ marginBottom: 16 }}>
+              <Text type="secondary" style={{ marginRight: 8, fontSize: 12 }}>快速填入：</Text>
+              <Space wrap size="small">
+                {PRESETS.map(p => (
+                  <Button key={p.label} size="small" onClick={() => applyPreset(p)}>
+                    {p.label}
+                  </Button>
+                ))}
+              </Space>
+            </div>
+
             <Form
               form={form}
               layout="vertical"
               onFinish={handleSave}
               initialValues={{
                 enabled: false,
-                model: 'deepseek-chat',
-                deepseekBaseUrl: 'https://api.deepseek.com',
-                deepseekApiKey: '',
+                llmModel: 'deepseek-chat',
+                llmBaseUrl: 'https://api.deepseek.com',
+                llmApiKey: '',
                 intervalSeconds: 120,
                 batchSize: 20,
                 maxPerTick: 200,
@@ -226,27 +301,28 @@ const SystemPage: React.FC = () => {
                 </Col>
                 <Col xs={24} md={8}>
                   <Form.Item
+                    label="API Base URL"
+                    name="llmBaseUrl"
+                    rules={[{ required: true, message: '请输入 API Base URL' }]}
+                    tooltip="兼容 OpenAI 接口规范的任意服务地址"
+                  >
+                    <Input placeholder="https://api.deepseek.com" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Form.Item
                     label="模型名"
-                    name="model"
+                    name="llmModel"
                     rules={[{ required: true, message: '请输入模型名' }]}
                   >
                     <Input placeholder="deepseek-chat" />
                   </Form.Item>
                 </Col>
-                <Col xs={24} md={8}>
-                  <Form.Item
-                    label="API Base URL"
-                    name="deepseekBaseUrl"
-                    rules={[{ required: true, message: '请输入 API Base URL' }]}
-                  >
-                    <Input placeholder="https://api.deepseek.com" />
-                  </Form.Item>
-                </Col>
               </Row>
 
               <Form.Item
-                label="DeepSeek API Key"
-                name="deepseekApiKey"
+                label="API Key"
+                name="llmApiKey"
                 tooltip={apiKeyHint}
                 extra={apiKeyHint}
               >
@@ -258,29 +334,17 @@ const SystemPage: React.FC = () => {
 
               <Row gutter={24}>
                 <Col xs={24} md={8}>
-                  <Form.Item
-                    label="轮询间隔（秒）"
-                    name="intervalSeconds"
-                    rules={[{ required: true }]}
-                  >
+                  <Form.Item label="轮询间隔（秒）" name="intervalSeconds" rules={[{ required: true }]}>
                     <InputNumber min={10} max={86400} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={8}>
-                  <Form.Item
-                    label="单次 LLM 请求条数"
-                    name="batchSize"
-                    rules={[{ required: true }]}
-                  >
+                  <Form.Item label="单次 LLM 请求条数" name="batchSize" rules={[{ required: true }]}>
                     <InputNumber min={1} max={100} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={8}>
-                  <Form.Item
-                    label="单次轮询最多处理"
-                    name="maxPerTick"
-                    rules={[{ required: true }]}
-                  >
+                  <Form.Item label="单次轮询最多处理" name="maxPerTick" rules={[{ required: true }]}>
                     <InputNumber min={1} max={10000} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
@@ -288,19 +352,10 @@ const SystemPage: React.FC = () => {
 
               <Form.Item style={{ marginBottom: 0 }}>
                 <Space>
-                  <Button
-                    type="primary"
-                    htmlType="submit"
-                    icon={<SaveOutlined />}
-                    loading={saving}
-                  >
+                  <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saving}>
                     保存
                   </Button>
-                  <Button
-                    onClick={() => {
-                      if (cfg?.tagger) applyToForm(cfg.tagger)
-                    }}
-                  >
+                  <Button onClick={() => { if (cfg?.tagger) applyToForm(cfg.tagger) }}>
                     重置
                   </Button>
                   {cfg?.note && (

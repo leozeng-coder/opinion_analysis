@@ -26,12 +26,7 @@ crawler:
   root: "../crawler"
   python: ""   # empty = auto-detect crawler/.venv/Scripts/python.exe
 
-# AI 自动打标后台任务：周期性地为新文章生成 1~4 个标签
-tagger:
-  enabled: true
-  deepseekApiKey: ""  # 留空则读 DEEPSEEK_API_KEY 环境变量；或在此填入你的 DeepSeek API Key
-  deepseekBaseUrl: "https://api.deepseek.com"
-  model: "deepseek-chat"
-  intervalSeconds: 120              # 轮询间隔（秒）
-  batchSize: 20                     # 单次 LLM 请求条数
-  maxPerTick: 200                   # 单次轮询最多处理多少条，避免长时占用
+# 注意：大模型（AI 自动打标 / 情感分析）相关配置通过管理后台维护。
+# 路径：管理后台 → 系统状态 → 大模型配置。
+# 配置持久化在数据库 system_settings 表；如需紧急覆盖 API Key，
+# 可设置环境变量 DEEPSEEK_API_KEY（仅对 Go 后端 tagger 服务有效）。

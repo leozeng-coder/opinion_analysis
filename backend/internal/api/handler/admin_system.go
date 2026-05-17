@@ -34,28 +34,28 @@ func (h *AdminSystemHandler) Config(c *gin.Context) {
 	out := gin.H{
 		"tagger": gin.H{
 			"enabled":         cfg.Enabled,
-			"model":           cfg.Model,
-			"deepseekBaseUrl": cfg.DeepseekBaseURL,
-			"deepseekApiKey":  utils.MaskString(cfg.DeepseekAPIKey),
+			"llmModel":        cfg.LLMModel,
+			"llmBaseUrl":      cfg.LLMBaseURL,
+			"llmApiKey":       utils.MaskString(cfg.LLMApiKey),
 			"apiKeySet":       keySet,
 			"intervalSeconds": cfg.IntervalSeconds,
 			"batchSize":       cfg.BatchSize,
 			"maxPerTick":      cfg.MaxPerTick,
 		},
-		"note": "修改后立即对后台 AI 自动打标任务生效；变更会持久化到 system_settings 表，重启不丢失。",
+		"note": "修改后立即对后台 AI 自动打标任务生效；变更持久化到 system_settings 表，重启不丢失。",
 	}
 	response.OK(c, out)
 }
 
-// updateTaggerReq 接收前端表单。DeepseekAPIKey 为指针：
-//   - nil 或省略 → 保留旧值（兼容前端不愿重传敏感字段）
-//   - 空字符串    → 清空 API key
+// updateTaggerReq 接收前端表单。LLMApiKey 为指针：
+//   - nil 或省略 → 保留旧值
+//   - 空字符串    → 清空
 //   - 非空        → 覆盖
 type updateTaggerReq struct {
 	Enabled         *bool   `json:"enabled"`
-	Model           *string `json:"model"`
-	DeepseekBaseURL *string `json:"deepseekBaseUrl"`
-	DeepseekAPIKey  *string `json:"deepseekApiKey"`
+	LLMModel        *string `json:"llmModel"`
+	LLMBaseURL      *string `json:"llmBaseUrl"`
+	LLMApiKey       *string `json:"llmApiKey"`
 	IntervalSeconds *int    `json:"intervalSeconds"`
 	BatchSize       *int    `json:"batchSize"`
 	MaxPerTick      *int    `json:"maxPerTick"`
@@ -77,14 +77,14 @@ func (h *AdminSystemHandler) UpdateTagger(c *gin.Context) {
 	if req.Enabled != nil {
 		merged.Enabled = *req.Enabled
 	}
-	if req.Model != nil {
-		merged.Model = strings.TrimSpace(*req.Model)
+	if req.LLMModel != nil {
+		merged.LLMModel = strings.TrimSpace(*req.LLMModel)
 	}
-	if req.DeepseekBaseURL != nil {
-		merged.DeepseekBaseURL = strings.TrimSpace(*req.DeepseekBaseURL)
+	if req.LLMBaseURL != nil {
+		merged.LLMBaseURL = strings.TrimSpace(*req.LLMBaseURL)
 	}
-	if req.DeepseekAPIKey != nil {
-		merged.DeepseekAPIKey = strings.TrimSpace(*req.DeepseekAPIKey)
+	if req.LLMApiKey != nil {
+		merged.LLMApiKey = strings.TrimSpace(*req.LLMApiKey)
 	}
 	if req.IntervalSeconds != nil {
 		if *req.IntervalSeconds < 10 {
@@ -126,9 +126,9 @@ func (h *AdminSystemHandler) UpdateTagger(c *gin.Context) {
 	response.OK(c, gin.H{
 		"tagger": gin.H{
 			"enabled":         cfg.Enabled,
-			"model":           cfg.Model,
-			"deepseekBaseUrl": cfg.DeepseekBaseURL,
-			"deepseekApiKey":  utils.MaskString(cfg.DeepseekAPIKey),
+			"llmModel":        cfg.LLMModel,
+			"llmBaseUrl":      cfg.LLMBaseURL,
+			"llmApiKey":       utils.MaskString(cfg.LLMApiKey),
 			"apiKeySet":       keySet,
 			"intervalSeconds": cfg.IntervalSeconds,
 			"batchSize":       cfg.BatchSize,
@@ -164,11 +164,11 @@ func (h *AdminSystemHandler) Health(c *gin.Context) {
 	dbProbe.Latency = time.Since(t).Milliseconds()
 	out["database"] = dbProbe
 
-	// DeepSeek ping：读取 tagger 服务当前生效配置（含热更新后的 key）
+	// LLM ping：读取 tagger 服务当前生效配置（含热更新后的 key）
 	dsProbe := healthProbe{}
 	t = time.Now()
 	cfg, keySet := h.taggerSvc.GetConfig()
-	dsURL := cfg.DeepseekBaseURL
+	dsURL := cfg.LLMBaseURL
 	if dsURL == "" {
 		dsURL = "https://api.deepseek.com"
 	}
@@ -178,7 +178,7 @@ func (h *AdminSystemHandler) Health(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 4*time.Second)
 		defer cancel()
 		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, dsURL+"/v1/models", nil)
-		req.Header.Set("Authorization", "Bearer "+cfg.DeepseekAPIKey)
+		req.Header.Set("Authorization", "Bearer "+cfg.LLMApiKey)
 		client := &http.Client{Timeout: 4 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -193,7 +193,7 @@ func (h *AdminSystemHandler) Health(c *gin.Context) {
 		}
 	}
 	dsProbe.Latency = time.Since(t).Milliseconds()
-	out["deepseek"] = dsProbe
+	out["llm"] = dsProbe
 
 	// 业务指标
 	var pendingTag int64

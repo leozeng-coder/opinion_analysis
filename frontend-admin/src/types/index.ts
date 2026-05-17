@@ -102,7 +102,7 @@ export interface HealthProbe {
 
 export interface SystemHealth {
   database: HealthProbe
-  deepseek: HealthProbe
+  llm: HealthProbe
   pendingTagging: number
   lastCrawlerRun?: {
     id: number
@@ -116,9 +116,9 @@ export interface SystemHealth {
 
 export interface TaggerConfig {
   enabled: boolean
-  model: string
-  deepseekBaseUrl: string
-  deepseekApiKey: string
+  llmModel: string
+  llmBaseUrl: string
+  llmApiKey: string
   apiKeySet: boolean
   intervalSeconds: number
   batchSize: number
@@ -132,9 +132,9 @@ export interface SystemConfigResponse {
 
 export interface UpdateTaggerPayload {
   enabled?: boolean
-  model?: string
-  deepseekBaseUrl?: string
-  deepseekApiKey?: string
+  llmModel?: string
+  llmBaseUrl?: string
+  llmApiKey?: string
   intervalSeconds?: number
   batchSize?: number
   maxPerTick?: number

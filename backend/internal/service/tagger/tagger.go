@@ -66,7 +66,7 @@ func (s *Service) UpdateConfig(cfg config.TaggerConfig) {
 }
 
 func (s *Service) applyConfig(cfg config.TaggerConfig) {
-	apiKey := strings.TrimSpace(cfg.DeepseekAPIKey)
+	apiKey := strings.TrimSpace(cfg.LLMApiKey)
 	if apiKey == "" {
 		apiKey = strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
 	}
@@ -199,7 +199,7 @@ func (s *Service) callDeepSeek(ctx context.Context, chunk []model.Article, cfg c
 
 输出格式示例：[{"i":1,"tags":["科技创新","人工智能"]},{"i":2,"tags":["资本市场","政策利好"]}]`, len(chunk), b.String())
 
-	model := cfg.Model
+	model := cfg.LLMModel
 	if strings.TrimSpace(model) == "" {
 		model = "deepseek-chat"
 	}
@@ -215,7 +215,7 @@ func (s *Service) callDeepSeek(ctx context.Context, chunk []model.Article, cfg c
 	}
 	payload, _ := json.Marshal(reqBody)
 
-	baseURL := cfg.DeepseekBaseURL
+	baseURL := cfg.LLMBaseURL
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://api.deepseek.com"
 	}

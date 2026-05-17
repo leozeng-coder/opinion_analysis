@@ -68,11 +68,19 @@ func runCrawlerSQL(db *gorm.DB) {
 func seedSystemSettings(db *gorm.DB) {
 	desired := []model.SystemSetting{
 		{Key: "registration_enabled", Value: "true", Desc: "是否允许开放注册（关闭后 /api/auth/register 拒绝）"},
+		// 大模型配置默认值（实际值请通过管理后台 → 系统状态 → 大模型配置维护）
+		{Key: "tagger.enabled", Value: "true", Desc: "AI 自动打标后台任务是否启用"},
+		{Key: "tagger.llm_api_key", Value: "", Desc: "LLM API Key（敏感）"},
+		{Key: "tagger.llm_base_url", Value: "https://api.deepseek.com", Desc: "LLM API Base URL（OpenAI 兼容）"},
+		{Key: "tagger.llm_model", Value: "deepseek-chat", Desc: "LLM 模型名"},
+		{Key: "tagger.interval_seconds", Value: "120", Desc: "轮询间隔（秒）"},
+		{Key: "tagger.batch_size", Value: "20", Desc: "单次 LLM 请求条数"},
+		{Key: "tagger.max_per_tick", Value: "200", Desc: "单次轮询最多处理条数"},
 	}
 	for _, s := range desired {
 		var existing model.SystemSetting
 		if err := db.Where("`key` = ?", s.Key).First(&existing).Error; err == nil {
-			continue
+			continue // 已存在，保留用户配置
 		}
 		if err := db.Create(&s).Error; err != nil {
 			log.Printf("[seed-settings] %s: %v", s.Key, err)
@@ -219,6 +227,9 @@ func main() {
 	} else if n > 0 {
 		log.Printf("[crawler task] startup_recovered stale_run_count=%d (marked failed, see crawler_run_logs.message)", n)
 	}
+
+	// 迁移旧 DB key（deepseek_* → llm_*），幂等
+	tagger.MigrateOldKeys(db)
 
 	// 启动 AI 自动打标后台任务：先用 system_settings 中的覆盖值合并 yaml 配置，再实例化服务
 	effectiveTaggerCfg := tagger.LoadConfig(db, config.Cfg.Tagger)

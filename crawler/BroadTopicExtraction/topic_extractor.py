@@ -21,16 +21,25 @@ try:
 except ImportError:
     raise ImportError("无法导入config.py配置文件")
 
+# 大模型配置统一从数据库 system_settings 读取
+from llm_config import load as load_llm_config
+
 class TopicExtractor:
     """话题提取器"""
-    
+
     def __init__(self):
         """初始化话题提取器"""
+        llm = load_llm_config()
+        if not llm.is_ready():
+            raise RuntimeError(
+                "DeepSeek API Key 未配置。请到管理后台 → 系统状态 → 大模型配置中填入，"
+                "或设置 DEEPSEEK_API_KEY 环境变量。"
+            )
         self.client = OpenAI(
-            api_key=config.DEEPSEEK_API_KEY,
-            base_url="https://api.deepseek.com"
+            api_key=llm.api_key,
+            base_url=llm.base_url,
         )
-        self.model = "deepseek-chat"
+        self.model = llm.model
     
     def extract_keywords_and_summary(self, news_list: List[Dict], max_keywords: int = 100) -> Tuple[List[str], str]:
         """

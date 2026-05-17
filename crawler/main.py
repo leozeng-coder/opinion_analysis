@@ -42,10 +42,9 @@ class OpinionCrawler:
         """检查基础配置"""
         print("\n检查基础配置...")
         
-        # 检查config.py配置项
+        # 检查config.py配置项（大模型 Key 走数据库，不在此检查）
         required_configs = [
             'DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_CHARSET',
-            'DEEPSEEK_API_KEY'
         ]
         
         missing_configs = []
