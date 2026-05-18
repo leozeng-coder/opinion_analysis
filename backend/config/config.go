@@ -13,6 +13,14 @@ type Config struct {
 	Log      LogConfig
 	Crawler  CrawlerConfig `mapstructure:"crawler"`
 	Tagger   TaggerConfig  `mapstructure:"tagger"`
+	RAG      RAGConfig     `mapstructure:"rag"`
+}
+
+// RAGConfig 智能对话混合检索（由独立 Python 服务写入 Milvus Lite + MySQL 增量同步）。
+type RAGConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// 本机 RAG/embedding 服务地址，例如 http://127.0.0.1:5055
+	EmbeddingServiceURL string `mapstructure:"embedding_service_url"`
 }
 
 // CrawlerConfig controls on-demand runs from the API (local subprocess).
@@ -73,6 +81,8 @@ func Load(path string) {
 	viper.SetDefault("tagger.intervalSeconds", 120)
 	viper.SetDefault("tagger.batchSize", 20)
 	viper.SetDefault("tagger.maxPerTick", 200)
+	viper.SetDefault("rag.enabled", false)
+	viper.SetDefault("rag.embedding_service_url", "http://127.0.0.1:5055")
 	viper.SetConfigFile(path)
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err != nil {

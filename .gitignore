@@ -37,6 +37,9 @@ __pycache__/
 .venv/
 venv/
 
+# RAG Milvus Lite 本地数据
+crawler/data/
+
 # 含有密钥的配置文件（参见 *.example 副本）
 backend/config/config.yaml
 crawler/config.py

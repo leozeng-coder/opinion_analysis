@@ -30,3 +30,8 @@ crawler:
 # 路径：管理后台 → 系统状态 → 大模型配置。
 # 配置持久化在数据库 system_settings 表；如需紧急覆盖 API Key，
 # 可设置环境变量 DEEPSEEK_API_KEY（仅对 Go 后端 tagger 服务有效）。
+
+rag:
+  # 智能助手 RAG：需单独启动 crawler/rag_service（Milvus Lite + 增量向量同步）
+  enabled: false
+  embedding_service_url: "http://127.0.0.1:5055"

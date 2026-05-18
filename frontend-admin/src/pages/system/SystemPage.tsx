@@ -13,6 +13,7 @@ import {
   Spin,
   Statistic,
   Switch,
+  Table,
   Tag,
   Tooltip,
   Typography,
@@ -21,13 +22,23 @@ import {
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  DatabaseOutlined,
   KeyOutlined,
   ReloadOutlined,
   SaveOutlined,
+  SyncOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
+import { adminRagApi } from '@/api/admin-rag'
 import { adminSystemApi } from '@/api/admin-system'
-import type { SystemConfigResponse, SystemHealth, TaggerConfig, UpdateTaggerPayload } from '@/types'
+import type {
+  RagStatus,
+  RagSyncLog,
+  SystemConfigResponse,
+  SystemHealth,
+  TaggerConfig,
+  UpdateTaggerPayload,
+} from '@/types'
 import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
@@ -56,7 +67,25 @@ const SystemPage: React.FC = () => {
   const [cfg, setCfg] = useState<SystemConfigResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [ragStatus, setRagStatus] = useState<RagStatus | null>(null)
+  const [ragRuns, setRagRuns] = useState<RagSyncLog[]>([])
+  const [ragTotal, setRagTotal] = useState(0)
+  const [ragPage, setRagPage] = useState(1)
+  const [ragLoading, setRagLoading] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [form] = Form.useForm<FormValues>()
+
+  const loadRagRuns = useCallback(async (page: number) => {
+    setRagLoading(true)
+    try {
+      const r = await adminRagApi.runs({ page, pageSize: 10 })
+      setRagTotal(r.total)
+      setRagRuns(r.list)
+      setRagPage(page)
+    } finally {
+      setRagLoading(false)
+    }
+  }, [])
 
   const applyToForm = useCallback((t: TaggerConfig) => {
     form.setFieldsValue({
@@ -73,16 +102,30 @@ const SystemPage: React.FC = () => {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [h, c] = await Promise.all([adminSystemApi.health(), adminSystemApi.config()])
+      const [h, c, rs] = await Promise.all([
+        adminSystemApi.health(),
+        adminSystemApi.config(),
+        adminRagApi.status().catch(() => null),
+      ])
       setHealth(h)
       setCfg(c)
       if (c?.tagger) applyToForm(c.tagger)
+      setRagStatus(rs as RagStatus | null)
+      await loadRagRuns(1)
     } finally {
       setLoading(false)
     }
-  }, [applyToForm])
+  }, [applyToForm, loadRagRuns])
 
   useEffect(() => { void fetchAll() }, [fetchAll])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void loadRagRuns(ragPage)
+      void adminRagApi.status().then(setRagStatus).catch(() => undefined)
+    }, 12000)
+    return () => window.clearInterval(id)
+  }, [ragPage, loadRagRuns])
 
   const handleSave = async (values: FormValues) => {
     const payload: UpdateTaggerPayload = {
@@ -120,6 +163,19 @@ const SystemPage: React.FC = () => {
     : '尚未配置，必须填写后台任务才能运行'
 
   const llmProbe = health?.llm
+
+  const handleRagSync = async () => {
+    setSyncing(true)
+    try {
+      await adminRagApi.triggerSync()
+      message.success('已提交向量同步，可在下表查看进度')
+      await loadRagRuns(ragPage)
+      const rs = await adminRagApi.status().catch(() => null)
+      setRagStatus(rs as RagStatus | null)
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   return (
     <div>
@@ -253,6 +309,122 @@ const SystemPage: React.FC = () => {
               </Card>
             </Col>
           </Row>
+
+          <Card
+            style={{ marginBottom: 24 }}
+            title={
+              <span>
+                <DatabaseOutlined style={{ marginRight: 8 }} />
+                向量知识库（RAG 同步）
+              </span>
+            }
+            extra={
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<SyncOutlined />}
+                  loading={syncing}
+                  disabled={!ragStatus?.embeddingServiceUrl}
+                  onClick={() => void handleRagSync()}
+                >
+                  立即同步
+                </Button>
+                <Button size="small" onClick={() => { void loadRagRuns(ragPage) }} loading={ragLoading}>
+                  刷新记录
+                </Button>
+              </Space>
+            }
+          >
+            {ragStatus?.note && (
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                {ragStatus.note}
+              </Text>
+            )}
+            <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="开关">
+                {ragStatus?.ragEnabled
+                  ? <Tag color="blue">已启用检索</Tag>
+                  : <Tag>未启用</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="句向量模型（非对话 LLM）">
+                {ragStatus?.embedModel ? <Text code>{ragStatus.embedModel}</Text> : <Text type="secondary">-</Text>}
+              </Descriptions.Item>
+              <Descriptions.Item label="向量维度">{ragStatus?.embedDim ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="Milvus 集合">{ragStatus?.collection || '-'}</Descriptions.Item>
+              <Descriptions.Item label="RAG 服务">
+                {ragStatus?.serviceReachable
+                  ? <Tag icon={<CheckCircleOutlined />} color="success">可达</Tag>
+                  : <Tag icon={<CloseCircleOutlined />} color="warning">不可达或未配置</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="同步周期（参考）">
+                {ragStatus?.syncIntervalSecondsHint != null ? `${ragStatus.syncIntervalSecondsHint}s` : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="服务地址" span={3}>
+                <Text type="secondary" style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                  {ragStatus?.embeddingServiceUrl || '未配置 config.rag.embedding_service_url'}
+                </Text>
+              </Descriptions.Item>
+              {ragStatus?.serviceError && (
+                <Descriptions.Item label="健康检查" span={3}>
+                  <Text type="danger" style={{ fontSize: 12 }}>{ragStatus.serviceError}</Text>
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+
+            <Table<RagSyncLog>
+              size="small"
+              rowKey="id"
+              loading={ragLoading}
+              dataSource={ragRuns}
+              scroll={{ x: 960 }}
+              pagination={{
+                current: ragPage,
+                total: ragTotal,
+                pageSize: 10,
+                showSizeChanger: false,
+                onChange: (p) => void loadRagRuns(p),
+              }}
+              columns={[
+                { title: 'ID', dataIndex: 'id', width: 72 },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  width: 92,
+                  render: (s: RagSyncLog['status']) => (
+                    <Tag color={s === 'success' ? 'success' : s === 'failed' ? 'error' : 'processing'}>{s}</Tag>
+                  ),
+                },
+                { title: '方式', dataIndex: 'mode', width: 100 },
+                {
+                  title: '进度',
+                  dataIndex: 'progress',
+                  width: 72,
+                  render: (p: number) => `${p}%`,
+                },
+                { title: '文章数', dataIndex: 'articlesProcessed', width: 88 },
+                { title: '写入块', dataIndex: 'chunksUpserted', width: 88 },
+                { title: '清理', dataIndex: 'chunksDeleted', width: 72 },
+                {
+                  title: '开始',
+                  dataIndex: 'startedAt',
+                  width: 128,
+                  render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss'),
+                },
+                {
+                  title: '结束',
+                  dataIndex: 'finishedAt',
+                  width: 128,
+                  render: (t: string | undefined) => (t ? dayjs(t).format('MM-DD HH:mm:ss') : '-'),
+                },
+                {
+                  title: '详情',
+                  dataIndex: 'progressDetail',
+                  ellipsis: true,
+                  render: (t: string) => t || '-',
+                },
+              ]}
+            />
+          </Card>
 
           {/* LLM config edit form */}
           <Card

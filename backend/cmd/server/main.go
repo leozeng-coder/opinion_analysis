@@ -196,6 +196,7 @@ func main() {
 		&model.Report{},
 		&model.SystemSetting{},
 		&model.AuditLog{},
+		&model.RagSyncLog{},
 	); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
 	}

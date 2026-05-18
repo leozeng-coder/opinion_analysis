@@ -37,11 +37,13 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 	topicH := handler.NewTopicHandler(db)
 	alertH := handler.NewAlertHandler(db)
 	crawlerH := handler.NewCrawlerHandler(db)
+	aiChatH := handler.NewAIChatHandler(db, taggerSvc)
 
 	// Admin handlers
 	adminUserH := handler.NewAdminUserHandler(db)
 	adminSettingH := handler.NewAdminSettingHandler(db)
 	adminSystemH := handler.NewAdminSystemHandler(db, taggerSvc)
+	adminRagH := handler.NewAdminRagHandler(db)
 	adminDSH := handler.NewAdminDataSourceHandler(db)
 	adminAuditH := handler.NewAdminAuditHandler(db)
 
@@ -106,6 +108,9 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 				crawler.GET("/runs/:id", crawlerH.GetRun)
 			}
 
+			// 智能助手对话（与 tagger 共用大模型配置）
+			authorized.POST("/ai/chat", aiChatH.Chat)
+
 			// AI 打标后台任务管理（管理员用）
 			taggerGroup := authorized.Group("/tagger")
 			{
@@ -154,6 +159,12 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 					middleware.Audit(db, "system_config", "update_tagger"),
 					adminSystemH.UpdateTagger)
 				admin.GET("/system/health", adminSystemH.Health)
+
+				admin.GET("/rag/status", adminRagH.Status)
+				admin.GET("/rag/runs", adminRagH.ListRuns)
+				admin.POST("/rag/sync",
+					middleware.Audit(db, "rag", "sync"),
+					adminRagH.TriggerSync)
 
 				admin.GET("/data-sources", adminDSH.List)
 				admin.POST("/data-sources",

@@ -139,3 +139,31 @@ export interface UpdateTaggerPayload {
   batchSize?: number
   maxPerTick?: number
 }
+
+/** 管理端：RAG / 句向量服务状态（与对话 LLM 区分） */
+export interface RagStatus {
+  ragEnabled: boolean
+  embeddingServiceUrl: string
+  serviceReachable: boolean
+  embedModel: string
+  embedDim: number
+  milvusUri: string
+  collection: string
+  note: string
+  syncIntervalSecondsHint: number
+  serviceError?: string
+}
+
+export interface RagSyncLog {
+  id: number
+  status: 'running' | 'success' | 'failed'
+  progress: number
+  progressDetail: string
+  message: string
+  articlesProcessed: number
+  chunksUpserted: number
+  chunksDeleted: number
+  mode: 'scheduled' | 'manual'
+  startedAt: string
+  finishedAt?: string
+}

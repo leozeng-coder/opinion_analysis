@@ -47,9 +47,12 @@ type Article struct {
 	Keywords    string         `gorm:"type:json" json:"keywords"`       // JSON数组（jieba 抽词）
 	AITags      *string        `gorm:"column:ai_tags;type:json" json:"aiTags"` // JSON 字符串数组；NULL=未打标
 	PublishedAt time.Time      `gorm:"index" json:"publishedAt"`
-	CreatedAt   time.Time      `json:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	// 向量知识库同步：content 变更时需重算 embedding 并重写 Milvus
+	EmbeddingContentHash *string    `gorm:"size:64;column:embedding_content_hash" json:"-"`
+	EmbeddingSyncedAt     *time.Time `gorm:"column:embedding_synced_at" json:"-"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	UpdatedAt             time.Time  `json:"updatedAt"`
+	DeletedAt             gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // 热点话题
@@ -120,6 +123,23 @@ type CrawlerRunLog struct {
 	StartedAt   time.Time  `json:"startedAt"`
 	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
 }
+
+// RagSyncLog 向量知识库增量同步任务记录（与 RAG Python 服务写同一表）。
+type RagSyncLog struct {
+	ID                 uint       `gorm:"primarykey" json:"id"`
+	Status             string     `gorm:"size:16;index" json:"status"` // running | success | failed
+	Progress           int        `gorm:"default:0" json:"progress"`
+	ProgressDetail     string     `gorm:"type:text" json:"progressDetail"`
+	Message            string     `gorm:"type:text" json:"message"`
+	ArticlesProcessed  int        `json:"articlesProcessed"`
+	ChunksUpserted     int        `json:"chunksUpserted"`
+	ChunksDeleted      int        `json:"chunksDeleted"`
+	Mode               string     `gorm:"size:16" json:"mode"` // scheduled | manual
+	StartedAt          time.Time  `json:"startedAt"`
+	FinishedAt         *time.Time `json:"finishedAt,omitempty"`
+}
+
+func (RagSyncLog) TableName() string { return "rag_sync_logs" }
 
 // 系统设置：键值对，承载开放注册等运行时开关
 type SystemSetting struct {

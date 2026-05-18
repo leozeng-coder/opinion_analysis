@@ -153,7 +153,7 @@ func (h *ArticleHandler) Stats(c *gin.Context) {
 func countHotTopics(db *gorm.DB, threshold int64) int64 {
 	// 尝试 JSON_TABLE（MySQL 8.0+）
 	sql := `
-		SELECT COUNT(DISTINCT jt.tag) AS hot_count
+		SELECT COUNT(*) AS hot_count
 		FROM (
 			SELECT jt.tag, COUNT(*) AS cnt
 			FROM articles a,

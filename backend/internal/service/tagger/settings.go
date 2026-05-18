@@ -94,11 +94,11 @@ func MigrateOldKeys(db *gorm.DB) {
 	for _, m := range migrations {
 		old, newKey := m[0], m[1]
 		var oldRow model.SystemSetting
-		if err := db.Where("`key` = ?", old).First(&oldRow).Error; err != nil {
+		if err := db.Where("`key` = ?", old).Limit(1).Find(&oldRow).Error; err != nil || oldRow.Key == "" {
 			continue // 旧行不存在，跳过
 		}
 		var newRow model.SystemSetting
-		if db.Where("`key` = ?", newKey).First(&newRow).Error == nil {
+		if db.Where("`key` = ?", newKey).Limit(1).Find(&newRow).Error == nil && newRow.Key != "" {
 			// 新 key 已存在，直接删除旧 key
 			db.Where("`key` = ?", old).Delete(&model.SystemSetting{})
 			continue
