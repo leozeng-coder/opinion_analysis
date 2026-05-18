@@ -38,6 +38,7 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 	alertH := handler.NewAlertHandler(db)
 	crawlerH := handler.NewCrawlerHandler(db)
 	aiChatH := handler.NewAIChatHandler(db, taggerSvc)
+	chatSessionH := handler.NewChatSessionHandler(db, taggerSvc)
 
 	// Admin handlers
 	adminUserH := handler.NewAdminUserHandler(db)
@@ -110,6 +111,17 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 
 			// 智能助手对话（与 tagger 共用大模型配置）
 			authorized.POST("/ai/chat", aiChatH.Chat)
+
+			// 智能助手会话管理（持久化多轮对话）
+			aiSessions := authorized.Group("/ai/sessions")
+			{
+				aiSessions.GET("", chatSessionH.ListSessions)
+				aiSessions.POST("", chatSessionH.CreateSession)
+				aiSessions.POST("/chat", chatSessionH.Chat)
+				aiSessions.GET("/:id", chatSessionH.GetSession)
+				aiSessions.DELETE("/:id", chatSessionH.DeleteSession)
+				aiSessions.PATCH("/:id", chatSessionH.RenameSession)
+			}
 
 			// AI 打标后台任务管理（管理员用）
 			taggerGroup := authorized.Group("/tagger")

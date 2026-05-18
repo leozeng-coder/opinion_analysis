@@ -197,6 +197,8 @@ func main() {
 		&model.SystemSetting{},
 		&model.AuditLog{},
 		&model.RagSyncLog{},
+		&model.ChatSession{},
+		&model.ChatMessage{},
 	); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
 	}

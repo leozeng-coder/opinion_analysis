@@ -171,6 +171,25 @@ type AuditLog struct {
 
 func (AuditLog) TableName() string { return "audit_logs" }
 
+// AI 对话会话（按用户隔离，持久化）
+type ChatSession struct {
+	ID        uint           `gorm:"primarykey" json:"id"`
+	UserID    uint           `gorm:"index;not null" json:"userId"`
+	Title     string         `gorm:"size:256;not null" json:"title"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// AI 对话消息
+type ChatMessage struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	SessionID uint      `gorm:"index;not null" json:"sessionId"`
+	Role      string    `gorm:"size:16;not null" json:"role"` // user | assistant
+	Content   string    `gorm:"type:longtext;not null" json:"content"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // 分析报告
 type Report struct {
 	ID          uint           `gorm:"primarykey" json:"id"`
