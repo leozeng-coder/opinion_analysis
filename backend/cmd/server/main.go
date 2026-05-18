@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"log"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,8 +87,8 @@ func seedSystemSettings(db *gorm.DB) {
 	}
 }
 
-// seedDefaultAdmin 仅在没有任何启用的 admin 账户时创建一个。
-// 密码优先取 ADMIN_INIT_PASSWORD，否则随机 16 位明文写到启动日志。
+// seedDefaultAdmin 仅在没有任何启用的 admin 账户时创建一个默认 admin / admin。
+// 可通过环境变量 ADMIN_INIT_PASSWORD 覆盖初始密码（生产环境推荐）。
 func seedDefaultAdmin(db *gorm.DB) {
 	var cnt int64
 	if err := db.Model(&model.User{}).Where("role = ? AND status = ?", "admin", 1).Count(&cnt).Error; err != nil {
@@ -100,12 +98,12 @@ func seedDefaultAdmin(db *gorm.DB) {
 	if cnt > 0 {
 		return
 	}
-	pwd := strings.TrimSpace(os.Getenv("ADMIN_INIT_PASSWORD"))
-	generated := false
+	initPwdEnv := strings.TrimSpace(os.Getenv("ADMIN_INIT_PASSWORD"))
+	pwd := initPwdEnv
 	if pwd == "" {
-		pwd = randomPassword(16)
-		generated = true
+		pwd = "admin"
 	}
+	fromEnv := initPwdEnv != ""
 	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("[admin-seed] bcrypt: %v", err)
@@ -128,26 +126,11 @@ func seedDefaultAdmin(db *gorm.DB) {
 	if user.Role != "admin" || user.Status != 1 {
 		db.Model(&user).Updates(map[string]interface{}{"role": "admin", "status": 1, "password": string(hash)})
 	}
-	if generated {
-		log.Printf("[admin-seed] initial admin password: %s — change immediately", pwd)
+	if fromEnv {
+		log.Printf("[admin-seed] created admin (username admin), password from ADMIN_INIT_PASSWORD env")
 	} else {
-		log.Printf("[admin-seed] admin user created from ADMIN_INIT_PASSWORD env")
+		log.Printf("[admin-seed] created default admin: username=admin password=admin — change immediately in production")
 	}
-}
-
-func randomPassword(n int) string {
-	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-	b := make([]byte, n)
-	max := big.NewInt(int64(len(alphabet)))
-	for i := range b {
-		idx, err := rand.Int(rand.Reader, max)
-		if err != nil {
-			b[i] = alphabet[0]
-			continue
-		}
-		b[i] = alphabet[idx.Int64()]
-	}
-	return string(b)
 }
 
 func seedCrawlerSpiderConfigs(db *gorm.DB) {

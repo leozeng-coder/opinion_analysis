@@ -43,7 +43,7 @@ services:
         condition: service_started
     environment:
       - GIN_MODE=release
-      # 首次启动时的默认 admin 密码，留空则自动随机生成并打到日志
+      # 首次启动 admin 密码：不设置则为 admin/admin；生产请设置强密码
       # - ADMIN_INIT_PASSWORD=change-me-now
     restart: unless-stopped
 
