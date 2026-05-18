@@ -629,7 +629,29 @@ class SyncRequest(BaseModel):
 app = FastAPI(title="Opinion RAG", version="1.0.0")
 
 
+def _is_sync_enabled() -> bool:
+    """检查 system_settings 表中 rag.sync_enabled 是否为 true（默认 true）。"""
+    try:
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM system_settings WHERE `key` = 'rag.sync_enabled' LIMIT 1")
+                row = cur.fetchone()
+                if row:
+                    val = str(row.get("value", "")).strip().lower()
+                    return val in ("true", "1", "yes", "on")
+                return True  # 默认启用
+        finally:
+            conn.close()
+    except Exception as e:
+        log.warning("check rag.sync_enabled failed: %s; defaulting to enabled", e)
+        return True
+
+
 def _scheduled_sync_job() -> None:
+    if not _is_sync_enabled():
+        log.debug("scheduled sync skipped: rag.sync_enabled is false")
+        return
     conn = mysql_conn()
     log_id: Optional[int] = None
     try:
@@ -720,6 +742,133 @@ def sync_now(background_tasks: BackgroundTasks, body: SyncRequest = SyncRequest(
             "message": "submitted",
         }
     return incremental_sync(sync_log_id=body.sync_log_id, mode="manual")
+
+
+class RagConfigRequest(BaseModel):
+    sync_enabled: Optional[bool] = None
+
+
+@app.get("/v1/rag-config")
+def get_rag_config() -> Dict[str, Any]:
+    """读取向量同步相关的 system_settings 配置。"""
+    enabled = _is_sync_enabled()
+    return {"sync_enabled": enabled}
+
+
+@app.put("/v1/rag-config")
+def update_rag_config(body: RagConfigRequest) -> Dict[str, Any]:
+    """写入/更新 system_settings 中的向量同步开关。"""
+    if body.sync_enabled is None:
+        return {"ok": True, "message": "no change"}
+    val = "true" if body.sync_enabled else "false"
+    try:
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO system_settings (`key`, `value`, `desc`, updated_at)
+                    VALUES ('rag.sync_enabled', %s, 'RAG 向量同步定时任务是否启用', UTC_TIMESTAMP())
+                    ON DUPLICATE KEY UPDATE `value` = %s, updated_at = UTC_TIMESTAMP()
+                    """,
+                    (val, val),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    log.info("rag.sync_enabled set to %s", val)
+    return {"ok": True, "sync_enabled": body.sync_enabled}
+
+
+@app.get("/v1/articles")
+def list_kb_articles(
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    platform: Optional[str] = None,
+    synced: Optional[str] = None,  # "yes" | "no" | ""
+) -> Dict[str, Any]:
+    """列出文章的向量同步状态（供管理后台查看知识库内容）。"""
+    page = max(1, page)
+    page_size = min(100, max(1, page_size))
+    offset = (page - 1) * page_size
+
+    where_parts = ["deleted_at IS NULL"]
+    args: List[Any] = []
+    if keyword:
+        where_parts.append("(title LIKE %s OR content LIKE %s)")
+        like = f"%{keyword}%"
+        args += [like, like]
+    if platform:
+        where_parts.append("platform = %s")
+        args.append(platform)
+    if synced == "yes":
+        where_parts.append("embedding_content_hash IS NOT NULL")
+    elif synced == "no":
+        where_parts.append("embedding_content_hash IS NULL")
+
+    where_sql = " AND ".join(where_parts)
+    try:
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) AS cnt FROM articles WHERE {where_sql}", args)
+                total = int((cur.fetchone() or {}).get("cnt", 0))
+                cur.execute(
+                    f"""
+                    SELECT id, title, platform, published_at,
+                           embedding_content_hash, embedding_synced_at
+                    FROM articles
+                    WHERE {where_sql}
+                    ORDER BY id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    args + [page_size, offset],
+                )
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    items = []
+    for r in rows:
+        items.append({
+            "id": r["id"],
+            "title": r.get("title") or "",
+            "platform": r.get("platform") or "",
+            "publishedAt": str(r["published_at"]) if r.get("published_at") else None,
+            "embeddingHash": r.get("embedding_content_hash"),
+            "embeddingSyncedAt": str(r["embedding_synced_at"]) if r.get("embedding_synced_at") else None,
+            "synced": r.get("embedding_content_hash") is not None,
+        })
+    return {"total": total, "list": items}
+
+
+@app.delete("/v1/articles/{article_id}/embedding")
+def delete_article_embedding(article_id: int) -> Dict[str, Any]:
+    """从 Milvus 中删除指定文章的向量，并清空 MySQL 中的同步标记（使下次同步重新写入）。"""
+    try:
+        client = ensure_milvus_client()
+        delete_chunks_for_article(client, article_id)
+    except Exception as e:
+        log.warning("delete embedding from milvus: %s", e)
+    try:
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE articles SET embedding_content_hash = NULL, embedding_synced_at = NULL WHERE id = %s",
+                    (article_id,),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"ok": True, "article_id": article_id}
 
 
 if __name__ == "__main__":

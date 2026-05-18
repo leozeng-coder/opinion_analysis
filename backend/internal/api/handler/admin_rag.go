@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -23,6 +24,117 @@ type AdminRagHandler struct {
 
 func NewAdminRagHandler(db *gorm.DB) *AdminRagHandler {
 	return &AdminRagHandler{db: db}
+}
+
+func ragServiceURL() string {
+	if config.Cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
+}
+
+// proxyGet 向 RAG Python 服务发 GET 请求，将响应体 JSON 回传给前端（包裹标准 response 格式）。
+func proxyGet(c *gin.Context, path string) {
+	url := ragServiceURL()
+	if url == "" {
+		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+		return
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, strings.TrimRight(url, "/")+path, nil)
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		response.Fail(c, 502, string(body))
+		return
+	}
+	var result any
+	if err := json.Unmarshal(body, &result); err != nil {
+		response.Fail(c, 502, "RAG 服务返回非法 JSON")
+		return
+	}
+	response.OK(c, result)
+}
+
+// proxyPut 向 RAG Python 服务发 PUT 请求，转发请求体。
+func proxyPut(c *gin.Context, path string) {
+	url := ragServiceURL()
+	if url == "" {
+		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+		return
+	}
+	payload, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		response.Fail(c, 400, "读请求体失败")
+		return
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPut,
+		strings.TrimRight(url, "/")+path, bytes.NewReader(payload))
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		response.Fail(c, 502, string(body))
+		return
+	}
+	var result any
+	if err := json.Unmarshal(body, &result); err != nil {
+		response.Fail(c, 502, "RAG 服务返回非法 JSON")
+		return
+	}
+	response.OK(c, result)
+}
+
+// proxyDelete 向 RAG Python 服务发 DELETE 请求。
+func proxyDelete(c *gin.Context, path string) {
+	url := ragServiceURL()
+	if url == "" {
+		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+		return
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete,
+		strings.TrimRight(url, "/")+path, nil)
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		response.Fail(c, 502, string(body))
+		return
+	}
+	var result any
+	if err := json.Unmarshal(body, &result); err != nil {
+		response.Fail(c, 502, "RAG 服务返回非法 JSON")
+		return
+	}
+	response.OK(c, result)
 }
 
 // Status GET /api/admin/rag/status — 合并后端开关、RAG 服务健康与「句向量模型」说明（非对话 LLM）。
@@ -87,6 +199,15 @@ func (h *AdminRagHandler) Status(c *gin.Context) {
 			out["syncIntervalSecondsHint"] = int(v)
 		}
 	}
+
+	// 读取 sync_enabled 开关
+	var ss model.SystemSetting
+	if h.db.Where("`key` = ?", "rag.sync_enabled").Limit(1).Find(&ss).Error == nil && ss.Key != "" {
+		out["syncEnabled"] = strings.ToLower(strings.TrimSpace(ss.Value)) == "true"
+	} else {
+		out["syncEnabled"] = true
+	}
+
 	response.OK(c, out)
 }
 
@@ -178,4 +299,55 @@ func (h *AdminRagHandler) TriggerSync(c *gin.Context) {
 		"message":   "已提交同步任务，请在下方列表查看进度",
 		"raw":       json.RawMessage(body),
 	})
+}
+
+// GetConfig GET /api/admin/rag/config — 读取向量同步开关配置（代理到 Python 服务）。
+func (h *AdminRagHandler) GetConfig(c *gin.Context) {
+	proxyGet(c, "/v1/rag-config")
+}
+
+// UpdateConfig PUT /api/admin/rag/config — 更新向量同步开关配置（代理到 Python 服务）。
+func (h *AdminRagHandler) UpdateConfig(c *gin.Context) {
+	proxyPut(c, "/v1/rag-config")
+}
+
+// ListKBArticles GET /api/admin/rag/articles — 列出文章向量同步状态（代理到 Python 服务）。
+func (h *AdminRagHandler) ListKBArticles(c *gin.Context) {
+	url := ragServiceURL()
+	if url == "" {
+		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+		return
+	}
+	// 透传查询参数
+	params := c.Request.URL.Query()
+	target := strings.TrimRight(url, "/") + "/v1/articles?" + params.Encode()
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		response.Fail(c, 502, string(body))
+		return
+	}
+	var result any
+	if err := json.Unmarshal(body, &result); err != nil {
+		response.Fail(c, 502, "RAG 服务返回非法 JSON")
+		return
+	}
+	response.OK(c, result)
+}
+
+// DeleteArticleEmbedding DELETE /api/admin/rag/articles/:id/embedding — 删除单篇文章的向量。
+func (h *AdminRagHandler) DeleteArticleEmbedding(c *gin.Context) {
+	id := c.Param("id")
+	proxyDelete(c, fmt.Sprintf("/v1/articles/%s/embedding", id))
 }

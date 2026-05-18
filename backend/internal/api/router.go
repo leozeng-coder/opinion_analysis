@@ -165,6 +165,14 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 				admin.POST("/rag/sync",
 					middleware.Audit(db, "rag", "sync"),
 					adminRagH.TriggerSync)
+				admin.GET("/rag/config", adminRagH.GetConfig)
+				admin.PUT("/rag/config",
+					middleware.Audit(db, "rag", "update_config"),
+					adminRagH.UpdateConfig)
+				admin.GET("/rag/articles", adminRagH.ListKBArticles)
+				admin.DELETE("/rag/articles/:id/embedding",
+					middleware.Audit(db, "rag", "delete_embedding"),
+					adminRagH.DeleteArticleEmbedding)
 
 				admin.GET("/data-sources", adminDSH.List)
 				admin.POST("/data-sources",

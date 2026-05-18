@@ -12,6 +12,7 @@ const CrawlerPage = lazy(() => import('@/pages/crawler/CrawlerPage'))
 const TaggerPage = lazy(() => import('@/pages/tagger/TaggerPage'))
 const DataSourcePage = lazy(() => import('@/pages/datasource/DataSourcePage'))
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'))
+const RagKBPage = lazy(() => import('@/pages/rag/RagKBPage'))
 
 const fallback = <Spin size="large" style={{ display: 'block', marginTop: 100, textAlign: 'center' }} />
 
@@ -32,6 +33,7 @@ const App: React.FC = () => (
             <Route path="/tagger" element={<TaggerPage />} />
             <Route path="/datasources" element={<DataSourcePage />} />
             <Route path="/audit" element={<AuditPage />} />
+            <Route path="/rag-kb" element={<RagKBPage />} />
             <Route path="/" element={<Navigate to="/system" replace />} />
           </Route>
         </Route>
@@ -42,3 +44,4 @@ const App: React.FC = () => (
 )
 
 export default App
+

@@ -24,6 +24,7 @@ const menuItems: MenuProps['items'] = [
   { key: '/settings', icon: <SettingOutlined />, label: <Link to="/settings">系统设置</Link> },
   { key: '/crawler', icon: <CloudSyncOutlined />, label: <Link to="/crawler">爬虫运维</Link> },
   { key: '/tagger', icon: <RobotOutlined />, label: <Link to="/tagger">AI 打标</Link> },
+  { key: '/rag-kb', icon: <DatabaseOutlined />, label: <Link to="/rag-kb">知识库管理</Link> },
   { key: '/datasources', icon: <DatabaseOutlined />, label: <Link to="/datasources">数据源</Link> },
   { key: '/audit', icon: <AuditOutlined />, label: <Link to="/audit">审计日志</Link> },
 ]
@@ -34,6 +35,7 @@ const routeLabels: Record<string, string> = {
   '/settings': '系统设置',
   '/crawler': '爬虫运维',
   '/tagger': 'AI 打标',
+  '/rag-kb': '知识库管理',
   '/datasources': '数据源管理',
   '/audit': '审计日志',
 }

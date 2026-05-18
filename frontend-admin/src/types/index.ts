@@ -151,6 +151,7 @@ export interface RagStatus {
   collection: string
   note: string
   syncIntervalSecondsHint: number
+  syncEnabled?: boolean
   serviceError?: string
 }
 
@@ -166,4 +167,14 @@ export interface RagSyncLog {
   mode: 'scheduled' | 'manual'
   startedAt: string
   finishedAt?: string
+}
+
+export interface RagKBArticle {
+  id: number
+  title: string
+  platform: string
+  publishedAt?: string
+  embeddingHash?: string
+  embeddingSyncedAt?: string
+  synced: boolean
 }

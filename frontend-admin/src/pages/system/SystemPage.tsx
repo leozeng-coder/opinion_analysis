@@ -73,6 +73,8 @@ const SystemPage: React.FC = () => {
   const [ragPage, setRagPage] = useState(1)
   const [ragLoading, setRagLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [ragSyncEnabled, setRagSyncEnabled] = useState<boolean>(true)
+  const [syncToggling, setSyncToggling] = useState(false)
   const [form] = Form.useForm<FormValues>()
 
   const loadRagRuns = useCallback(async (page: number) => {
@@ -111,6 +113,12 @@ const SystemPage: React.FC = () => {
       setCfg(c)
       if (c?.tagger) applyToForm(c.tagger)
       setRagStatus(rs as RagStatus | null)
+      if ((rs as RagStatus | null)?.serviceReachable) {
+        const cfg2 = await adminRagApi.getConfig().catch(() => null)
+        if (cfg2 != null) setRagSyncEnabled(cfg2.sync_enabled)
+      } else if ((rs as RagStatus | null)?.syncEnabled != null) {
+        setRagSyncEnabled((rs as RagStatus).syncEnabled!)
+      }
       await loadRagRuns(1)
     } finally {
       setLoading(false)
@@ -126,6 +134,20 @@ const SystemPage: React.FC = () => {
     }, 12000)
     return () => window.clearInterval(id)
   }, [ragPage, loadRagRuns])
+
+  const handleRagSyncToggle = async (checked: boolean) => {
+    setSyncToggling(true)
+    try {
+      await adminRagApi.updateConfig({ sync_enabled: checked })
+      setRagSyncEnabled(checked)
+      message.success(checked ? '已启用定时同步' : '已暂停定时同步')
+    } catch (e) {
+      console.error(e)
+      message.error('设置失败')
+    } finally {
+      setSyncToggling(false)
+    }
+  }
 
   const handleSave = async (values: FormValues) => {
     const payload: UpdateTaggerPayload = {
@@ -320,6 +342,18 @@ const SystemPage: React.FC = () => {
             }
             extra={
               <Space>
+                <Space size={4}>
+                  <Text style={{ fontSize: 13 }}>定时同步</Text>
+                  <Switch
+                    size="small"
+                    checked={ragSyncEnabled}
+                    loading={syncToggling}
+                    disabled={!ragStatus?.serviceReachable}
+                    onChange={(v) => void handleRagSyncToggle(v)}
+                    checkedChildren="开"
+                    unCheckedChildren="关"
+                  />
+                </Space>
                 <Button
                   type="primary"
                   icon={<SyncOutlined />}
