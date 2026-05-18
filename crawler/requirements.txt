@@ -1,5 +1,6 @@
-# 舆情分析爬虫项目依赖包
-# 整合BroadTopicExtraction和DeepSentimentCrawling模块的核心依赖
+# =============================================================================
+# Python 版本：推荐 3.11；若使用 3.12/3.13，需较新的 playwright / pydantic（带预编译 wheel）。
+# =============================================================================
 
 # ===============================
 # 数据库相关
@@ -16,6 +17,11 @@ requests==2.32.3
 aiofiles~=23.2.1
 
 # ===============================
+# LLM API（BroadTopicExtractor / ArticleSyncBridge 使用 OpenAI 兼容 SDK）
+# ===============================
+openai>=1.40.0,<2
+
+# ===============================
 # 话题提取模块依赖
 # ===============================
 numpy
@@ -29,13 +35,15 @@ pytz
 # MediaCrawler爬虫依赖
 # ===============================
 Pillow>=11.0.0,<12
-playwright==1.45.0
+# 1.45 在 Py3.13 上常触发 greenlet 源码编译失败；1.49+ 提供兼容 wheel
+playwright>=1.49.0,<2
 tenacity==8.2.2
 opencv-python
 redis~=4.6.0
-pydantic==2.5.2
-fastapi==0.110.2
-uvicorn==0.29.0
+# 2.5.x 的 pydantic-core 在 Py3.13 上可能无 wheel 且从源码构建失败
+pydantic>=2.12.0,<3
+fastapi>=0.115.0,<0.116
+uvicorn>=0.29.0,<0.35
 python-dotenv==1.0.1
 jieba==0.42.1
 snownlp==0.12.3

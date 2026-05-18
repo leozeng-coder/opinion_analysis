@@ -16,11 +16,11 @@ if not exist "scheduler.py" (
     goto END
 )
 
-REM Prefer stable Python: try py -3.13, then 3.12, 3.11, else plain python.
+REM Prefer 3.11 (project default), then 3.12/3.13; Py3.14+ may lack wheels for some pins.
 set "PYRUN="
-py -3.13 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.13"
+py -3.11 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.11"
 if not defined PYRUN py -3.12 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.12"
-if not defined PYRUN py -3.11 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.11"
+if not defined PYRUN py -3.13 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.13"
 if not defined PYRUN (
     where python >nul 2>&1
     if errorlevel 1 (
