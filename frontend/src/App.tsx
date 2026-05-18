@@ -12,6 +12,7 @@ const TopicsPage = lazy(() => import('@/pages/topics/TopicsPage'))
 const AlertsPage = lazy(() => import('@/pages/alerts/AlertsPage'))
 const StatsPage = lazy(() => import('@/pages/stats/StatsPage'))
 const CrawlerPage = lazy(() => import('@/pages/crawler/CrawlerPage'))
+const AiAssistantPage = lazy(() => import('@/pages/assistant/AiAssistantPage'))
 
 const fallback = <Spin size="large" style={{ display: 'block', marginTop: 100, textAlign: 'center' }} />
 
@@ -29,6 +30,7 @@ const App: React.FC = () => (
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/crawler" element={<CrawlerPage />} />
+            <Route path="/assistant" element={<AiAssistantPage />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>

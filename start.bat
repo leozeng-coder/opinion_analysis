@@ -11,6 +11,13 @@ if exist "C:\Program Files\nodejs\node.exe"   set "PATH=C:\Program Files\nodejs;
 echo Starting backend  :8080 ...
 start "Backend  :8080"   /D "%~dp0backend"        cmd /k call "%~dp0scripts\run-backend.cmd"
 
+if "%SKIP_RAG%"=="1" (
+    echo [launcher] SKIP_RAG=1 - not starting RAG embedding service (Milvus Lite).
+) else (
+    echo Starting RAG      :5055 ^(set SKIP_RAG=1 to disable^) ...
+    start "RAG      :5055" /D "%~dp0"                cmd /k call "%~dp0scripts\run-rag-service.cmd"
+)
+
 echo Starting frontend :5173 ...
 start "Frontend :5173"   /D "%~dp0frontend"        cmd /k call "%~dp0scripts\run-frontend.cmd"
 
@@ -28,6 +35,7 @@ echo.
 echo   Frontend : http://localhost:5173
 echo   Admin    : http://localhost:5174
 echo   API      : http://localhost:8080
+if not "%SKIP_RAG%"=="1" echo   RAG embed: http://localhost:5055 ^(backend: rag.enabled in config.yaml^)
 echo.
 pause
 endlocal

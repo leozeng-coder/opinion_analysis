@@ -2,7 +2,6 @@ import React, { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   Layout, Menu, Avatar, Dropdown, theme, Badge, Space, Typography,
-  FloatButton,
 } from 'antd'
 import {
   DashboardOutlined, FileTextOutlined, FireOutlined,
@@ -10,7 +9,7 @@ import {
   CommentOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store/auth'
-import AiChatDrawer from '@/components/assistant/AiChatDrawer'
+import DraggableAssistantLauncher from '@/components/layout/DraggableAssistantLauncher'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -22,11 +21,11 @@ const menuItems = [
   { key: '/alerts', icon: <BellOutlined />, label: '预警中心' },
   { key: '/stats', icon: <BarChartOutlined />, label: '统计分析' },
   { key: '/crawler', icon: <CloudSyncOutlined />, label: '爬虫调度' },
+  { key: '/assistant', icon: <CommentOutlined />, label: '智能助手' },
 ]
 
 const AppLayout: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false)
-  const [aiDrawerOpen, setAiDrawerOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   const { token: { colorBgContainer, borderRadiusLG } } = theme.useToken()
@@ -92,14 +91,9 @@ const AppLayout: React.FC = () => {
         </Content>
       </Layout>
 
-      <FloatButton
-        type="primary"
-        icon={<CommentOutlined />}
-        tooltip="智能助手"
-        onClick={() => setAiDrawerOpen(true)}
-        style={{ right: 24, bottom: 24 }}
-      />
-      <AiChatDrawer open={aiDrawerOpen} onClose={() => setAiDrawerOpen(false)} />
+      {location.pathname !== '/assistant' && (
+        <DraggableAssistantLauncher onOpen={() => navigate('/assistant')} />
+      )}
     </Layout>
   )
 }
