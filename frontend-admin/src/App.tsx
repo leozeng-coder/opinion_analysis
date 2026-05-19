@@ -6,10 +6,10 @@ import PrivateAdminRoute from '@/components/PrivateAdminRoute'
 
 const LoginPage = lazy(() => import('@/pages/login/LoginPage'))
 const UsersPage = lazy(() => import('@/pages/users/UsersPage'))
-const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'))
 const SystemPage = lazy(() => import('@/pages/system/SystemPage'))
+const ConfigPage = lazy(() => import('@/pages/config/ConfigPage'))
+const TasksPage = lazy(() => import('@/pages/tasks/TasksPage'))
 const CrawlerPage = lazy(() => import('@/pages/crawler/CrawlerPage'))
-const TaggerPage = lazy(() => import('@/pages/tagger/TaggerPage'))
 const DataSourcePage = lazy(() => import('@/pages/datasource/DataSourcePage'))
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'))
 const RagKBPage = lazy(() => import('@/pages/rag/RagKBPage'))
@@ -26,14 +26,17 @@ const App: React.FC = () => (
         <Route path="/login" element={<LoginPage />} />
         <Route element={<PrivateAdminRoute />}>
           <Route element={<AdminLayout />}>
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/system" element={<SystemPage />} />
+            <Route path="/config" element={<ConfigPage />} />
+            <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/users" element={<UsersPage />} />
             <Route path="/crawler" element={<CrawlerPage />} />
-            <Route path="/tagger" element={<TaggerPage />} />
+            <Route path="/rag-kb" element={<RagKBPage />} />
             <Route path="/datasources" element={<DataSourcePage />} />
             <Route path="/audit" element={<AuditPage />} />
-            <Route path="/rag-kb" element={<RagKBPage />} />
+            {/* 旧路由重定向 */}
+            <Route path="/settings" element={<Navigate to="/config" replace />} />
+            <Route path="/tagger" element={<Navigate to="/tasks" replace />} />
             <Route path="/" element={<Navigate to="/system" replace />} />
           </Route>
         </Route>
@@ -44,4 +47,3 @@ const App: React.FC = () => (
 )
 
 export default App
-
