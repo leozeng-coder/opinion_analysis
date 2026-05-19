@@ -13,10 +13,10 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"opinion-analysis/config"
-	"opinion-analysis/internal/api"
-	"opinion-analysis/internal/api/handler"
-	"opinion-analysis/internal/model"
-	"opinion-analysis/internal/service/tagger"
+	"opinion-analysis/src/api"
+	"opinion-analysis/src/model"
+	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/tagger"
 )
 
 // runCrawlerSQL 执行 crawler/schema/crawler_tables.sql，幂等：已存在/重复键等错误静默跳过。
@@ -137,7 +137,7 @@ func seedCrawlerSpiderConfigs(db *gorm.DB) {
 	// 迁移旧 key（rss/zhihu/tieba/search）到新 key（broad-topic/deep-sentiment）
 	oldKeys := []string{"rss", "zhihu", "tieba", "search"}
 	for _, old := range oldKeys {
-		db.Where("spider_key = ?", old).Delete(&model.CrawlerSpiderConfig{})
+		_ = repository.NewStore(db).Crawler.DeleteSpiderConfigByKey(old)
 	}
 
 	desired := []struct {
@@ -151,10 +151,9 @@ func seedCrawlerSpiderConfigs(db *gorm.DB) {
 	}
 
 	for _, d := range desired {
-		var existing model.CrawlerSpiderConfig
-		err := db.Where("spider_key = ?", d.Key).First(&existing).Error
-		if err == nil {
-			continue // 已存在，不覆盖用户配置
+		crawlerRepo := repository.NewStore(db).Crawler
+		if _, err := crawlerRepo.FindSpiderByKey(d.Key); err == nil {
+			continue
 		}
 		seed := model.CrawlerSpiderConfig{
 			SpiderKey:       d.Key,
@@ -162,7 +161,7 @@ func seedCrawlerSpiderConfigs(db *gorm.DB) {
 			IntervalMinutes: d.Interval,
 			Enabled:         d.Enabled,
 		}
-		if err := db.Create(&seed).Error; err != nil {
+		if err := crawlerRepo.CreateSpiderConfig(&seed); err != nil {
 			log.Fatalf("seed crawler spider config %q: %v", d.Key, err)
 		}
 	}
@@ -184,22 +183,7 @@ func main() {
 	sqlDB.SetMaxIdleConns(config.Cfg.Database.MaxIdleConn)
 
 	// 自动迁移
-	if err := db.AutoMigrate(
-		&model.User{},
-		&model.DataSource{},
-		&model.Article{},
-		&model.Topic{},
-		&model.AlertRule{},
-		&model.AlertRecord{},
-		&model.CrawlerSpiderConfig{},
-		&model.CrawlerRunLog{},
-		&model.Report{},
-		&model.SystemSetting{},
-		&model.AuditLog{},
-		&model.RagSyncLog{},
-		&model.ChatSession{},
-		&model.ChatMessage{},
-	); err != nil {
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
 	}
 
@@ -209,7 +193,7 @@ func main() {
 
 	runCrawlerSQL(db)
 
-	if n, err := handler.RecoverStaleCrawlerRuns(db); err != nil {
+	if n, err := repository.NewStore(db).Crawler.RecoverStaleRuns(); err != nil {
 		log.Fatalf("recover stale crawler runs: %v", err)
 	} else if n > 0 {
 		log.Printf("[crawler task] startup_recovered stale_run_count=%d (marked failed, see crawler_run_logs.message)", n)
