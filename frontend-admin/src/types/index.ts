@@ -208,6 +208,13 @@ export interface RagStatus {
   serviceReachable: boolean
   embedModel: string
   embedDim: number
+  collectionDim?: number
+  dimensionMismatch?: boolean
+  embedderReady?: boolean
+  embedderError?: string
+  processManaged?: boolean
+  processRunning?: boolean
+  processPid?: number
   milvusUri: string
   collection: string
   note: string
@@ -215,6 +222,24 @@ export interface RagStatus {
   syncEnabled?: boolean
   serviceError?: string
   embedProvider?: string
+}
+
+export interface RagRestartResult {
+  ok: boolean
+  pid?: number
+  healthReady: boolean
+  starting?: boolean
+  elapsedMs: number
+  message: string
+}
+
+export interface RagMilvusRebuildResult {
+  ok: boolean
+  collection: string
+  dropped_previous: boolean
+  embed_dimension: number
+  collection_dimension: number
+  articles_reset_for_resync: number
 }
 
 export interface RagSyncLog {

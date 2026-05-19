@@ -3,6 +3,8 @@ import type {
   PageResult,
   RagConfig,
   RagKBArticle,
+  RagMilvusRebuildResult,
+  RagRestartResult,
   RagStatus,
   RagSyncLog,
   UpdateRagConfigPayload,
@@ -20,6 +22,10 @@ export const adminRagApi = {
   getConfig: () => request.get<never, RagConfig>('/admin/rag/config'),
   updateConfig: (payload: UpdateRagConfigPayload) =>
     request.put<never, RagConfig & { ok?: boolean }>('/admin/rag/config', payload),
+  rebuildMilvus: () =>
+    request.post<never, RagMilvusRebuildResult>('/admin/rag/milvus/rebuild', {}),
+  restartService: () =>
+    request.post<never, RagRestartResult>('/admin/rag/restart', {}, { timeout: 45000 }),
   listArticles: (params: {
     page?: number
     page_size?: number

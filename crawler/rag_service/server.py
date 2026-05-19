@@ -182,22 +182,39 @@ def refresh_runtime_settings() -> None:
         CHUNK_MAX_CHARS = max(128, int(_effective_setting("rag.chunk_max_chars") or "420"))
         CHUNK_OVERLAP = max(0, min(CHUNK_MAX_CHARS // 2, int(_effective_setting("rag.chunk_overlap") or "72")))
         SYNC_INTERVAL_SEC = max(30, int(_effective_setting("rag.sync_interval_sec") or "120"))
-        BATCH_LIMIT = max(1, min(500, int(_effective_setting("rag.sync_batch") or "100")))
+        BATCH_LIMIT = max(1, min(2000, int(_effective_setting("rag.sync_batch") or "100")))
 
 
 def _embedder_fingerprint() -> str:
-    return f"{EMBED_PROVIDER}|{MODEL_NAME}|{EMBED_API_BASE}|{bool(EMBED_API_KEY)}"
+    key_part = (
+        hashlib.sha256(EMBED_API_KEY.encode("utf-8")).hexdigest()[:12]
+        if EMBED_API_KEY
+        else ""
+    )
+    return f"{EMBED_PROVIDER}|{MODEL_NAME}|{EMBED_API_BASE}|{key_part}"
 
 
-def _reload_embedder_if_needed() -> List[str]:
-    """嵌入配置变更时卸载缓存，下次 encode 时重载。返回 warning 列表。"""
+class DimensionMismatchError(Exception):
+    """Milvus 集合维度与当前嵌入模型输出维度不一致。"""
+
+    def __init__(self, model_dim: int, collection_dim: int) -> None:
+        self.model_dim = model_dim
+        self.collection_dim = collection_dim
+        super().__init__(
+            f"向量维度不一致：Milvus 集合={collection_dim}，当前嵌入模型={model_dim}。"
+            "请在管理后台「重建向量库并同步」。"
+        )
+
+
+def _reload_embedder_if_needed() -> Tuple[List[str], Optional[str]]:
+    """嵌入配置变更时卸载缓存并重载。返回 (warnings, fatal_error)。"""
     global _embedder, _embed_dim
     warnings: List[str] = []
     old_dim = _embed_dim if _embed_dim > 0 else None
     fp = _embedder_fingerprint()
     with _config_lock:
         if _embedder is not None and getattr(_embedder, "_rag_fingerprint", None) == fp:
-            return warnings
+            return warnings, None
         _embedder = None
         _embed_dim = 0
     try:
@@ -206,11 +223,16 @@ def _reload_embedder_if_needed() -> List[str]:
         new_dim = get_embed_dim()
         if old_dim is not None and new_dim != old_dim:
             warnings.append(
-                f"向量维度 {old_dim} → {new_dim}，若检索异常请重建 Milvus 集合并重新同步"
+                f"向量维度 {old_dim} → {new_dim}，请重建 Milvus 向量库并重新同步"
+            )
+        coll_dim = get_collection_embed_dim()
+        if coll_dim is not None and coll_dim != new_dim:
+            warnings.append(
+                f"Milvus 集合维度 {coll_dim} 与当前模型 {new_dim} 不一致，请重建向量库"
             )
     except Exception as e:
-        warnings.append(f"加载嵌入模型失败: {e}")
-    return warnings
+        return warnings, f"加载嵌入模型失败: {e}"
+    return warnings, None
 
 
 def get_embedder() -> Embedder:
@@ -321,6 +343,88 @@ def mysql_conn():
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )
+
+
+def get_collection_embed_dim(client: MilvusClient | None = None) -> Optional[int]:
+    """读取 Milvus 集合 embedding 字段维度；集合不存在时返回 None。"""
+    mc = client
+    if mc is None:
+        try:
+            mc = MilvusClient(uri=MILVUS_URI)
+        except Exception as e:
+            log.debug("milvus client for describe: %s", e)
+            return None
+    if not mc.has_collection(COL_NAME):
+        return None
+    try:
+        info = mc.describe_collection(COL_NAME)
+        for field in info.get("fields") or []:
+            if str(field.get("name")) != "embedding":
+                continue
+            params = field.get("params") or field.get("type_params") or {}
+            if isinstance(params, dict) and params.get("dim") is not None:
+                return int(params["dim"])
+    except Exception as e:
+        log.warning("describe collection %s: %s", COL_NAME, e)
+    return None
+
+
+def assert_embedding_dimensions_match(client: MilvusClient) -> None:
+    coll_dim = get_collection_embed_dim(client)
+    if coll_dim is None:
+        return
+    model_dim = get_embed_dim()
+    if coll_dim != model_dim:
+        raise DimensionMismatchError(model_dim, coll_dim)
+
+
+def reset_embedding_sync_markers() -> int:
+    """清空文章向量同步标记，便于重建 Milvus 后全量重算。"""
+    conn = mysql_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE articles
+                SET embedding_content_hash = NULL, embedding_synced_at = NULL
+                WHERE deleted_at IS NULL
+                """
+            )
+            return int(cur.rowcount or 0)
+    finally:
+        conn.commit()
+        conn.close()
+
+
+def rebuild_milvus_collection() -> Dict[str, Any]:
+    """按当前嵌入模型维度 drop 并重建 Milvus 集合，并重置 MySQL 同步标记。"""
+    global _client
+    refresh_runtime_settings()
+    model_dim = get_embed_dim()
+    raw = MilvusClient(uri=MILVUS_URI)
+    dropped = False
+    if raw.has_collection(COL_NAME):
+        raw.drop_collection(COL_NAME)
+        dropped = True
+    _client = None
+    new_client = ensure_milvus_client()
+    coll_dim = get_collection_embed_dim(new_client)
+    cleared = reset_embedding_sync_markers()
+    log.info(
+        "rebuilt milvus collection=%s model_dim=%s collection_dim=%s cleared=%s",
+        COL_NAME,
+        model_dim,
+        coll_dim,
+        cleared,
+    )
+    return {
+        "ok": True,
+        "collection": COL_NAME,
+        "dropped_previous": dropped,
+        "embed_dimension": model_dim,
+        "collection_dimension": coll_dim,
+        "articles_reset_for_resync": cleared,
+    }
 
 
 def ensure_milvus_client() -> MilvusClient:
@@ -478,6 +582,7 @@ def incremental_sync(sync_log_id: Optional[int] = None, mode: Optional[str] = No
 
 def _incremental_sync_impl(sync_log_id: Optional[int], mode: Optional[str]) -> Dict[str, Any]:
     client = ensure_milvus_client()
+    assert_embedding_dimensions_match(client)
     conn = mysql_conn()
     processed = 0
     upserted = 0
@@ -628,6 +733,7 @@ def distance_to_sim(d: float) -> float:
 
 def hybrid_search(query: str, top_k: int) -> List[Dict[str, Any]]:
     client = ensure_milvus_client()
+    assert_embedding_dimensions_match(client)
     kw_ids = set(keyword_candidate_ids(query))
     qvec = encode_query(query.strip())
 
@@ -767,6 +873,12 @@ def _scheduled_sync_job() -> None:
     if not _is_sync_enabled():
         log.debug("scheduled sync skipped: rag.sync_enabled is false")
         return
+    try:
+        client = ensure_milvus_client()
+        assert_embedding_dimensions_match(client)
+    except DimensionMismatchError as e:
+        log.warning("scheduled sync skipped: %s", e)
+        return
     conn = mysql_conn()
     log_id: Optional[int] = None
     try:
@@ -793,16 +905,41 @@ def _scheduled_sync_job() -> None:
 def _run_sync_background(
     sync_log_id: Optional[int],
 ) -> None:
+    conn = mysql_conn()
     try:
         incremental_sync(sync_log_id=sync_log_id, mode="manual")
+    except DimensionMismatchError as e:
+        log.error("background sync blocked: %s", e)
+        if sync_log_id:
+            _finish_sync_log(
+                conn,
+                sync_log_id,
+                ok=False,
+                message=str(e),
+                articles_processed=0,
+                chunks_upserted=0,
+                chunks_deleted=0,
+            )
     except Exception as e:
         log.exception("background sync failed: %s", e)
+        if sync_log_id:
+            _finish_sync_log(
+                conn,
+                sync_log_id,
+                ok=False,
+                message=str(e),
+                articles_processed=0,
+                chunks_upserted=0,
+                chunks_deleted=0,
+            )
+    finally:
+        conn.close()
 
 
 @app.on_event("startup")
 def _startup() -> None:
     refresh_runtime_settings()
-    ensure_milvus_client()
+    # Milvus / embedder 延迟到首次 sync/search 时加载，避免阻塞 HTTP 启动。
     sched = BackgroundScheduler()
     sched.add_job(
         _scheduled_sync_job,
@@ -815,33 +952,58 @@ def _startup() -> None:
     sched.start()
     app.state.scheduler = sched
     log.info(
-        "RAG milvus=%s collection=%s sync_interval=%ss embed_model=%s dim=%s",
+        "RAG listening on %s:%s milvus=%s collection=%s embed_model=%s (lazy load)",
+        RAG_HOST,
+        RAG_PORT,
         MILVUS_URI,
         COL_NAME,
-        SYNC_INTERVAL_SEC,
         MODEL_NAME,
-        get_embed_dim(),
     )
 
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
     refresh_runtime_settings()
-    dim = EMBED_DIM_ENV or 384
-    if _embedder is not None:
+    model_dim = float(_embed_dim) if _embed_dim > 0 else 0.0
+    embedder_ready = _embedder is not None
+    embedder_error: Optional[str] = None
+    if embedder_ready:
         try:
-            dim = get_embed_dim()
-        except Exception:
-            pass
-    return {
+            model_dim = float(get_embed_dim())
+        except Exception as e:
+            embedder_error = str(e)
+            embedder_ready = False
+
+    collection_dim: Optional[float] = None
+    try:
+        cd = get_collection_embed_dim()
+        if cd is not None:
+            collection_dim = float(cd)
+    except Exception:
+        pass
+
+    dimension_mismatch = (
+        collection_dim is not None
+        and model_dim > 0
+        and int(collection_dim) != int(model_dim)
+    )
+
+    out: Dict[str, Any] = {
         "status": "ok",
         "embed_provider": EMBED_PROVIDER,
         "embed_model": MODEL_NAME,
-        "embed_dimension": float(dim),
+        "embed_dimension": model_dim,
+        "embedder_ready": embedder_ready,
         "milvus_uri": MILVUS_URI,
         "collection": COL_NAME,
         "sync_interval_sec": float(SYNC_INTERVAL_SEC),
+        "dimension_mismatch": dimension_mismatch,
     }
+    if collection_dim is not None:
+        out["collection_dimension"] = collection_dim
+    if embedder_error:
+        out["embedder_error"] = embedder_error
+    return out
 
 
 @app.post("/v1/search")
@@ -856,6 +1018,11 @@ def search(body: SearchRequest) -> Dict[str, Any]:
 
 @app.post("/v1/sync")
 def sync_now(background_tasks: BackgroundTasks, body: SyncRequest = SyncRequest()) -> Dict[str, Any]:
+    try:
+        client = ensure_milvus_client()
+        assert_embedding_dimensions_match(client)
+    except DimensionMismatchError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     if body.async_:
         background_tasks.add_task(_run_sync_background, body.sync_log_id)
         return {
@@ -867,19 +1034,41 @@ def sync_now(background_tasks: BackgroundTasks, body: SyncRequest = SyncRequest(
     return incremental_sync(sync_log_id=body.sync_log_id, mode="manual")
 
 
+@app.post("/v1/milvus/rebuild")
+def rebuild_milvus() -> Dict[str, Any]:
+    """Drop 并重建 Milvus 集合（按当前嵌入模型维度），并重置 MySQL 同步标记。"""
+    try:
+        return rebuild_milvus_collection()
+    except Exception as e:
+        log.exception("milvus rebuild failed")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.post("/v1/rag-config/reload")
 def reload_rag_config() -> Dict[str, Any]:
     """从 system_settings 重新加载配置并热更新（持久化与历史由 Go 后端负责）。"""
     refresh_runtime_settings()
-    warnings = _reload_embedder_if_needed()
+    warnings, fatal = _reload_embedder_if_needed()
     _reschedule_sync_job()
+    if fatal:
+        raise HTTPException(
+            status_code=502,
+            detail={"ok": False, "error": fatal, "warnings": warnings},
+        )
     out: Dict[str, Any] = {
         "ok": True,
         "embed_provider": EMBED_PROVIDER,
         "embed_model": MODEL_NAME,
+        "embed_dimension": get_embed_dim() if _embedder is not None else 0,
+        "collection_dimension": get_collection_embed_dim(),
+        "dimension_mismatch": False,
         "sync_interval_sec": SYNC_INTERVAL_SEC,
         "sync_batch": BATCH_LIMIT,
     }
+    coll_dim = out.get("collection_dimension")
+    model_dim = out.get("embed_dimension")
+    if coll_dim is not None and model_dim and int(coll_dim) != int(model_dim):
+        out["dimension_mismatch"] = True
     if warnings:
         out["warnings"] = warnings
     log.info(

@@ -12,11 +12,12 @@ import (
 	userhandler "opinion-analysis/src/api/handler/user"
 	"opinion-analysis/src/middleware"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
 	"opinion-analysis/pkg/response"
 )
 
-func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.Engine {
+func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager) *gin.Engine {
 	store := repository.NewStore(db)
 
 	r := gin.New()
@@ -44,7 +45,7 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 	adminUserH := adminhandler.NewUserHandler(store)
 	adminSettingH := adminhandler.NewSettingHandler(store)
 	adminSystemH := adminhandler.NewSystemHandler(db, store, taggerSvc)
-	adminRagH := adminhandler.NewRAGHandler(store)
+	adminRagH := adminhandler.NewRAGHandler(store, ragProc)
 	adminDSH := adminhandler.NewDataSourceHandler(store)
 	adminAuditH := adminhandler.NewAuditHandler(store)
 
@@ -181,6 +182,12 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 				admin.PUT("/rag/config",
 					middleware.Audit(db, "rag", "update_config"),
 					adminRagH.UpdateConfig)
+				admin.POST("/rag/milvus/rebuild",
+					middleware.Audit(db, "rag", "rebuild_milvus"),
+					adminRagH.RebuildMilvus)
+				admin.POST("/rag/restart",
+					middleware.Audit(db, "rag", "restart_service"),
+					adminRagH.RestartService)
 				admin.GET("/rag/articles", adminRagH.ListKBArticles)
 				admin.DELETE("/rag/articles/:id/embedding",
 					middleware.Audit(db, "rag", "delete_embedding"),

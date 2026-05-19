@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,14 +16,30 @@ import (
 	"opinion-analysis/pkg/response"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/ragprocess"
 )
 
 type RAGHandler struct {
-	rag *repository.RAGRepository
+	rag  *repository.RAGRepository
+	proc *ragprocess.Manager
 }
 
-func NewRAGHandler(store *repository.Store) *RAGHandler {
-	return &RAGHandler{rag: store.RAG}
+func NewRAGHandler(store *repository.Store, proc *ragprocess.Manager) *RAGHandler {
+	return &RAGHandler{rag: store.RAG, proc: proc}
+}
+
+func extractRagErrorDetail(body []byte) string {
+	s := strings.TrimSpace(string(body))
+	if s == "" {
+		return "RAG 服务错误"
+	}
+	var obj map[string]any
+	if json.Unmarshal(body, &obj) == nil {
+		if d, ok := obj["detail"].(string); ok && d != "" {
+			return d
+		}
+	}
+	return s
 }
 
 func ragServiceURL() string {
@@ -30,6 +47,41 @@ func ragServiceURL() string {
 		return ""
 	}
 	return strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
+}
+
+func proxyRagPost(c *gin.Context, path string, payload any, timeout time.Duration) (int, []byte, error) {
+	url := ragServiceURL()
+	if url == "" {
+		return 0, nil, fmt.Errorf("未配置 rag.embedding_service_url")
+	}
+	var bodyReader io.Reader
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return 0, nil, err
+		}
+		bodyReader = bytes.NewReader(b)
+	}
+	client := &http.Client{Timeout: timeout}
+	req, err := http.NewRequestWithContext(
+		c.Request.Context(),
+		http.MethodPost,
+		strings.TrimRight(url, "/")+path,
+		bodyReader,
+	)
+	if err != nil {
+		return 0, nil, err
+	}
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, body, nil
 }
 
 // proxyDelete 向 RAG Python 服务发 DELETE 请求。
@@ -84,6 +136,13 @@ func (h *RAGHandler) Status(c *gin.Context) {
 		url = strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
 		out["embeddingServiceUrl"] = url
 	}
+	if h.proc != nil {
+		out["processManaged"] = h.proc.ManagedEnabled()
+		out["processRunning"] = h.proc.IsRunning()
+		if pid := h.proc.PID(); pid > 0 {
+			out["processPid"] = pid
+		}
+	}
 	if url == "" {
 		response.OK(c, out)
 		return
@@ -119,6 +178,18 @@ func (h *RAGHandler) Status(c *gin.Context) {
 		}
 		if v, ok := remote["embed_dimension"].(float64); ok {
 			out["embedDim"] = int(v)
+		}
+		if v, ok := remote["collection_dimension"].(float64); ok {
+			out["collectionDim"] = int(v)
+		}
+		if v, ok := remote["dimension_mismatch"].(bool); ok {
+			out["dimensionMismatch"] = v
+		}
+		if v, ok := remote["embedder_ready"].(bool); ok {
+			out["embedderReady"] = v
+		}
+		if v, ok := remote["embedder_error"].(string); ok && v != "" {
+			out["embedderError"] = v
 		}
 		if v, ok := remote["milvus_uri"].(string); ok {
 			out["milvusUri"] = v
@@ -215,9 +286,15 @@ func (h *RAGHandler) TriggerSync(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 409 {
+		msg := extractRagErrorDetail(body)
+		_ = h.rag.FailSyncLog(&logRow, msg)
+		response.Fail(c, 409, msg)
+		return
+	}
 	if resp.StatusCode/100 != 2 {
 		_ = h.rag.FailSyncLog(&logRow, string(body))
-		response.Fail(c, 502, "RAG 服务拒绝: "+string(body))
+		response.Fail(c, 502, "RAG 服务拒绝: "+extractRagErrorDetail(body))
 		return
 	}
 
@@ -440,8 +517,8 @@ func (h *RAGHandler) UpdateConfig(c *gin.Context) {
 		response.Fail(c, 400, "sync_interval_sec 应在 30~86400")
 		return
 	}
-	if merged.SyncBatch < 1 || merged.SyncBatch > 500 {
-		response.Fail(c, 400, "sync_batch 应在 1~500")
+	if merged.SyncBatch < 1 || merged.SyncBatch > 2000 {
+		response.Fail(c, 400, "sync_batch 应在 1~2000")
 		return
 	}
 
@@ -468,7 +545,47 @@ func (h *RAGHandler) UpdateConfig(c *gin.Context) {
 		warn = strings.Join(pyWarnings, "；")
 	}
 	resp := repository.BuildRagConfigResponse(merged, tryRagEnvOverrides(), applied, warn)
+	resp.Warnings = pyWarnings
 	response.OK(c, resp)
+}
+
+// RebuildMilvus POST /api/admin/rag/milvus/rebuild — 重建 Milvus 集合并清空同步标记。
+func (h *RAGHandler) RebuildMilvus(c *gin.Context) {
+	status, body, err := proxyRagPost(c, "/v1/milvus/rebuild", nil, 120*time.Second)
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	if status/100 != 2 {
+		response.Fail(c, status, extractRagErrorDetail(body))
+		return
+	}
+	var result map[string]any
+	if err := json.Unmarshal(body, &result); err != nil {
+		response.Fail(c, 502, "RAG 服务返回非法 JSON")
+		return
+	}
+	response.OK(c, result)
+}
+
+// RestartService POST /api/admin/rag/restart — 杀旧进程并拉起 RAG 子进程（快速返回，前端轮询 status）。
+func (h *RAGHandler) RestartService(c *gin.Context) {
+	if h.proc == nil || !h.proc.ManagedEnabled() {
+		response.Fail(c, 400, "RAG 进程托管未启用，请在 config.yaml 设置 rag.managed: true")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
+	defer cancel()
+	result, err := h.proc.Restart(ctx)
+	if err != nil {
+		if result.Message != "" {
+			response.Fail(c, 502, result.Message)
+			return
+		}
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	response.OK(c, result)
 }
 
 // ListKBArticles GET /api/admin/rag/articles — 列出文章向量同步状态（代理到 Python 服务）。

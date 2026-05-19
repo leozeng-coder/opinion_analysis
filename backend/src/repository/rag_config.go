@@ -191,6 +191,7 @@ type RagConfigResponse struct {
 	OK              bool     `json:"ok"`
 	ServiceApplied  bool     `json:"service_applied,omitempty"`
 	Warning         string   `json:"warning,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
 }
 
 func BuildRagConfigResponse(cfg RagConfigData, envOverrides []string, serviceApplied bool, warning string) RagConfigResponse {

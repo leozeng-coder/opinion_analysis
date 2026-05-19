@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -8,6 +9,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Popconfirm,
   Row,
   Select,
@@ -105,6 +107,8 @@ const SystemPage: React.FC = () => {
   const [ragPage, setRagPage] = useState(1)
   const [ragLoading, setRagLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [rebuildingMilvus, setRebuildingMilvus] = useState(false)
+  const [restartingRag, setRestartingRag] = useState(false)
   const [ragSyncEnabled, setRagSyncEnabled] = useState<boolean>(true)
   const [syncToggling, setSyncToggling] = useState(false)
   const [ragSaving, setRagSaving] = useState(false)
@@ -395,6 +399,10 @@ const SystemPage: React.FC = () => {
   const llmProbe = health?.llm
 
   const handleRagSync = async () => {
+    if (ragStatus?.dimensionMismatch) {
+      message.warning('向量维度与 Milvus 集合不一致，请先「重建向量库并同步」')
+      return
+    }
     setSyncing(true)
     try {
       await adminRagApi.triggerSync()
@@ -402,9 +410,89 @@ const SystemPage: React.FC = () => {
       await loadRagRuns(ragPage)
       const rs = await adminRagApi.status().catch(() => null)
       setRagStatus(rs as RagStatus | null)
+    } catch (e: unknown) {
+      console.error(e)
+      const err = e as { response?: { data?: { message?: string } }; message?: string }
+      message.error(err.response?.data?.message || err.message || '同步提交失败')
     } finally {
       setSyncing(false)
     }
+  }
+
+  const handleRagRebuildAndSync = () => {
+    Modal.confirm({
+      title: '重建 Milvus 向量库',
+      content:
+        '将删除当前 Milvus 集合中的全部向量，并按当前嵌入模型维度重建；同时清空文章的同步标记以便全量重算。此操作不可撤销，是否继续？',
+      okText: '重建并同步',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setRebuildingMilvus(true)
+        try {
+          const result = await adminRagApi.rebuildMilvus()
+          message.success(
+            `向量库已重建（${result.collection_dimension} 维），已重置 ${result.articles_reset_for_resync} 篇文章的同步标记`,
+          )
+          const rs = await adminRagApi.status().catch(() => null)
+          setRagStatus(rs as RagStatus | null)
+          await adminRagApi.triggerSync()
+          message.success('已提交全量向量同步')
+          await loadRagRuns(ragPage)
+        } catch (e: unknown) {
+          console.error(e)
+          const err = e as { response?: { data?: { message?: string } }; message?: string }
+          message.error(err.response?.data?.message || err.message || '重建失败')
+        } finally {
+          setRebuildingMilvus(false)
+        }
+      },
+    })
+  }
+
+  const handleRagRestart = () => {
+    Modal.confirm({
+      title: '重启 RAG 服务',
+      content:
+        '将停止占用端口的旧 RAG 进程并重新拉起（加载最新代码与配置）。本地模型首次加载可能需 1～2 分钟，是否继续？',
+      okText: '重启',
+      cancelText: '取消',
+      onOk: async () => {
+        setRestartingRag(true)
+        try {
+          const result = await adminRagApi.restartService()
+          if (result.healthReady) {
+            message.success(result.message || `RAG 已就绪（PID ${result.pid ?? '-'})`)
+          } else {
+            message.loading(result.message || 'RAG 启动中…', 0)
+          }
+          const deadline = Date.now() + 180_000
+          while (Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 2000))
+            const rs = await adminRagApi.status().catch(() => null)
+            if (rs) setRagStatus(rs as RagStatus)
+            if (rs?.serviceReachable) {
+              message.destroy()
+              message.success(
+                rs.embedderReady === false
+                  ? `RAG HTTP 已就绪（PID ${result.pid ?? '-'}），嵌入模型仍在加载`
+                  : `RAG 服务已就绪（PID ${result.pid ?? rs.processPid ?? '-'})`,
+              )
+              return
+            }
+          }
+          message.destroy()
+          message.warning('RAG 进程已提交启动，但等待就绪超时；请查看 crawler/logs/rag_service_managed.log')
+        } catch (e: unknown) {
+          message.destroy()
+          console.error(e)
+          const err = e as { response?: { data?: { message?: string } }; message?: string }
+          message.error(err.response?.data?.message || err.message || '重启失败')
+        } finally {
+          setRestartingRag(false)
+        }
+      },
+    })
   }
 
   const ragFieldLocked = (dbKey: string) => ragEnvLocks.includes(dbKey)
@@ -608,11 +696,28 @@ const SystemPage: React.FC = () => {
                     unCheckedChildren="关"
                   />
                 </Space>
+                {ragStatus?.processManaged && (
+                  <Button
+                    icon={<ReloadOutlined />}
+                    loading={restartingRag}
+                    onClick={() => handleRagRestart()}
+                  >
+                    重启 RAG 服务
+                  </Button>
+                )}
+                <Button
+                  danger={!!ragStatus?.dimensionMismatch}
+                  loading={rebuildingMilvus}
+                  disabled={!ragStatus?.serviceReachable}
+                  onClick={() => handleRagRebuildAndSync()}
+                >
+                  重建向量库并同步
+                </Button>
                 <Button
                   type="primary"
                   icon={<SyncOutlined />}
                   loading={syncing}
-                  disabled={!ragStatus?.embeddingServiceUrl}
+                  disabled={!ragStatus?.embeddingServiceUrl || !!ragStatus?.dimensionMismatch}
                   onClick={() => void handleRagSync()}
                 >
                   立即同步
@@ -628,6 +733,31 @@ const SystemPage: React.FC = () => {
                 {ragStatus.note}
               </Text>
             )}
+            {ragStatus?.dimensionMismatch && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="向量维度不一致"
+                description={
+                  <>
+                    当前嵌入模型为 {ragStatus.embedDim ?? '-'} 维，Milvus 集合为{' '}
+                    {ragStatus.collectionDim ?? '-'} 维，无法写入或检索向量。请点击上方
+                    <Text strong>「重建向量库并同步」</Text>
+                    修复（会清空 Milvus 向量并全量重算）。
+                  </>
+                }
+              />
+            )}
+            {ragStatus?.embedderError && !ragStatus?.dimensionMismatch && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="嵌入模型未就绪"
+                description={ragStatus.embedderError}
+              />
+            )}
             <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} style={{ marginBottom: 16 }}>
               <Descriptions.Item label="开关">
                 {ragStatus?.ragEnabled
@@ -642,13 +772,34 @@ const SystemPage: React.FC = () => {
               <Descriptions.Item label="句向量模型">
                 {ragStatus?.embedModel ? <Text code>{ragStatus.embedModel}</Text> : <Text type="secondary">-</Text>}
               </Descriptions.Item>
-              <Descriptions.Item label="向量维度">{ragStatus?.embedDim ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="模型向量维度">{ragStatus?.embedDim ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="Milvus 集合维度">
+                {ragStatus?.collectionDim != null ? (
+                  ragStatus.dimensionMismatch ? (
+                    <Text type="danger">{ragStatus.collectionDim}</Text>
+                  ) : (
+                    ragStatus.collectionDim
+                  )
+                ) : (
+                  '-'
+                )}
+              </Descriptions.Item>
               <Descriptions.Item label="Milvus 集合">{ragStatus?.collection || '-'}</Descriptions.Item>
               <Descriptions.Item label="RAG 服务">
                 {ragStatus?.serviceReachable
                   ? <Tag icon={<CheckCircleOutlined />} color="success">可达</Tag>
                   : <Tag icon={<CloseCircleOutlined />} color="warning">不可达或未配置</Tag>}
               </Descriptions.Item>
+              {ragStatus?.processManaged && (
+                <Descriptions.Item label="进程托管">
+                  <Space size={4}>
+                    <Tag color="blue">Go 托管</Tag>
+                    {ragStatus.processPid != null && ragStatus.processPid > 0 && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>PID {ragStatus.processPid}</Text>
+                    )}
+                  </Space>
+                </Descriptions.Item>
+              )}
               <Descriptions.Item label="同步周期（参考）">
                 {ragStatus?.syncIntervalSecondsHint != null ? `${ragStatus.syncIntervalSecondsHint}s` : '-'}
               </Descriptions.Item>
@@ -688,7 +839,10 @@ const SystemPage: React.FC = () => {
               )}
               {!ragStatus?.serviceReachable && (
                 <Text type="warning" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
-                  RAG 服务当前不可达，仍可保存配置到数据库；保存后请重启 rag_service 使配置生效。
+                  RAG 服务当前不可达，仍可保存配置到数据库；
+                  {ragStatus?.processManaged
+                    ? ' 可点击上方「重启 RAG 服务」由后端拉起进程。'
+                    : ' 保存后请重启 rag_service 使配置生效。'}
                 </Text>
               )}
               <Form
@@ -728,7 +882,7 @@ const SystemPage: React.FC = () => {
                       label={ragProvider === 'api' ? 'Embedding 模型名（API model）' : '句向量模型（HuggingFace id）'}
                       name="embed_model"
                       rules={[{ required: true, message: '请输入模型名' }]}
-                      extra="更换模型后请「立即同步」重建向量；若维度变化可能需重建 Milvus 集合"
+                      extra="更换模型后若维度变化，需「重建向量库并同步」"
                     >
                       <Input
                         disabled={ragFieldLocked('rag.embed_model')}
@@ -822,10 +976,14 @@ const SystemPage: React.FC = () => {
                     </Form.Item>
                   </Col>
                   <Col xs={24} md={12}>
-                    <Form.Item label="单次同步文章数上限" name="sync_batch">
+                    <Form.Item
+                      label="单次同步文章数上限"
+                      name="sync_batch"
+                      extra="重建向量库后可调大（最大 2000）以便一次同步全部文章"
+                    >
                       <InputNumber
                         min={1}
-                        max={500}
+                        max={2000}
                         style={{ width: '100%' }}
                         disabled={ragFieldLocked('rag.sync_batch')}
                       />

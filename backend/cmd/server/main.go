@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -16,6 +17,7 @@ import (
 	"opinion-analysis/src/api"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
 )
 
@@ -218,7 +220,25 @@ func main() {
 	ctx := context.Background()
 	go taggerSvc.Start(ctx)
 
-	r := api.NewRouter(db, logger, taggerSvc)
+	ragProc := ragprocess.NewManager()
+	if config.Cfg.RAG.Managed && config.Cfg.RAG.AutoStart {
+		go func() {
+			startCtx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+			defer cancel()
+			if err := ragProc.EnsureStarted(startCtx); err != nil {
+				log.Printf("[rag-process] auto_start: %v", err)
+			}
+		}()
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := ragProc.Stop(stopCtx); err != nil {
+			log.Printf("[rag-process] stop: %v", err)
+		}
+	}()
+
+	r := api.NewRouter(db, logger, taggerSvc, ragProc)
 
 	addr := fmt.Sprintf(":%s", config.Cfg.Server.Port)
 	logger.Info("server starting", zap.String("addr", addr))
