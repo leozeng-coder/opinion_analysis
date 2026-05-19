@@ -164,6 +164,13 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service) *gin.
 					middleware.Audit(db, "system_config", "update_tagger"),
 					adminSystemH.UpdateTagger)
 				admin.GET("/system/health", adminSystemH.Health)
+				admin.GET("/system/settings/history", adminSystemH.ListSettingHistory)
+				admin.DELETE("/system/settings/history/:id",
+					middleware.Audit(db, "system_config", "delete_setting_history"),
+					adminSystemH.DeleteSettingHistory)
+				admin.POST("/system/settings/history/:id/reapply",
+					middleware.Audit(db, "system_config", "reapply_setting_history"),
+					adminSystemH.ReapplySettingHistory)
 
 				admin.GET("/rag/status", adminRagH.Status)
 				admin.GET("/rag/runs", adminRagH.ListRuns)

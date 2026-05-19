@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 舆情 RAG：Milvus + MySQL 增量同步 + 混合检索（句向量 + 关键词）。
-向量化使用 Sentence-Transformers（与对话大模型无关）；正文按语义边界切块后分别嵌入。
+向量化支持本地 Sentence-Transformers 或 OpenAI 兼容 Embedding API（与对话大模型无关）。
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pymilvus import DataType, MilvusClient
-from sentence_transformers import SentenceTransformer
+from embedder import Embedder, create_embedder
 
 RAG_HOST = os.environ.get("RAG_HOST", "0.0.0.0")
 RAG_PORT = int(os.environ.get("RAG_PORT", "5055"))
@@ -118,18 +118,128 @@ log.info(
     _pw_src,
 )
 
-_model: SentenceTransformer | None = None
+_embedder: Embedder | None = None
 _client: MilvusClient | None = None
 _embed_dim: int = 0
 _sync_lock = threading.Lock()
+_config_lock = threading.Lock()
+
+EMBED_PROVIDER = os.environ.get("RAG_EMBED_PROVIDER", "local")
+EMBED_API_BASE = os.environ.get("RAG_EMBED_API_BASE", "")
+EMBED_API_KEY = os.environ.get("RAG_EMBED_API_KEY", "")
+
+# system_settings key -> (env var, default str)
+_RAG_SETTING_SPECS: Dict[str, Tuple[str, str]] = {
+    "rag.embed_provider": ("RAG_EMBED_PROVIDER", "local"),
+    "rag.embed_model": ("RAG_EMBED_MODEL", "paraphrase-multilingual-MiniLM-L12-v2"),
+    "rag.embed_api_base": ("RAG_EMBED_API_BASE", ""),
+    "rag.embed_api_key": ("RAG_EMBED_API_KEY", ""),
+    "rag.chunk_max_chars": ("RAG_CHUNK_MAX_CHARS", "420"),
+    "rag.chunk_overlap": ("RAG_CHUNK_OVERLAP", "72"),
+    "rag.sync_interval_sec": ("RAG_SYNC_INTERVAL_SEC", "120"),
+    "rag.sync_batch": ("RAG_SYNC_BATCH", "100"),
+}
 
 
-def get_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        log.info("loading sentence-transformers: %s", MODEL_NAME)
-        _model = SentenceTransformer(MODEL_NAME)
-    return _model
+def _read_system_setting(key: str, default: str = "") -> str:
+    try:
+        conn = mysql_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT `value` FROM system_settings WHERE `key` = %s LIMIT 1",
+                    (key,),
+                )
+                row = cur.fetchone()
+                if row and row.get("value") is not None:
+                    return str(row["value"]).strip()
+        finally:
+            conn.close()
+    except Exception as e:
+        log.debug("read setting %s: %s", key, e)
+    return default
+
+
+def _effective_setting(db_key: str) -> str:
+    env_key, default = _RAG_SETTING_SPECS[db_key]
+    if env_key in os.environ:
+        return str(os.environ[env_key]).strip()
+    return _read_system_setting(db_key, default)
+
+
+def refresh_runtime_settings() -> None:
+    """从 DB / 环境变量刷新可调运行时参数（启动与后台保存后调用）。"""
+    global MODEL_NAME, EMBED_PROVIDER, EMBED_API_BASE, EMBED_API_KEY
+    global CHUNK_MAX_CHARS, CHUNK_OVERLAP, SYNC_INTERVAL_SEC, BATCH_LIMIT
+    with _config_lock:
+        EMBED_PROVIDER = (_effective_setting("rag.embed_provider") or "local").strip().lower()
+        MODEL_NAME = _effective_setting("rag.embed_model")
+        EMBED_API_BASE = _effective_setting("rag.embed_api_base")
+        if "RAG_EMBED_API_KEY" in os.environ:
+            EMBED_API_KEY = os.environ["RAG_EMBED_API_KEY"]
+        else:
+            EMBED_API_KEY = _read_system_setting("rag.embed_api_key", "")
+        CHUNK_MAX_CHARS = max(128, int(_effective_setting("rag.chunk_max_chars") or "420"))
+        CHUNK_OVERLAP = max(0, min(CHUNK_MAX_CHARS // 2, int(_effective_setting("rag.chunk_overlap") or "72")))
+        SYNC_INTERVAL_SEC = max(30, int(_effective_setting("rag.sync_interval_sec") or "120"))
+        BATCH_LIMIT = max(1, min(500, int(_effective_setting("rag.sync_batch") or "100")))
+
+
+def _embedder_fingerprint() -> str:
+    return f"{EMBED_PROVIDER}|{MODEL_NAME}|{EMBED_API_BASE}|{bool(EMBED_API_KEY)}"
+
+
+def _reload_embedder_if_needed() -> List[str]:
+    """嵌入配置变更时卸载缓存，下次 encode 时重载。返回 warning 列表。"""
+    global _embedder, _embed_dim
+    warnings: List[str] = []
+    old_dim = _embed_dim if _embed_dim > 0 else None
+    fp = _embedder_fingerprint()
+    with _config_lock:
+        if _embedder is not None and getattr(_embedder, "_rag_fingerprint", None) == fp:
+            return warnings
+        _embedder = None
+        _embed_dim = 0
+    try:
+        emb = get_embedder()
+        emb._rag_fingerprint = fp  # type: ignore[attr-defined]
+        new_dim = get_embed_dim()
+        if old_dim is not None and new_dim != old_dim:
+            warnings.append(
+                f"向量维度 {old_dim} → {new_dim}，若检索异常请重建 Milvus 集合并重新同步"
+            )
+    except Exception as e:
+        warnings.append(f"加载嵌入模型失败: {e}")
+    return warnings
+
+
+def get_embedder() -> Embedder:
+    global _embedder
+    refresh_runtime_settings()
+    fp = _embedder_fingerprint()
+    if _embedder is None or getattr(_embedder, "_rag_fingerprint", None) != fp:
+        log.info(
+            "loading embedder provider=%s model=%s base=%s",
+            EMBED_PROVIDER,
+            MODEL_NAME,
+            EMBED_API_BASE or "(local)",
+        )
+        _embedder = create_embedder(EMBED_PROVIDER, MODEL_NAME, EMBED_API_BASE, EMBED_API_KEY)
+        try:
+            _embedder._rag_fingerprint = fp  # type: ignore[attr-defined]
+        except Exception:
+            pass
+    return _embedder
+
+
+def encode_embeddings(texts: List[str]) -> List[List[float]]:
+    if not texts:
+        return []
+    return get_embedder().encode(texts, normalize=True)
+
+
+def encode_query(text: str) -> List[float]:
+    return encode_embeddings([text])[0]
 
 
 def get_embed_dim() -> int:
@@ -137,12 +247,7 @@ def get_embed_dim() -> int:
     if _embed_dim <= 0:
         d = EMBED_DIM_ENV
         if d <= 0:
-            m = get_model()
-            d = int(
-                m.get_embedding_dimension()
-                if hasattr(m, "get_embedding_dimension")
-                else m.get_sentence_embedding_dimension()
-            )
+            d = int(get_embedder().dimension())
         _embed_dim = d
     return _embed_dim
 
@@ -164,8 +269,12 @@ def build_full_embed_text(title: str, content: str) -> str:
     return (t + "\n" + c).strip() if c else t
 
 
-def semantic_chunks(text: str, max_chars: int = CHUNK_MAX_CHARS, overlap: int = CHUNK_OVERLAP) -> List[str]:
+def semantic_chunks(text: str, max_chars: int | None = None, overlap: int | None = None) -> List[str]:
     """按字符窗口切块，优先在换行、中文标点处断开；块间带重叠利于跨句检索。"""
+    if max_chars is None:
+        max_chars = CHUNK_MAX_CHARS
+    if overlap is None:
+        overlap = CHUNK_OVERLAP
     t = (text or "").strip()
     if not t:
         return []
@@ -247,7 +356,6 @@ def delete_chunks_for_article(client: MilvusClient, article_id: int) -> None:
 
 def upsert_article_chunks(
     client: MilvusClient,
-    model: SentenceTransformer,
     article_id: int,
     title: str,
     content: str,
@@ -259,10 +367,11 @@ def upsert_article_chunks(
         delete_chunks_for_article(client, article_id)
         return 0
 
+    embed_inputs = [embed_chunk_text(title, piece) for piece in pieces]
+    vecs = encode_embeddings(embed_inputs)
+
     rows: List[Dict[str, Any]] = []
-    for i, piece in enumerate(pieces):
-        et = embed_chunk_text(title, piece)
-        vec = model.encode(et, normalize_embeddings=True, show_progress_bar=False).tolist()
+    for i, (piece, vec) in enumerate(zip(pieces, vecs)):
         h = sha256_text(piece)[:12]
         pk = f"{int(article_id)}:{i}:{h}"
         if len(pk) > 96:
@@ -369,7 +478,6 @@ def incremental_sync(sync_log_id: Optional[int] = None, mode: Optional[str] = No
 
 def _incremental_sync_impl(sync_log_id: Optional[int], mode: Optional[str]) -> Dict[str, Any]:
     client = ensure_milvus_client()
-    model = get_model()
     conn = mysql_conn()
     processed = 0
     upserted = 0
@@ -424,7 +532,6 @@ def _incremental_sync_impl(sync_log_id: Optional[int], mode: Optional[str]) -> D
             aid = int(row["id"])
             n_chunks = upsert_article_chunks(
                 client,
-                model,
                 aid,
                 str(row.get("title") or ""),
                 str(row.get("content") or ""),
@@ -521,11 +628,8 @@ def distance_to_sim(d: float) -> float:
 
 def hybrid_search(query: str, top_k: int) -> List[Dict[str, Any]]:
     client = ensure_milvus_client()
-    model = get_model()
     kw_ids = set(keyword_candidate_ids(query))
-    qvec = model.encode(
-        query, normalize_embeddings=True, show_progress_bar=False
-    ).tolist()
+    qvec = encode_query(query.strip())
 
     lim = min(40, max(top_k * 5, top_k))
     raw = client.search(
@@ -629,6 +733,17 @@ class SyncRequest(BaseModel):
 app = FastAPI(title="Opinion RAG", version="1.0.0")
 
 
+def _reschedule_sync_job() -> None:
+    sched = getattr(app.state, "scheduler", None)
+    if sched is None:
+        return
+    try:
+        sched.reschedule_job("sync", trigger="interval", seconds=SYNC_INTERVAL_SEC)
+        log.info("rescheduled sync job interval=%ss", SYNC_INTERVAL_SEC)
+    except Exception as e:
+        log.warning("reschedule sync job: %s", e)
+
+
 def _is_sync_enabled() -> bool:
     """检查 system_settings 表中 rag.sync_enabled 是否为 true（默认 true）。"""
     try:
@@ -686,6 +801,7 @@ def _run_sync_background(
 
 @app.on_event("startup")
 def _startup() -> None:
+    refresh_runtime_settings()
     ensure_milvus_client()
     sched = BackgroundScheduler()
     sched.add_job(
@@ -710,9 +826,16 @@ def _startup() -> None:
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    dim = get_embed_dim() if _model is not None else (EMBED_DIM_ENV or 384)
+    refresh_runtime_settings()
+    dim = EMBED_DIM_ENV or 384
+    if _embedder is not None:
+        try:
+            dim = get_embed_dim()
+        except Exception:
+            pass
     return {
         "status": "ok",
+        "embed_provider": EMBED_PROVIDER,
         "embed_model": MODEL_NAME,
         "embed_dimension": float(dim),
         "milvus_uri": MILVUS_URI,
@@ -744,42 +867,28 @@ def sync_now(background_tasks: BackgroundTasks, body: SyncRequest = SyncRequest(
     return incremental_sync(sync_log_id=body.sync_log_id, mode="manual")
 
 
-class RagConfigRequest(BaseModel):
-    sync_enabled: Optional[bool] = None
-
-
-@app.get("/v1/rag-config")
-def get_rag_config() -> Dict[str, Any]:
-    """读取向量同步相关的 system_settings 配置。"""
-    enabled = _is_sync_enabled()
-    return {"sync_enabled": enabled}
-
-
-@app.put("/v1/rag-config")
-def update_rag_config(body: RagConfigRequest) -> Dict[str, Any]:
-    """写入/更新 system_settings 中的向量同步开关。"""
-    if body.sync_enabled is None:
-        return {"ok": True, "message": "no change"}
-    val = "true" if body.sync_enabled else "false"
-    try:
-        conn = mysql_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO system_settings (`key`, `value`, `desc`, updated_at)
-                    VALUES ('rag.sync_enabled', %s, 'RAG 向量同步定时任务是否启用', UTC_TIMESTAMP())
-                    ON DUPLICATE KEY UPDATE `value` = %s, updated_at = UTC_TIMESTAMP()
-                    """,
-                    (val, val),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    log.info("rag.sync_enabled set to %s", val)
-    return {"ok": True, "sync_enabled": body.sync_enabled}
+@app.post("/v1/rag-config/reload")
+def reload_rag_config() -> Dict[str, Any]:
+    """从 system_settings 重新加载配置并热更新（持久化与历史由 Go 后端负责）。"""
+    refresh_runtime_settings()
+    warnings = _reload_embedder_if_needed()
+    _reschedule_sync_job()
+    out: Dict[str, Any] = {
+        "ok": True,
+        "embed_provider": EMBED_PROVIDER,
+        "embed_model": MODEL_NAME,
+        "sync_interval_sec": SYNC_INTERVAL_SEC,
+        "sync_batch": BATCH_LIMIT,
+    }
+    if warnings:
+        out["warnings"] = warnings
+    log.info(
+        "rag config reloaded provider=%s model=%s interval=%ss",
+        EMBED_PROVIDER,
+        MODEL_NAME,
+        SYNC_INTERVAL_SEC,
+    )
+    return out
 
 
 @app.get("/v1/articles")

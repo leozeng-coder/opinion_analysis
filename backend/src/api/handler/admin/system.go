@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,10 +18,12 @@ import (
 )
 
 type SystemHandler struct {
-	db         *gorm.DB
-	taggerSvc  *tagger.Service
-	articles   *repository.ArticleRepository
-	crawler    *repository.CrawlerRepository
+	db        *gorm.DB
+	taggerSvc *tagger.Service
+	articles  *repository.ArticleRepository
+	crawler   *repository.CrawlerRepository
+	system    *repository.SystemRepository
+	rag       *repository.RAGRepository
 }
 
 func NewSystemHandler(db *gorm.DB, store *repository.Store, taggerSvc *tagger.Service) *SystemHandler {
@@ -28,6 +32,8 @@ func NewSystemHandler(db *gorm.DB, store *repository.Store, taggerSvc *tagger.Se
 		taggerSvc: taggerSvc,
 		articles:  store.Article,
 		crawler:   store.Crawler,
+		system:    store.System,
+		rag:       store.RAG,
 	}
 }
 
@@ -118,8 +124,10 @@ func (h *SystemHandler) UpdateTagger(c *gin.Context) {
 
 	uid, _ := c.Get("userID")
 	cu, _ := uid.(uint)
+	uname, _ := c.Get("username")
+	actorName, _ := uname.(string)
 
-	if err := tagger.SaveConfig(h.db, merged, cu); err != nil {
+	if err := tagger.SaveConfig(h.db, merged, cu, actorName); err != nil {
 		response.Fail(c, 500, "持久化失败: "+err.Error())
 		return
 	}
@@ -213,4 +221,140 @@ func (h *SystemHandler) Health(c *gin.Context) {
 	out["timestamp"] = time.Now()
 
 	response.OK(c, out)
+}
+
+// ListSettingHistory GET /api/admin/system/settings/history — 配置快照列表（domain=rag|tagger）。
+func (h *SystemHandler) ListSettingHistory(c *gin.Context) {
+	domain := strings.TrimSpace(c.Query("domain"))
+	if domain == "" {
+		prefix := strings.TrimSpace(c.Query("prefix"))
+		switch {
+		case strings.HasPrefix(prefix, "rag"):
+			domain = "rag"
+		case strings.HasPrefix(prefix, "tagger"):
+			domain = "tagger"
+		}
+	}
+	if domain != "rag" && domain != "tagger" {
+		response.Fail(c, 400, "domain 必须是 rag 或 tagger")
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	list, total, err := h.system.ListConfigSnapshots(domain, page, pageSize)
+	if err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.OK(c, gin.H{
+		"list":  list,
+		"total": total,
+		"page":  page,
+	})
+}
+
+// DeleteSettingHistory DELETE /api/admin/system/settings/history/:id
+func (h *SystemHandler) DeleteSettingHistory(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Fail(c, 400, "invalid id")
+		return
+	}
+	if _, err := h.system.GetConfigSnapshotByID(uint(id)); err != nil {
+		if repository.IsNotFound(err) {
+			response.Fail(c, 404, "历史记录不存在")
+			return
+		}
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	if err := h.system.DeleteConfigSnapshot(uint(id)); err != nil {
+		response.Fail(c, 500, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"ok": true, "message": "已删除"})
+}
+
+// ReapplySettingHistory POST /api/admin/system/settings/history/:id/reapply — 应用整条配置快照。
+func (h *SystemHandler) ReapplySettingHistory(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Fail(c, 400, "invalid id")
+		return
+	}
+	row, err := h.system.GetConfigSnapshotByID(uint(id))
+	if err != nil {
+		if repository.IsNotFound(err) {
+			response.Fail(c, 404, "历史记录不存在")
+			return
+		}
+		response.Fail(c, 500, err.Error())
+		return
+	}
+
+	var cu uint
+	if uid, ok := c.Get("userID"); ok {
+		if idu, ok := uid.(uint); ok {
+			cu = idu
+		}
+	}
+	actorName := ""
+	if uname, ok := c.Get("username"); ok {
+		if name, ok := uname.(string); ok {
+			actorName = name
+		}
+	}
+
+	var warn string
+	var pyWarnings []string
+
+	switch row.Domain {
+	case "rag":
+		payload, err := repository.ParseRagSnapshotPayload(row.Payload)
+		if err != nil {
+			response.Fail(c, 400, "快照数据无效")
+			return
+		}
+		if err := h.rag.SaveRagConfig(payload.ToRagConfigData(), cu, actorName); err != nil {
+			response.Fail(c, 500, "应用失败: "+err.Error())
+			return
+		}
+		_, warn, pyWarnings = reloadRagService(c)
+	case "tagger":
+		if h.taggerSvc == nil {
+			response.Fail(c, 500, "tagger 服务不可用")
+			return
+		}
+		payload, err := repository.ParseTaggerSnapshotPayload(row.Payload)
+		if err != nil {
+			response.Fail(c, 400, "快照数据无效")
+			return
+		}
+		cfg := payload.ToTaggerConfig()
+		if err := tagger.SaveConfig(h.db, cfg, cu, actorName); err != nil {
+			response.Fail(c, 500, "持久化失败: "+err.Error())
+			return
+		}
+		h.taggerSvc.UpdateConfig(cfg)
+		if config.Cfg != nil {
+			config.Cfg.Tagger = cfg
+		}
+	default:
+		response.Fail(c, 400, fmt.Sprintf("不支持的配置域: %s", row.Domain))
+		return
+	}
+
+	if len(pyWarnings) > 0 {
+		warn = strings.Join(pyWarnings, "；")
+	}
+	msg := "已应用该条历史配置"
+	if warn != "" {
+		msg += "；" + warn
+	}
+	response.OK(c, gin.H{
+		"ok":      true,
+		"message": msg,
+		"domain":  row.Domain,
+		"warning": warn,
+	})
 }

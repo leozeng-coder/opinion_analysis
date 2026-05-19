@@ -8,7 +8,9 @@ import {
   Form,
   Input,
   InputNumber,
+  Popconfirm,
   Row,
+  Select,
   Space,
   Spin,
   Statistic,
@@ -32,12 +34,17 @@ import {
 import { adminRagApi } from '@/api/admin-rag'
 import { adminSystemApi } from '@/api/admin-system'
 import type {
+  RagConfig,
   RagStatus,
   RagSyncLog,
   SystemConfigResponse,
   SystemHealth,
+  ConfigSnapshot,
+  RagSnapshotConfig,
+  TaggerSnapshotConfig,
   TaggerConfig,
   UpdateTaggerPayload,
+  UpdateRagConfigPayload,
 } from '@/types'
 import dayjs from 'dayjs'
 
@@ -62,6 +69,31 @@ interface FormValues {
   maxPerTick: number
 }
 
+const EMBED_API_PRESETS = [
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small' },
+  { label: 'Jina', baseUrl: 'https://api.jina.ai/v1', model: 'jina-embeddings-v3' },
+  { label: '百炼/Qwen', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'text-embedding-v3' },
+  { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-embedding' },
+]
+
+interface RagFormValues {
+  embed_provider: 'local' | 'api'
+  embed_model: string
+  embed_api_base: string
+  embed_api_key: string
+  chunk_max_chars: number
+  chunk_overlap: number
+  sync_interval_sec: number
+  sync_batch: number
+}
+
+const EMBED_PRESETS = [
+  { label: '多语言 MiniLM（默认）', model: 'paraphrase-multilingual-MiniLM-L12-v2' },
+  { label: 'BGE 中文 small', model: 'BAAI/bge-small-zh-v1.5' },
+  { label: 'BGE 中文 base', model: 'BAAI/bge-base-zh-v1.5' },
+  { label: 'M3E base', model: 'moka-ai/m3e-base' },
+]
+
 const SystemPage: React.FC = () => {
   const [health, setHealth] = useState<SystemHealth | null>(null)
   const [cfg, setCfg] = useState<SystemConfigResponse | null>(null)
@@ -75,7 +107,169 @@ const SystemPage: React.FC = () => {
   const [syncing, setSyncing] = useState(false)
   const [ragSyncEnabled, setRagSyncEnabled] = useState<boolean>(true)
   const [syncToggling, setSyncToggling] = useState(false)
+  const [ragSaving, setRagSaving] = useState(false)
+  const [ragEnvLocks, setRagEnvLocks] = useState<string[]>([])
+  const [ragApiKeySet, setRagApiKeySet] = useState(false)
+  const [ragHistory, setRagHistory] = useState<ConfigSnapshot[]>([])
+  const [ragHistTotal, setRagHistTotal] = useState(0)
+  const [ragHistPage, setRagHistPage] = useState(1)
+  const [taggerHistory, setTaggerHistory] = useState<ConfigSnapshot[]>([])
+  const [taggerHistTotal, setTaggerHistTotal] = useState(0)
+  const [taggerHistPage, setTaggerHistPage] = useState(1)
   const [form] = Form.useForm<FormValues>()
+  const [ragForm] = Form.useForm<RagFormValues>()
+  const ragProvider = Form.useWatch('embed_provider', ragForm) ?? 'local'
+
+  const loadRagHistory = useCallback(async (page: number) => {
+    const r = await adminSystemApi.settingHistory({ domain: 'rag', page, pageSize: 8 })
+    setRagHistory(r.list)
+    setRagHistTotal(r.total)
+    setRagHistPage(page)
+  }, [])
+
+  const loadTaggerHistory = useCallback(async (page: number) => {
+    const r = await adminSystemApi.settingHistory({ domain: 'tagger', page, pageSize: 8 })
+    setTaggerHistory(r.list)
+    setTaggerHistTotal(r.total)
+    setTaggerHistPage(page)
+  }, [])
+
+  const refreshRagConfigForm = useCallback(async () => {
+    const cfg2 = await adminRagApi.getConfig().catch(() => null)
+    if (cfg2 != null) {
+      setRagSyncEnabled(cfg2.sync_enabled)
+      setRagEnvLocks(cfg2.env_overrides ?? [])
+      setRagApiKeySet(cfg2.api_key_set ?? false)
+      ragForm.setFieldsValue({
+        embed_provider: (cfg2.embed_provider === 'api' ? 'api' : 'local') as 'local' | 'api',
+        embed_model: cfg2.embed_model,
+        embed_api_base: cfg2.embed_api_base ?? '',
+        embed_api_key: '',
+        chunk_max_chars: cfg2.chunk_max_chars,
+        chunk_overlap: cfg2.chunk_overlap,
+        sync_interval_sec: cfg2.sync_interval_sec,
+        sync_batch: cfg2.sync_batch,
+      })
+    }
+  }, [ragForm])
+
+  const handleDeleteHistory = async (id: number, reload: () => Promise<void>) => {
+    try {
+      await adminSystemApi.deleteSettingHistory(id)
+      message.success('已删除历史记录')
+      await reload()
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const handleReapplyHistory = async (id: number, kind: 'rag' | 'tagger') => {
+    try {
+      const resp = await adminSystemApi.reapplySettingHistory(id)
+      if (resp.warning) {
+        message.warning(resp.message)
+      } else {
+        message.success(resp.message)
+      }
+      if (kind === 'rag') {
+        await Promise.all([loadRagHistory(ragHistPage), refreshRagConfigForm()])
+        void adminRagApi.status().then(setRagStatus).catch(() => undefined)
+      } else {
+        await loadTaggerHistory(taggerHistPage)
+        const c = await adminSystemApi.config()
+        setCfg(c)
+        if (c?.tagger) applyToForm(c.tagger)
+        void adminSystemApi.health().then(setHealth)
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  const historyActionColumn = (kind: 'rag' | 'tagger', reload: () => Promise<void>) => ({
+    title: '操作',
+    key: 'actions',
+    width: 100,
+    fixed: 'right' as const,
+    render: (_: unknown, row: ConfigSnapshot) => (
+      <Space size={4} wrap>
+        <Button type="link" size="small" onClick={() => void handleReapplyHistory(row.id, kind)}>
+          应用
+        </Button>
+        <Popconfirm
+          title="确定删除这条历史记录？"
+          onConfirm={() => void handleDeleteHistory(row.id, reload)}
+        >
+          <Button type="link" size="small" danger>
+            删除
+          </Button>
+        </Popconfirm>
+      </Space>
+    ),
+  })
+
+  const ragSnapshotColumns = [
+    {
+      title: '嵌入来源',
+      width: 100,
+      render: (_: unknown, row: ConfigSnapshot) => {
+        const c = row.config as RagSnapshotConfig
+        return c.embed_provider === 'api'
+          ? <Tag color="purple">API</Tag>
+          : <Tag color="blue">本地</Tag>
+      },
+    },
+    { title: '模型', width: 160, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_model || '-' },
+    { title: 'API URL', width: 200, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_api_base || '-' },
+    { title: 'API Key', width: 120, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_api_key || '-' },
+    { title: '切块', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).chunk_max_chars },
+    { title: '重叠', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).chunk_overlap },
+    { title: '同步间隔', width: 88, render: (_: unknown, row: ConfigSnapshot) => `${(row.config as RagSnapshotConfig).sync_interval_sec}s` },
+    { title: '批量', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).sync_batch },
+    {
+      title: '定时同步',
+      width: 88,
+      render: (_: unknown, row: ConfigSnapshot) => (
+        (row.config as RagSnapshotConfig).sync_enabled
+          ? <Tag color="success">开</Tag>
+          : <Tag>关</Tag>
+      ),
+    },
+    { title: '操作者', width: 88, dataIndex: 'updatedByName', render: (v: string) => v || '-' },
+    {
+      title: '时间',
+      width: 128,
+      dataIndex: 'createdAt',
+      render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss'),
+    },
+    historyActionColumn('rag', () => loadRagHistory(ragHistPage)),
+  ]
+
+  const taggerSnapshotColumns = [
+    {
+      title: '启用',
+      width: 72,
+      render: (_: unknown, row: ConfigSnapshot) => (
+        (row.config as TaggerSnapshotConfig).enabled
+          ? <Tag color="success">是</Tag>
+          : <Tag>否</Tag>
+      ),
+    },
+    { title: '模型', width: 140, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_model || '-' },
+    { title: 'API URL', width: 200, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_base_url || '-' },
+    { title: 'API Key', width: 120, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_api_key || '-' },
+    { title: '轮询间隔', width: 88, render: (_: unknown, row: ConfigSnapshot) => `${(row.config as TaggerSnapshotConfig).interval_seconds}s` },
+    { title: '批次', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).batch_size },
+    { title: '上限', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).max_per_tick },
+    { title: '操作者', width: 88, dataIndex: 'updatedByName', render: (v: string) => v || '-' },
+    {
+      title: '时间',
+      width: 128,
+      dataIndex: 'createdAt',
+      render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss'),
+    },
+    historyActionColumn('tagger', () => loadTaggerHistory(taggerHistPage)),
+  ]
 
   const loadRagRuns = useCallback(async (page: number) => {
     setRagLoading(true)
@@ -113,17 +307,30 @@ const SystemPage: React.FC = () => {
       setCfg(c)
       if (c?.tagger) applyToForm(c.tagger)
       setRagStatus(rs as RagStatus | null)
-      if ((rs as RagStatus | null)?.serviceReachable) {
-        const cfg2 = await adminRagApi.getConfig().catch(() => null)
-        if (cfg2 != null) setRagSyncEnabled(cfg2.sync_enabled)
+      const cfg2 = await adminRagApi.getConfig().catch(() => null)
+      if (cfg2 != null) {
+        setRagSyncEnabled(cfg2.sync_enabled)
+        setRagEnvLocks(cfg2.env_overrides ?? [])
+        setRagApiKeySet(cfg2.api_key_set ?? false)
+        ragForm.setFieldsValue({
+          embed_provider: (cfg2.embed_provider === 'api' ? 'api' : 'local') as 'local' | 'api',
+          embed_model: cfg2.embed_model,
+          embed_api_base: cfg2.embed_api_base ?? '',
+          embed_api_key: '',
+          chunk_max_chars: cfg2.chunk_max_chars,
+          chunk_overlap: cfg2.chunk_overlap,
+          sync_interval_sec: cfg2.sync_interval_sec,
+          sync_batch: cfg2.sync_batch,
+        })
       } else if ((rs as RagStatus | null)?.syncEnabled != null) {
         setRagSyncEnabled((rs as RagStatus).syncEnabled!)
       }
       await loadRagRuns(1)
+      await Promise.all([loadRagHistory(1), loadTaggerHistory(1)])
     } finally {
       setLoading(false)
     }
-  }, [applyToForm, loadRagRuns])
+  }, [applyToForm, loadRagHistory, loadRagRuns, loadTaggerHistory, ragForm])
 
   useEffect(() => { void fetchAll() }, [fetchAll])
 
@@ -168,6 +375,7 @@ const SystemPage: React.FC = () => {
       if (resp?.tagger) applyToForm(resp.tagger)
       message.success('已保存，后台任务下一轮 tick 生效')
       void adminSystemApi.health().then(setHealth)
+      void loadTaggerHistory(1)
     } catch (e) {
       console.error(e)
     } finally {
@@ -196,6 +404,53 @@ const SystemPage: React.FC = () => {
       setRagStatus(rs as RagStatus | null)
     } finally {
       setSyncing(false)
+    }
+  }
+
+  const ragFieldLocked = (dbKey: string) => ragEnvLocks.includes(dbKey)
+
+  const ragApiKeyHint = ragApiKeySet
+    ? '已配置，留空则保留当前值'
+    : '使用第三方 API 时必须填写'
+
+  const handleSaveRagEmbed = async (values: RagFormValues) => {
+    setRagSaving(true)
+    try {
+      const payload: UpdateRagConfigPayload = {
+        embed_provider: values.embed_provider,
+        embed_model: values.embed_model.trim(),
+        chunk_max_chars: values.chunk_max_chars,
+        chunk_overlap: values.chunk_overlap,
+        sync_interval_sec: values.sync_interval_sec,
+        sync_batch: values.sync_batch,
+      }
+      if (values.embed_provider === 'api') {
+        payload.embed_api_base = (values.embed_api_base ?? '').trim()
+      }
+      const keyTrimmed = (values.embed_api_key ?? '').trim()
+      if (keyTrimmed) payload.embed_api_key = keyTrimmed
+
+      const resp = await adminRagApi.updateConfig(payload)
+      setRagEnvLocks(resp.env_overrides ?? [])
+      setRagApiKeySet(resp.api_key_set ?? ragApiKeySet)
+      ragForm.setFieldValue('embed_api_key', '')
+      if (resp.warnings?.length) {
+        message.warning(resp.warnings.join('；'))
+      } else if (resp.warning) {
+        message.warning(resp.warning)
+      } else if (resp.service_applied === false) {
+        message.success('配置已保存到数据库，请重启 RAG 服务后生效')
+      } else {
+        message.success('Embedding 配置已保存（换模型后建议立即同步）')
+      }
+      const rs = await adminRagApi.status().catch(() => null)
+      setRagStatus(rs as RagStatus | null)
+      void loadRagHistory(1)
+    } catch (e) {
+      console.error(e)
+      message.error('保存失败')
+    } finally {
+      setRagSaving(false)
     }
   }
 
@@ -348,7 +603,6 @@ const SystemPage: React.FC = () => {
                     size="small"
                     checked={ragSyncEnabled}
                     loading={syncToggling}
-                    disabled={!ragStatus?.serviceReachable}
                     onChange={(v) => void handleRagSyncToggle(v)}
                     checkedChildren="开"
                     unCheckedChildren="关"
@@ -380,7 +634,12 @@ const SystemPage: React.FC = () => {
                   ? <Tag color="blue">已启用检索</Tag>
                   : <Tag>未启用</Tag>}
               </Descriptions.Item>
-              <Descriptions.Item label="句向量模型（非对话 LLM）">
+              <Descriptions.Item label="句向量来源">
+                {ragStatus?.embedProvider === 'api'
+                  ? <Tag color="purple">第三方 API</Tag>
+                  : <Tag color="blue">本地模型</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="句向量模型">
                 {ragStatus?.embedModel ? <Text code>{ragStatus.embedModel}</Text> : <Text type="secondary">-</Text>}
               </Descriptions.Item>
               <Descriptions.Item label="向量维度">{ragStatus?.embedDim ?? '-'}</Descriptions.Item>
@@ -404,6 +663,194 @@ const SystemPage: React.FC = () => {
                 </Descriptions.Item>
               )}
             </Descriptions>
+
+            <Card
+              size="small"
+              type="inner"
+              title="Embedding 配置（句向量模型，非对话 LLM）"
+              style={{ marginBottom: 16 }}
+              extra={
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<SaveOutlined />}
+                  loading={ragSaving}
+                  onClick={() => ragForm.submit()}
+                >
+                  保存
+                </Button>
+              }
+            >
+              {ragEnvLocks.length > 0 && (
+                <Text type="warning" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
+                  以下项被 RAG 进程环境变量锁定，后台修改无效：{ragEnvLocks.join('、')}
+                </Text>
+              )}
+              {!ragStatus?.serviceReachable && (
+                <Text type="warning" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
+                  RAG 服务当前不可达，仍可保存配置到数据库；保存后请重启 rag_service 使配置生效。
+                </Text>
+              )}
+              <Form
+                form={ragForm}
+                layout="vertical"
+                onFinish={(v) => void handleSaveRagEmbed(v)}
+                initialValues={{
+                  embed_provider: 'local',
+                  embed_model: 'paraphrase-multilingual-MiniLM-L12-v2',
+                  embed_api_base: '',
+                  embed_api_key: '',
+                  chunk_max_chars: 420,
+                  chunk_overlap: 72,
+                  sync_interval_sec: 120,
+                  sync_batch: 100,
+                }}
+              >
+                <Row gutter={16}>
+                  <Col xs={24} md={8}>
+                    <Form.Item
+                      label="嵌入来源"
+                      name="embed_provider"
+                      rules={[{ required: true }]}
+                      extra="local=本地 Sentence-Transformers；api=OpenAI 兼容 Embedding API"
+                    >
+                      <Select
+                        disabled={ragFieldLocked('rag.embed_provider')}
+                        options={[
+                          { value: 'local', label: '本地模型（Sentence-Transformers）' },
+                          { value: 'api', label: '第三方 API（OpenAI 兼容）' },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={16}>
+                    <Form.Item
+                      label={ragProvider === 'api' ? 'Embedding 模型名（API model）' : '句向量模型（HuggingFace id）'}
+                      name="embed_model"
+                      rules={[{ required: true, message: '请输入模型名' }]}
+                      extra="更换模型后请「立即同步」重建向量；若维度变化可能需重建 Milvus 集合"
+                    >
+                      <Input
+                        disabled={ragFieldLocked('rag.embed_model')}
+                        placeholder={ragProvider === 'api' ? 'text-embedding-3-small' : 'paraphrase-multilingual-MiniLM-L12-v2'}
+                      />
+                    </Form.Item>
+                  </Col>
+                  {ragProvider === 'local' && (
+                    <Col xs={24}>
+                      <Space wrap style={{ marginBottom: 16 }}>
+                        {EMBED_PRESETS.map((p) => (
+                          <Button
+                            key={p.model}
+                            size="small"
+                            disabled={ragFieldLocked('rag.embed_model')}
+                            onClick={() => ragForm.setFieldValue('embed_model', p.model)}
+                          >
+                            {p.label}
+                          </Button>
+                        ))}
+                      </Space>
+                    </Col>
+                  )}
+                  {ragProvider === 'api' && (
+                    <>
+                      <Col xs={24} md={14}>
+                        <Form.Item
+                          label="Embedding API Base URL"
+                          name="embed_api_base"
+                          rules={[{ required: true, message: '请输入 API Base URL' }]}
+                        >
+                          <Input
+                            disabled={ragFieldLocked('rag.embed_api_base')}
+                            placeholder="https://api.openai.com/v1"
+                          />
+                        </Form.Item>
+                        <Space wrap style={{ marginBottom: 16 }}>
+                          {EMBED_API_PRESETS.map((p) => (
+                            <Button
+                              key={p.label}
+                              size="small"
+                              disabled={ragFieldLocked('rag.embed_api_base')}
+                              onClick={() => ragForm.setFieldsValue({ embed_api_base: p.baseUrl, embed_model: p.model })}
+                            >
+                              {p.label}
+                            </Button>
+                          ))}
+                        </Space>
+                      </Col>
+                      <Col xs={24} md={10}>
+                        <Form.Item
+                          label="Embedding API Key"
+                          name="embed_api_key"
+                          extra={ragApiKeyHint}
+                        >
+                          <Input.Password
+                            disabled={ragFieldLocked('rag.embed_api_key')}
+                            autoComplete="new-password"
+                            placeholder={ragApiKeySet ? '留空则保留当前值' : 'sk-...'}
+                          />
+                        </Form.Item>
+                      </Col>
+                    </>
+                  )}
+                  <Col xs={24} md={10}>
+                    <Form.Item label="切块最大字符" name="chunk_max_chars">
+                      <InputNumber
+                        min={128}
+                        max={2000}
+                        style={{ width: '100%' }}
+                        disabled={ragFieldLocked('rag.chunk_max_chars')}
+                      />
+                    </Form.Item>
+                    <Form.Item label="切块重叠字符" name="chunk_overlap">
+                      <InputNumber
+                        min={0}
+                        max={500}
+                        style={{ width: '100%' }}
+                        disabled={ragFieldLocked('rag.chunk_overlap')}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="定时同步间隔（秒）" name="sync_interval_sec">
+                      <InputNumber
+                        min={30}
+                        max={86400}
+                        style={{ width: '100%' }}
+                        disabled={ragFieldLocked('rag.sync_interval_sec')}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item label="单次同步文章数上限" name="sync_batch">
+                      <InputNumber
+                        min={1}
+                        max={500}
+                        style={{ width: '100%' }}
+                        disabled={ragFieldLocked('rag.sync_batch')}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Form>
+
+              <Table<ConfigSnapshot>
+                size="small"
+                title={() => <Text type="secondary" style={{ fontSize: 12 }}>Embedding 配置变更历史（每次保存一条完整快照）</Text>}
+                rowKey="id"
+                style={{ marginBottom: 16 }}
+                scroll={{ x: 1400 }}
+                dataSource={ragHistory}
+                pagination={{
+                  current: ragHistPage,
+                  total: ragHistTotal,
+                  pageSize: 8,
+                  showSizeChanger: false,
+                  onChange: (p) => void loadRagHistory(p),
+                }}
+                columns={ragSnapshotColumns}
+              />
+            </Card>
 
             <Table<RagSyncLog>
               size="small"
@@ -570,6 +1017,22 @@ const SystemPage: React.FC = () => {
                 </Space>
               </Form.Item>
             </Form>
+
+            <Table<ConfigSnapshot>
+              size="small"
+              title={() => <Text type="secondary" style={{ fontSize: 12 }}>大模型配置变更历史（每次保存一条完整快照）</Text>}
+              rowKey="id"
+              scroll={{ x: 1200 }}
+              dataSource={taggerHistory}
+              pagination={{
+                current: taggerHistPage,
+                total: taggerHistTotal,
+                pageSize: 8,
+                showSizeChanger: false,
+                onChange: (p) => void loadTaggerHistory(p),
+              }}
+              columns={taggerSnapshotColumns}
+            />
           </Card>
         </>
       )}

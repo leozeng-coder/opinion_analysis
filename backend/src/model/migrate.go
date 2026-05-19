@@ -13,6 +13,8 @@ func AllModels() []any {
 		&CrawlerRunLog{},
 		&Report{},
 		&SystemSetting{},
+		&SystemSettingHistory{},
+		&ConfigSnapshot{},
 		&AuditLog{},
 		&RagSyncLog{},
 		&ChatSession{},

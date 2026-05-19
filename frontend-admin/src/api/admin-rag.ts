@@ -1,5 +1,12 @@
 import request from './request'
-import type { PageResult, RagKBArticle, RagStatus, RagSyncLog } from '@/types'
+import type {
+  PageResult,
+  RagConfig,
+  RagKBArticle,
+  RagStatus,
+  RagSyncLog,
+  UpdateRagConfigPayload,
+} from '@/types'
 
 export const adminRagApi = {
   status: () => request.get<never, RagStatus>('/admin/rag/status'),
@@ -10,10 +17,9 @@ export const adminRagApi = {
       '/admin/rag/sync',
       {},
     ),
-  getConfig: () =>
-    request.get<never, { sync_enabled: boolean }>('/admin/rag/config'),
-  updateConfig: (payload: { sync_enabled: boolean }) =>
-    request.put<never, { ok: boolean; sync_enabled: boolean }>('/admin/rag/config', payload),
+  getConfig: () => request.get<never, RagConfig>('/admin/rag/config'),
+  updateConfig: (payload: UpdateRagConfigPayload) =>
+    request.put<never, RagConfig & { ok?: boolean }>('/admin/rag/config', payload),
   listArticles: (params: {
     page?: number
     page_size?: number

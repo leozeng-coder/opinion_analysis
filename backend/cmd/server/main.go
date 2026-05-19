@@ -75,6 +75,15 @@ func seedSystemSettings(db *gorm.DB) {
 		{Key: "tagger.interval_seconds", Value: "120", Desc: "轮询间隔（秒）"},
 		{Key: "tagger.batch_size", Value: "20", Desc: "单次 LLM 请求条数"},
 		{Key: "tagger.max_per_tick", Value: "200", Desc: "单次轮询最多处理条数"},
+		{Key: "rag.sync_enabled", Value: "true", Desc: "RAG 向量同步定时任务是否启用"},
+		{Key: "rag.embed_provider", Value: "local", Desc: "RAG 句向量来源：local=本地模型，api=OpenAI 兼容 API"},
+		{Key: "rag.embed_model", Value: "paraphrase-multilingual-MiniLM-L12-v2", Desc: "RAG 句向量模型名（本地 HuggingFace id 或 API model）"},
+		{Key: "rag.embed_api_base", Value: "", Desc: "RAG Embedding API Base URL（OpenAI 兼容）"},
+		{Key: "rag.embed_api_key", Value: "", Desc: "RAG Embedding API Key（敏感）"},
+		{Key: "rag.chunk_max_chars", Value: "420", Desc: "RAG 切块最大字符数"},
+		{Key: "rag.chunk_overlap", Value: "72", Desc: "RAG 切块重叠字符数"},
+		{Key: "rag.sync_interval_sec", Value: "120", Desc: "RAG 定时增量同步间隔（秒）"},
+		{Key: "rag.sync_batch", Value: "100", Desc: "RAG 单次同步最多处理文章数"},
 	}
 	for _, s := range desired {
 		var existing model.SystemSetting

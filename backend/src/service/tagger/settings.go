@@ -8,6 +8,7 @@ import (
 
 	"opinion-analysis/config"
 	"opinion-analysis/src/model"
+	"opinion-analysis/src/repository"
 )
 
 const settingPrefix = "tagger."
@@ -36,8 +37,8 @@ func LoadConfig(db *gorm.DB, base config.TaggerConfig) config.TaggerConfig {
 	return out
 }
 
-// SaveConfig 把 cfg 中的字段批量写回 system_settings 表。
-func SaveConfig(db *gorm.DB, cfg config.TaggerConfig, updatedBy uint) error {
+// SaveConfig 把 cfg 中的字段批量写回 system_settings 表，并记录完整配置快照。
+func SaveConfig(db *gorm.DB, cfg config.TaggerConfig, updatedBy uint, updatedByName string) error {
 	pairs := map[string]string{
 		settingPrefix + "enabled":          boolToStr(cfg.Enabled),
 		settingPrefix + "llm_api_key":      cfg.LLMApiKey,
@@ -80,7 +81,11 @@ func SaveConfig(db *gorm.DB, cfg config.TaggerConfig, updatedBy uint) error {
 				return err
 			}
 		}
-		return nil
+		payloadJSON, err := repository.MarshalTaggerSnapshot(cfg)
+		if err != nil {
+			return err
+		}
+		return repository.CreateConfigSnapshotIfChangedTx(tx, "tagger", payloadJSON, updatedBy, updatedByName)
 	})
 }
 
@@ -148,4 +153,9 @@ func boolToStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// ApplySettingValue 将 system_settings 键值写入 TaggerConfig。
+func ApplySettingValue(cfg *config.TaggerConfig, key, val string) {
+	applySetting(cfg, key, val)
 }

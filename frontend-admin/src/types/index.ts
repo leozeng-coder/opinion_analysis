@@ -140,6 +140,67 @@ export interface UpdateTaggerPayload {
   maxPerTick?: number
 }
 
+export interface RagConfig {
+  sync_enabled: boolean
+  embed_provider: 'local' | 'api' | string
+  embed_model: string
+  embed_api_base?: string
+  embed_api_key?: string
+  api_key_set?: boolean
+  chunk_max_chars: number
+  chunk_overlap: number
+  sync_interval_sec: number
+  sync_batch: number
+  env_overrides?: string[]
+  note?: string
+  warnings?: string[]
+  warning?: string
+  service_applied?: boolean
+}
+
+export interface UpdateRagConfigPayload {
+  sync_enabled?: boolean
+  embed_provider?: 'local' | 'api' | string
+  embed_model?: string
+  embed_api_base?: string
+  embed_api_key?: string
+  chunk_max_chars?: number
+  chunk_overlap?: number
+  sync_interval_sec?: number
+  sync_batch?: number
+}
+
+export interface RagSnapshotConfig {
+  sync_enabled: boolean
+  embed_provider: string
+  embed_model: string
+  embed_api_base: string
+  embed_api_key: string
+  chunk_max_chars: number
+  chunk_overlap: number
+  sync_interval_sec: number
+  sync_batch: number
+}
+
+export interface TaggerSnapshotConfig {
+  enabled: boolean
+  llm_model: string
+  llm_base_url: string
+  llm_api_key: string
+  interval_seconds: number
+  batch_size: number
+  max_per_tick: number
+}
+
+export interface ConfigSnapshot {
+  id: number
+  domain: 'rag' | 'tagger'
+  config: RagSnapshotConfig | TaggerSnapshotConfig
+  updatedBy: number
+  updatedByName: string
+  createdAt: string
+}
+
 /** 管理端：RAG / 句向量服务状态（与对话 LLM 区分） */
 export interface RagStatus {
   ragEnabled: boolean
@@ -153,6 +214,7 @@ export interface RagStatus {
   syncIntervalSecondsHint: number
   syncEnabled?: boolean
   serviceError?: string
+  embedProvider?: string
 }
 
 export interface RagSyncLog {

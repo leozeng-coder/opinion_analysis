@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"opinion-analysis/pkg/utils"
 	"opinion-analysis/src/model"
 )
 
@@ -57,4 +58,72 @@ func (r *SystemRepository) RegistrationEnabled() bool {
 	}
 	v := strings.ToLower(strings.TrimSpace(s.Value))
 	return v == "true" || v == "1" || v == "yes" || v == "on"
+}
+
+func isSensitiveSettingKey(key string) bool {
+	k := strings.ToLower(key)
+	return strings.Contains(k, "api_key") || strings.Contains(k, "password") || strings.Contains(k, "secret")
+}
+
+func maskSettingValue(key, val string) string {
+	if isSensitiveSettingKey(key) {
+		return utils.MaskString(val)
+	}
+	return val
+}
+
+// RecordSettingHistory 写入单条配置变更历史。
+func (r *SystemRepository) RecordSettingHistory(key, oldVal, newVal string, updatedBy uint, updatedByName, source string) error {
+	if oldVal == newVal {
+		return nil
+	}
+	row := model.SystemSettingHistory{
+		SettingKey:    key,
+		OldValue:      oldVal,
+		NewValue:      newVal,
+		UpdatedBy:     updatedBy,
+		UpdatedByName: updatedByName,
+		Source:        source,
+	}
+	return r.db.Create(&row).Error
+}
+
+// ListSettingHistory 按 key 前缀分页查询配置变更历史。
+func (r *SystemRepository) ListSettingHistory(prefix string, page, pageSize int) ([]model.SystemSettingHistory, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
+	}
+	q := r.db.Model(&model.SystemSettingHistory{})
+	if p := strings.TrimSpace(prefix); p != "" {
+		q = q.Where("setting_key LIKE ?", p+"%")
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var list []model.SystemSettingHistory
+	err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
+	for i := range list {
+		list[i].OldValue = maskSettingValue(list[i].SettingKey, list[i].OldValue)
+		list[i].NewValue = maskSettingValue(list[i].SettingKey, list[i].NewValue)
+	}
+	return list, total, err
+}
+
+// GetSettingHistoryByID 读取单条历史（不脱敏，供重新应用使用）。
+func (r *SystemRepository) GetSettingHistoryByID(id uint) (*model.SystemSettingHistory, error) {
+	var row model.SystemSettingHistory
+	err := r.db.First(&row, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+// DeleteSettingHistoryByID 删除单条配置变更历史。
+func (r *SystemRepository) DeleteSettingHistoryByID(id uint) error {
+	return r.db.Delete(&model.SystemSettingHistory{}, id).Error
 }
