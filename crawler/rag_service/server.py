@@ -844,8 +844,13 @@ def _reschedule_sync_job() -> None:
     if sched is None:
         return
     try:
+        enabled = _is_sync_enabled()
         sched.reschedule_job("sync", trigger="interval", seconds=SYNC_INTERVAL_SEC)
-        log.info("rescheduled sync job interval=%ss", SYNC_INTERVAL_SEC)
+        if enabled:
+            sched.resume_job("sync")
+        else:
+            sched.pause_job("sync")
+        log.info("rescheduled sync job interval=%ss enabled=%s", SYNC_INTERVAL_SEC, enabled)
     except Exception as e:
         log.warning("reschedule sync job: %s", e)
 
@@ -951,6 +956,9 @@ def _startup() -> None:
     )
     sched.start()
     app.state.scheduler = sched
+    if not _is_sync_enabled():
+        sched.pause_job("sync")
+        log.info("sync job paused on startup (rag.sync_enabled=false)")
     log.info(
         "RAG listening on %s:%s milvus=%s collection=%s embed_model=%s (lazy load)",
         RAG_HOST,

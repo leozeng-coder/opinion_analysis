@@ -36,12 +36,14 @@ type Service struct {
 	mu     sync.RWMutex
 	cfg    config.TaggerConfig
 	apiKey string
+	notify chan struct{}
 }
 
 func New(db *gorm.DB, cfg config.TaggerConfig) *Service {
 	s := &Service{
 		db:     db,
 		client: &http.Client{Timeout: 60 * time.Second},
+		notify: make(chan struct{}, 1),
 	}
 	s.applyConfig(cfg)
 	return s
@@ -60,9 +62,13 @@ func (s *Service) GetConfig() (cfg config.TaggerConfig, apiKeySet bool) {
 	return cfg, key != ""
 }
 
-// UpdateConfig 替换当前配置。下一轮 tick 自动生效。
+// UpdateConfig 替换当前配置。下一轮 tick 自动生效；若 goroutine 正在等待启用，立即唤醒。
 func (s *Service) UpdateConfig(cfg config.TaggerConfig) {
 	s.applyConfig(cfg)
+	select {
+	case s.notify <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Service) applyConfig(cfg config.TaggerConfig) {
@@ -97,7 +103,14 @@ func (s *Service) Start(ctx context.Context) {
 				interval = 2 * time.Minute
 			}
 			if !cfg.Enabled {
-				timer.Reset(interval)
+				log.Printf("[tagger] paused: waiting for re-enable")
+				select {
+				case <-ctx.Done():
+					log.Printf("[tagger] stopped: %v", ctx.Err())
+					return
+				case <-s.notify:
+				}
+				timer.Reset(5 * time.Second)
 				continue
 			}
 			if apiKey == "" {
