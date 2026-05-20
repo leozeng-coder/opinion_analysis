@@ -4,7 +4,7 @@ import {
   Table, Input, Select, DatePicker, Space, Tag, Button,
   Typography, Drawer, Descriptions, Card, Empty, Tooltip,
 } from 'antd'
-import { ReloadOutlined, CloseOutlined } from '@ant-design/icons'
+import { ReloadOutlined, CloseOutlined, FileTextOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import * as echarts from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -13,27 +13,21 @@ import 'echarts-wordcloud'
 import dayjs from 'dayjs'
 import { articleApi, type ArticleQuery } from '@/api/article'
 import type { Article, TagCount } from '@/types'
+import { platformLabel } from '@/utils/platform'
+import { wordCloudColor } from '@/styles/chart'
+import PageHeader from '@/components/common/PageHeader'
+import page from '@/styles/page.module.css'
 
 echarts.use([CanvasRenderer, TooltipComponent])
 
-const { Title, Paragraph } = Typography
+const { Paragraph } = Typography
 const { RangePicker } = DatePicker
 
-const SENTIMENT_TAG: Record<string, { color: string; label: string }> = {
-  positive: { color: 'success', label: '正面' },
-  neutral: { color: 'default', label: '中性' },
-  negative: { color: 'error', label: '负面' },
+const SENTIMENT_TAG: Record<string, { className: string; label: string }> = {
+  positive: { className: page.softTagSage, label: '正面' },
+  neutral: { className: page.softTagBlue, label: '中性' },
+  negative: { className: page.softTagRose, label: '负面' },
 }
-
-const PLATFORM_LABEL: Record<string, string> = {
-  weibo: '微博热搜', zhihu: '知乎热榜', 'bilibili-hot-search': 'B站热搜',
-  toutiao: '今日头条', douyin: '抖音热榜', coolapk: '酷安热榜',
-  tieba: '百度贴吧', wallstreetcn: '华尔街见闻', thepaper: '澎湃新闻',
-  'cls-hot': '财联社', xueqiu: '雪球热榜', kuaishou: '快手热榜',
-  xhs: '小红书', dy: '抖音', ks: '快手', bili: 'B站', wb: '微博',
-  weixin: '微信', news: '新闻', forum: '论坛',
-}
-const platformLabel = (p: string) => PLATFORM_LABEL[p] ?? p
 
 // 解析 aiTags（后端返回 JSON 字符串）→ string[]
 const parseTags = (raw?: string | null): string[] => {
@@ -51,7 +45,12 @@ const OpinionPage: React.FC = () => {
   const [data, setData] = useState<Article[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
-  const [query, setQuery] = useState<ArticleQuery>({ page: 1, pageSize: 20 })
+  const [query, setQuery] = useState<ArticleQuery>(() => {
+    const init: ArticleQuery = { page: 1, pageSize: 20 }
+    const plat = searchParams.get('platform')
+    if (plat) init.platform = plat
+    return init
+  })
   const [keyword, setKeyword] = useState('')
   const [detail, setDetail] = useState<Article | null>(null)
   const [platformOptions, setPlatformOptions] = useState<{ value: string; label: string }[]>([
@@ -99,6 +98,12 @@ const OpinionPage: React.FC = () => {
 
   useEffect(() => { fetchData(query) }, [query, fetchData])
 
+  // URL ?platform= 跳转（如仪表盘柱状图点击）
+  useEffect(() => {
+    const plat = searchParams.get('platform')
+    setQuery((q) => ({ ...q, page: 1, platform: plat || undefined }))
+  }, [searchParams])
+
   // 选中标签 → 同步到 query
   useEffect(() => {
     setQuery((q) => ({
@@ -144,13 +149,13 @@ const OpinionPage: React.FC = () => {
     {
       title: '情感', dataIndex: 'sentiment', width: 80,
       render: (s) => {
-        const cfg = SENTIMENT_TAG[s] ?? { color: 'default', label: s }
-        return <Tag color={cfg.color}>{cfg.label}</Tag>
+        const cfg = SENTIMENT_TAG[s] ?? { className: page.softTagNeutral, label: s }
+        return <Tag className={cfg.className}>{cfg.label}</Tag>
       },
     },
     {
       title: '情感分值', dataIndex: 'sentScore', width: 90,
-      render: (v: number) => <span style={{ color: v > 0 ? '#52c41a' : v < 0 ? '#ff4d4f' : undefined }}>{v.toFixed(2)}</span>,
+      render: (v: number) => <span style={{ color: v > 0 ? '#42C48C' : v < 0 ? '#EC6B6B' : undefined }}>{v.toFixed(2)}</span>,
     },
     {
       title: '发布时间', dataIndex: 'publishedAt', width: 160,
@@ -169,8 +174,18 @@ const OpinionPage: React.FC = () => {
   )
 
   return (
-    <div>
-      <Title level={4} style={{ marginTop: 0, marginBottom: 16 }}>舆情数据</Title>
+    <div className={page.pageShell}>
+      <PageHeader
+        title="舆情数据"
+        subtitle="浏览、筛选各平台舆情文章，支持 AI 标签词云与多维检索"
+        icon={<FileTextOutlined />}
+        extra={
+          <Button icon={<ReloadOutlined />} className={page.ghostBtn}
+            onClick={() => { fetchData(query); refreshTagCounts() }}>
+            刷新
+          </Button>
+        }
+      />
 
       <TagCloudCard
         data={tagCounts}
@@ -179,7 +194,7 @@ const OpinionPage: React.FC = () => {
         onClear={() => setSelectedTags([])}
       />
 
-      <Card size="small" style={{ marginBottom: 16 }}>
+      <Card bordered={false} className={`${page.panelCard} ${page.toolbar}`}>
         <Space wrap>
           <Input.Search
             placeholder="搜索关键词"
@@ -197,7 +212,7 @@ const OpinionPage: React.FC = () => {
           <Select
             style={{ width: 140 }}
             options={platformOptions}
-            defaultValue=""
+            value={query.platform ?? ''}
             onChange={(v) => setQuery(q => ({ ...q, page: 1, platform: v || undefined }))}
           />
           <Select
@@ -229,10 +244,10 @@ const OpinionPage: React.FC = () => {
               endAt: dates?.[1]?.toISOString(),
             }))}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => { fetchData(query); refreshTagCounts() }}>刷新</Button>
         </Space>
       </Card>
 
+      <Card bordered={false} className={`${page.panelCard} ${page.tableWrap}`}>
       <Table
         rowKey="id"
         columns={columns}
@@ -248,6 +263,7 @@ const OpinionPage: React.FC = () => {
           onChange: (page, pageSize) => setQuery(q => ({ ...q, page, pageSize })),
         }}
       />
+      </Card>
 
       <Drawer
         open={!!detail}
@@ -260,7 +276,9 @@ const OpinionPage: React.FC = () => {
             <Descriptions column={2} size="small" bordered>
               <Descriptions.Item label="平台">{platformLabel(detail.platform)}</Descriptions.Item>
               <Descriptions.Item label="情感">
-                <Tag color={SENTIMENT_TAG[detail.sentiment]?.color}>{SENTIMENT_TAG[detail.sentiment]?.label}</Tag>
+                <Tag className={SENTIMENT_TAG[detail.sentiment]?.className ?? page.softTagNeutral}>
+                  {SENTIMENT_TAG[detail.sentiment]?.label ?? detail.sentiment}
+                </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="作者">{detail.author}</Descriptions.Item>
               <Descriptions.Item label="情感分值">{detail.sentScore.toFixed(4)}</Descriptions.Item>
@@ -270,7 +288,7 @@ const OpinionPage: React.FC = () => {
                 ) : (
                   <Space size={[4, 4]} wrap>
                     {parseTags(detail.aiTags).map((t) => (
-                      <Tag key={t} color="blue">{t}</Tag>
+                      <Tag key={t} className={page.softTagBlue}>{t}</Tag>
                     ))}
                   </Space>
                 )}
@@ -324,14 +342,13 @@ const TagCloudCard: React.FC<TagCloudCardProps> = ({ data, selected, onToggle, o
         sizeRange: [12, 40],
         rotationRange: [0, 0],
         drawOutOfBound: false,
-        textStyle: {
-          color: () => {
-            const palette = ['#1677ff', '#52c41a', '#faad14', '#13c2c2', '#722ed1', '#eb2f96', '#fa541c']
-            return palette[Math.floor(Math.random() * palette.length)]
-          },
-        },
+        textStyle: {},
         emphasis: { textStyle: { fontWeight: 'bold', textShadowBlur: 6, textShadowColor: 'rgba(0,0,0,0.2)' } },
-        data: data.map((d) => ({ name: d.tag, value: d.count })),
+        data: data.map((d) => ({
+          name: d.tag,
+          value: d.count,
+          textStyle: { color: wordCloudColor(d.tag) },
+        })),
       }],
     } as echarts.EChartsCoreOption)
 
@@ -348,7 +365,8 @@ const TagCloudCard: React.FC<TagCloudCardProps> = ({ data, selected, onToggle, o
 
   return (
     <Card
-      size="small"
+      bordered={false}
+      className={page.panelCard}
       title="标签词云"
       extra={
         selected.length > 0 ? (
@@ -357,14 +375,12 @@ const TagCloudCard: React.FC<TagCloudCardProps> = ({ data, selected, onToggle, o
             <Button size="small" icon={<CloseOutlined />} onClick={onClear}>清空</Button>
           </Space>
         ) : (
-          <span style={{ color: '#999' }}>点击标签即可筛选；可与下方筛选叠加</span>
+          <span style={{ color: 'var(--app-text-muted)', fontSize: 13 }}>点击标签即可筛选；可与下方筛选叠加</span>
         )
       }
-      style={{ marginBottom: 16 }}
-      bodyStyle={{ padding: 8 }}
     >
       {data.length === 0 ? (
-        <Empty description="暂无标签数据（等待 AI 打标完成）" style={{ padding: '24px 0' }} />
+        <Empty description="暂无标签数据（等待 AI 打标完成）" className={page.emptyCompact} style={{ padding: '24px 0' }} />
       ) : (
         <>
           <div ref={chartRef} style={{ width: '100%', height: 260 }} />
@@ -377,6 +393,7 @@ const TagCloudCard: React.FC<TagCloudCardProps> = ({ data, selected, onToggle, o
                     <Tag
                       color="blue"
                       closable
+                      className={page.softTagBlue}
                       onClose={(e) => { e.preventDefault(); onToggle(t) }}
                       style={{ cursor: 'pointer' }}
                     >

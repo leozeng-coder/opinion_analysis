@@ -27,10 +27,12 @@ import { adminRagApi } from '@/api/admin-rag'
 import { taggerApi } from '@/api/tagger'
 import { adminAuditApi } from '@/api/admin-audit'
 import { adminSystemApi } from '@/api/admin-system'
+import PageHeader from '@/components/common/PageHeader'
+import ui from '@/styles/page.module.css'
 import type { AuditLog, RagStatus, RagSyncLog, TaggerConfig } from '@/types'
 import dayjs from 'dayjs'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const TasksPage: React.FC = () => {
   // tagger
@@ -155,14 +157,17 @@ const TasksPage: React.FC = () => {
   const isEnabled = taggerCfg?.enabled ?? false
 
   return (
-    <div>
-      <Title level={4} style={{ marginTop: 0, marginBottom: 24 }}>
-        <SyncOutlined style={{ marginRight: 8 }} />任务管理
-      </Title>
+    <div className={ui.pageShell}>
+      <PageHeader
+        title="任务管理"
+        subtitle="AI 打标与 RAG 向量同步任务监控"
+        icon={<SyncOutlined />}
+      />
 
       {/* ── Section 1: AI 打标任务 ──────────────────────────────────────── */}
       <Card
-        style={{ marginBottom: 24 }}
+        bordered={false}
+        className={ui.panelCard}
         title={
           <span>
             <RobotOutlined style={{ marginRight: 8 }} />
@@ -178,7 +183,7 @@ const TasksPage: React.FC = () => {
                 value={pending ?? '-'}
                 suffix="篇"
                 loading={loading}
-                valueStyle={{ color: pending && pending > 0 ? '#fa8c16' : '#52c41a', fontSize: 32 }}
+                valueStyle={{ color: pending && pending > 0 ? '#E8A84A' : '#42C48C', fontSize: 32 }}
               />
             </Card>
           </Col>
@@ -227,12 +232,12 @@ const TasksPage: React.FC = () => {
                   点击下方按钮可立即执行一轮，在后台异步运行，不影响当前页面。
                 </Text>
                 {!isEnabled && (
-                  <Tag color="warning" style={{ width: 'fit-content' }}>
+                  <Tag className={ui.softTagAmber} style={{ width: 'fit-content' }}>
                     后台任务已停用，手动触发仍可执行
                   </Tag>
                 )}
                 {!taggerCfg?.apiKeySet && (
-                  <Tag color="error" style={{ width: 'fit-content' }}>
+                  <Tag className={ui.softTagRose} style={{ width: 'fit-content' }}>
                     API Key 未配置，请先到「系统配置」完成设置
                   </Tag>
                 )}
@@ -290,6 +295,8 @@ const TasksPage: React.FC = () => {
 
       {/* ── Section 2: RAG 向量同步 ──────────────────────────────────────── */}
       <Card
+        bordered={false}
+        className={ui.panelCard}
         title={
           <span>
             <DatabaseOutlined style={{ marginRight: 8 }} />
@@ -333,7 +340,7 @@ const TasksPage: React.FC = () => {
                 value={pendingEmbed ?? '-'}
                 suffix="篇"
                 loading={loading}
-                valueStyle={{ color: pendingEmbed && pendingEmbed > 0 ? '#fa8c16' : '#52c41a', fontSize: 28 }}
+                valueStyle={{ color: pendingEmbed && pendingEmbed > 0 ? '#E8A84A' : '#42C48C', fontSize: 28 }}
               />
               <div style={{ marginTop: 4 }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>
@@ -362,7 +369,7 @@ const TasksPage: React.FC = () => {
               <Statistic
                 title="RAG 服务"
                 value={ragStatus?.serviceReachable ? '可达' : '不可达'}
-                valueStyle={{ color: ragStatus?.serviceReachable ? '#52c41a' : '#ff4d4f', fontSize: 28 }}
+                valueStyle={{ color: ragStatus?.serviceReachable ? '#42C48C' : '#EC6B6B', fontSize: 28 }}
               />
               {ragStatus?.embedModel && (
                 <div style={{ marginTop: 4 }}>
@@ -377,7 +384,7 @@ const TasksPage: React.FC = () => {
           <Alert
             type="error"
             showIcon
-            style={{ marginBottom: 16 }}
+            className={ui.infoBanner}
             message="向量维度不一致"
             description={
               <>
@@ -392,7 +399,7 @@ const TasksPage: React.FC = () => {
           <Alert
             type="warning"
             showIcon
-            style={{ marginBottom: 16 }}
+            className={ui.infoBanner}
             message="嵌入模型未就绪"
             description={ragStatus.embedderError}
           />
@@ -404,6 +411,7 @@ const TasksPage: React.FC = () => {
           loading={ragLoading}
           dataSource={ragRuns}
           scroll={{ x: 960 }}
+          className={ui.tableWrap}
           pagination={{
             current: ragPage,
             total: ragTotal,
@@ -416,7 +424,11 @@ const TasksPage: React.FC = () => {
             {
               title: '状态', dataIndex: 'status', width: 92,
               render: (s: RagSyncLog['status']) => (
-                <Tag color={s === 'success' ? 'success' : s === 'failed' ? 'error' : 'processing'}>{s}</Tag>
+                <Tag className={
+                  s === 'success' ? ui.softTagSage
+                    : s === 'failed' ? ui.softTagRose
+                      : ui.softTagBlue
+                }>{s}</Tag>
               ),
             },
             { title: '方式', dataIndex: 'mode', width: 100 },

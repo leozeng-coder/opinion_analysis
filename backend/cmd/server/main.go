@@ -14,6 +14,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"opinion-analysis/config"
+	"opinion-analysis/pkg/redisclient"
 	"opinion-analysis/src/api"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
@@ -148,7 +149,7 @@ func seedCrawlerSpiderConfigs(db *gorm.DB) {
 	// 迁移旧 key（rss/zhihu/tieba/search）到新 key（broad-topic/deep-sentiment）
 	oldKeys := []string{"rss", "zhihu", "tieba", "search"}
 	for _, old := range oldKeys {
-		_ = repository.NewStore(db).Crawler.DeleteSpiderConfigByKey(old)
+		_ = repository.NewStore(db, nil).Crawler.DeleteSpiderConfigByKey(old)
 	}
 
 	desired := []struct {
@@ -162,7 +163,7 @@ func seedCrawlerSpiderConfigs(db *gorm.DB) {
 	}
 
 	for _, d := range desired {
-		crawlerRepo := repository.NewStore(db).Crawler
+		crawlerRepo := repository.NewStore(db, nil).Crawler
 		if _, err := crawlerRepo.FindSpiderByKey(d.Key); err == nil {
 			continue
 		}
@@ -204,7 +205,12 @@ func main() {
 
 	runCrawlerSQL(db)
 
-	if n, err := repository.NewStore(db).Crawler.RecoverStaleRuns(); err != nil {
+	rdb := redisclient.New(config.Cfg.Redis)
+	if rdb != nil {
+		defer rdb.Close()
+	}
+
+	if n, err := repository.NewStore(db, repository.NewDigestRepository(rdb)).Crawler.RecoverStaleRuns(); err != nil {
 		log.Fatalf("recover stale crawler runs: %v", err)
 	} else if n > 0 {
 		log.Printf("[crawler task] startup_recovered stale_run_count=%d (marked failed, see crawler_run_logs.message)", n)
@@ -238,7 +244,7 @@ func main() {
 		}
 	}()
 
-	r := api.NewRouter(db, logger, taggerSvc, ragProc)
+	r := api.NewRouter(db, rdb, logger, taggerSvc, ragProc)
 
 	addr := fmt.Sprintf(":%s", config.Cfg.Server.Port)
 	logger.Info("server starting", zap.String("addr", addr))

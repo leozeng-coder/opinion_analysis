@@ -151,56 +151,53 @@ class DatabaseManager:
     
     def save_daily_topics(self, keywords: List[str], summary: str, extract_date: date = None) -> bool:
         """
-        保存每日话题分析
-        
-        Args:
-            keywords: 话题关键词列表
-            summary: 新闻分析总结
-            extract_date: 提取日期，默认为今天
-        
-        Returns:
-            是否保存成功
+        保存每日话题：关键词入 MySQL（供 Stage2），AI 摘要入 Redis。
         """
         if not extract_date:
             extract_date = date.today()
-        
+
         current_timestamp = int(datetime.now().timestamp())
-        
+        mysql_ok = False
+
         try:
             cursor = self.connection.cursor()
-            
-            # 检查今天是否已有记录
-            check_query = "SELECT id FROM daily_topics WHERE extract_date = %s"
-            cursor.execute(check_query, (extract_date,))
+
+            # 主记录 topic_YYYYMMDD（与 deep-sentiment 注入的多行关键词区分）
+            topic_id = f"topic_{extract_date.strftime('%Y%m%d')}"
+            check_query = "SELECT id FROM daily_topics WHERE extract_date = %s AND topic_id = %s"
+            cursor.execute(check_query, (extract_date, topic_id))
             existing = cursor.fetchone()
-            
+
             keywords_json = json.dumps(keywords, ensure_ascii=False)
-            
+
             if existing:
-                # 更新现有记录
                 update_query = """
                     UPDATE daily_topics
-                    SET keywords = %s, summary = %s, last_modify_ts = %s
-                    WHERE extract_date = %s
+                    SET keywords = %s, last_modify_ts = %s
+                    WHERE extract_date = %s AND topic_id = %s
                 """
-                cursor.execute(update_query, (keywords_json, summary, current_timestamp, extract_date))
-                print(f"更新了 {extract_date} 的话题分析")
+                cursor.execute(update_query, (keywords_json, current_timestamp, extract_date, topic_id))
+                print(f"更新了 {extract_date} 的话题关键词")
             else:
-                # 插入新记录
-                topic_id = f"topic_{extract_date.strftime('%Y%m%d')}"
                 topic_name = f"{extract_date.strftime('%Y-%m-%d')} 热点话题"
                 insert_query = """
-                    INSERT INTO daily_topics (topic_id, topic_name, extract_date, keywords, summary, add_ts, last_modify_ts)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO daily_topics (topic_id, topic_name, extract_date, keywords, add_ts, last_modify_ts)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                 """
-                cursor.execute(insert_query, (topic_id, topic_name, extract_date, keywords_json, summary, current_timestamp, current_timestamp))
-                print(f"保存了 {extract_date} 的话题分析")
-            
-            return True
-            
+                cursor.execute(insert_query, (topic_id, topic_name, extract_date, keywords_json, current_timestamp, current_timestamp))
+                print(f"保存了 {extract_date} 的话题关键词")
+
+            mysql_ok = True
         except Exception as e:
-            print(f"保存话题分析失败: {e}")
-            return False
+            print(f"保存话题关键词失败: {e}")
+
+        try:
+            from common.digest_redis import save_daily_digest
+            save_daily_digest(summary, keywords, extract_date)
+        except Exception as e:
+            print(f"写入 Redis 摘要失败: {e}")
+
+        return mysql_ok
     
     def get_daily_topics(self, extract_date: date = None) -> Optional[Dict]:
         """
@@ -217,8 +214,9 @@ class DatabaseManager:
         
         try:
             cursor = self.connection.cursor()
-            query = "SELECT * FROM daily_topics WHERE extract_date = %s"
-            cursor.execute(query, (extract_date,))
+            topic_id = f"topic_{extract_date.strftime('%Y%m%d')}"
+            query = "SELECT * FROM daily_topics WHERE extract_date = %s AND topic_id = %s"
+            cursor.execute(query, (extract_date, topic_id))
             result = cursor.fetchone()
             
             if result:
@@ -285,10 +283,7 @@ class DatabaseManager:
             
             # 话题统计
             topics_query = """
-                SELECT 
-                    extract_date,
-                    keywords,
-                    CHAR_LENGTH(summary) as summary_length
+                SELECT extract_date, keywords
                 FROM daily_topics 
                 WHERE extract_date >= DATE_SUB(CURDATE(), INTERVAL %s DAY)
                 ORDER BY extract_date DESC

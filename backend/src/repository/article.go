@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 	"opinion-analysis/src/model"
@@ -76,7 +77,7 @@ func (r *ArticleRepository) DistinctPlatforms() ([]string, error) {
 	var platforms []string
 	err := r.db.Model(&model.Article{}).
 		Distinct("platform").
-		Where("platform != '' AND platform != ?", "github-trending-today").
+		Where("platform != ''").
 		Order("platform asc").
 		Pluck("platform", &platforms).Error
 	return platforms, err
@@ -95,6 +96,20 @@ type PlatformDist struct {
 type TrendPoint struct {
 	Date  string `json:"date"`
 	Count int64  `json:"count"`
+}
+
+type SentimentTrendRow struct {
+	Date      string `json:"date"`
+	Sentiment string `json:"sentiment"`
+	Count     int64  `json:"count"`
+}
+
+type SentimentTrendPoint struct {
+	Date     string `json:"date"`
+	Positive int64  `json:"positive"`
+	Neutral  int64  `json:"neutral"`
+	Negative int64  `json:"negative"`
+	Total    int64  `json:"total"`
 }
 
 func (r *ArticleRepository) baseStatsQuery(startAt, endAt string) *gorm.DB {
@@ -126,6 +141,57 @@ func (r *ArticleRepository) Trend(startAt, endAt string) ([]TrendPoint, error) {
 		Select("DATE(published_at) as date, count(*) as count").
 		Group("DATE(published_at)").Order("date asc").Scan(&trend).Error
 	return trend, err
+}
+
+func (r *ArticleRepository) CountBetween(startAt, endAt string) (int64, error) {
+	var count int64
+	err := r.baseStatsQuery(startAt, endAt).Count(&count).Error
+	return count, err
+}
+
+func (r *ArticleRepository) SentimentTrend(startAt, endAt string) ([]SentimentTrendPoint, error) {
+	var rows []SentimentTrendRow
+	err := r.baseStatsQuery(startAt, endAt).
+		Select("DATE(published_at) as date, sentiment, count(*) as count").
+		Group("DATE(published_at), sentiment").
+		Order("date asc").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	byDate := map[string]*SentimentTrendPoint{}
+	order := make([]string, 0)
+	for _, row := range rows {
+		pt, ok := byDate[row.Date]
+		if !ok {
+			pt = &SentimentTrendPoint{Date: row.Date}
+			byDate[row.Date] = pt
+			order = append(order, row.Date)
+		}
+		switch row.Sentiment {
+		case "positive":
+			pt.Positive = row.Count
+		case "neutral":
+			pt.Neutral = row.Count
+		case "negative":
+			pt.Negative = row.Count
+		}
+		pt.Total += row.Count
+	}
+	out := make([]SentimentTrendPoint, 0, len(order))
+	for _, d := range order {
+		out = append(out, *byDate[d])
+	}
+	return out, nil
+}
+
+func (r *ArticleRepository) LatestPublishedAt() (*time.Time, error) {
+	var ts *time.Time
+	err := r.db.Model(&model.Article{}).
+		Where("platform != ?", "github-trending-today").
+		Select("MAX(published_at)").
+		Scan(&ts).Error
+	return ts, err
 }
 
 func (r *ArticleRepository) CountPendingTagging() (int64, error) {

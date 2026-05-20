@@ -30,6 +30,7 @@ import {
   type ChatSession,
   type ChatMessage,
 } from '@/api/chatSession'
+import page from '@/styles/page.module.css'
 import styles from './AiAssistantPage.module.css'
 
 const { Text } = Typography
@@ -306,6 +307,7 @@ const AiAssistantPage: React.FC = () => {
   const titleBar = currentSession?.title ?? '舆情分析助手'
 
   return (
+    <div className={page.pageShellFlush}>
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         <div className={styles.sidebarHeader}>
@@ -517,6 +519,7 @@ const AiAssistantPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+    </div>
     </div>
   )
 }

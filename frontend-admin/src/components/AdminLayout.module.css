@@ -1,0 +1,72 @@
+.layout {
+  min-height: 100vh;
+}
+
+.sider {
+  background: var(--sider-bg) !important;
+  position: sticky !important;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
+}
+
+.logo {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0 16px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.logoIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(77, 147, 232, 0.28);
+  color: #8ec0ff;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.header {
+  padding: 0 24px !important;
+  background: var(--header-bg) !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--app-border);
+  height: 56px;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+
+.header :global(.ant-breadcrumb) {
+  font-size: 13px;
+}
+
+.userTrigger {
+  cursor: pointer;
+  padding: 4px 8px 4px 4px;
+  border-radius: 10px;
+  transition: background 0.15s;
+}
+
+.userTrigger:hover {
+  background: var(--c-blue-soft);
+}
+
+.content {
+  margin: 16px;
+  padding: 0;
+  background: transparent !important;
+  min-height: 360px;
+}

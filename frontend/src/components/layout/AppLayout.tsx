@@ -1,15 +1,16 @@
 import React, { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
-  Layout, Menu, Avatar, Dropdown, theme, Badge, Space, Typography,
+  Layout, Menu, Avatar, Dropdown, Badge, Space, Typography,
 } from 'antd'
 import {
   DashboardOutlined, FileTextOutlined, FireOutlined,
   BellOutlined, UserOutlined, LogoutOutlined, BarChartOutlined, CloudSyncOutlined,
-  CommentOutlined,
+  CommentOutlined, RadarChartOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store/auth'
 import DraggableAssistantLauncher from '@/components/layout/DraggableAssistantLauncher'
+import styles from './AppLayout.module.css'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -28,7 +29,6 @@ const AppLayout: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
-  const { token: { colorBgContainer, borderRadiusLG } } = theme.useToken()
   const { user, logout } = useAuthStore()
 
   const userMenuItems = [
@@ -44,19 +44,17 @@ const AppLayout: React.FC = () => {
   }
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className={styles.layout}>
       <Sider
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
-        style={{ background: '#001529' }}
+        className={styles.sider}
+        width={220}
       >
-        <div style={{
-          height: 64, display: 'flex', alignItems: 'center',
-          justifyContent: 'center', color: '#fff', fontSize: collapsed ? 14 : 18,
-          fontWeight: 'bold', overflow: 'hidden', whiteSpace: 'nowrap',
-        }}>
-          {collapsed ? '舆' : '舆情分析系统'}
+        <div className={styles.logo}>
+          <span className={styles.logoIcon}><RadarChartOutlined /></span>
+          {!collapsed && <span>舆情分析系统</span>}
         </div>
         <Menu
           theme="dark"
@@ -68,25 +66,26 @@ const AppLayout: React.FC = () => {
       </Sider>
 
       <Layout>
-        <Header style={{
-          padding: '0 24px', background: colorBgContainer,
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          borderBottom: '1px solid #f0f0f0',
-        }}>
-          <Space size={16}>
-            <Badge count={3} size="small">
-              <BellOutlined style={{ fontSize: 18, cursor: 'pointer' }} />
+        <Header className={styles.header}>
+          <Space size={12}>
+            <Badge count={0} size="small" showZero={false}>
+              <div className={styles.headerAction}>
+                <BellOutlined style={{ fontSize: 17 }} />
+              </div>
             </Badge>
             <Dropdown menu={{ items: userMenuItems, onClick: handleUserMenu }}>
-              <Space style={{ cursor: 'pointer' }}>
-                <Avatar icon={<UserOutlined />} size="small" />
-                <Text>{user?.nickname || user?.username}</Text>
+              <Space className={styles.userTrigger} size={10}>
+                <Avatar icon={<UserOutlined />} size="small"
+                  style={{ background: 'var(--c-blue)' }} />
+                <Text style={{ color: 'var(--app-text)' }}>
+                  {user?.nickname || user?.username}
+                </Text>
               </Space>
             </Dropdown>
           </Space>
         </Header>
 
-        <Content style={{ margin: '24px', background: colorBgContainer, borderRadius: borderRadiusLG, padding: 24, overflow: 'auto' }}>
+        <Content className={styles.content}>
           <Outlet />
         </Content>
       </Layout>

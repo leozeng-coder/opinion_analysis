@@ -1,11 +1,12 @@
 import React from 'react'
 import { Form, Input, Button, Card, message, Typography } from 'antd'
-import { UserOutlined, LockOutlined } from '@ant-design/icons'
+import { UserOutlined, LockOutlined, RadarChartOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/store/auth'
+import auth from '@/styles/auth.module.css'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 const LoginPage: React.FC = () => {
   const navigate = useNavigate()
@@ -25,14 +26,12 @@ const LoginPage: React.FC = () => {
   }
 
   return (
-    <div style={{
-      height: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', background: '#f0f2f5',
-    }}>
-      <Card style={{ width: 380, boxShadow: '0 4px 24px rgba(0,0,0,.08)' }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Title level={3} style={{ margin: 0 }}>舆情分析系统</Title>
-          <Typography.Text type="secondary">Public Opinion Analysis Platform</Typography.Text>
+    <div className={auth.authPage}>
+      <Card bordered={false} className={auth.authCard}>
+        <div className={auth.authHeader}>
+          <div className={auth.authLogo}><RadarChartOutlined /></div>
+          <Title level={3} className={auth.authTitle}>舆情分析系统</Title>
+          <Text className={auth.authSubtitle}>Public Opinion Analysis Platform</Text>
         </div>
         <Form onFinish={onFinish} size="large" autoComplete="off">
           <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
@@ -41,13 +40,13 @@ const LoginPage: React.FC = () => {
           <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password prefix={<LockOutlined />} placeholder="密码" />
           </Form.Item>
-          <Form.Item>
+          <Form.Item style={{ marginBottom: 0 }}>
             <Button type="primary" htmlType="submit" block loading={loading}>
               登录
             </Button>
           </Form.Item>
         </Form>
-        <div style={{ textAlign: 'center', marginTop: 8 }}>
+        <div className={auth.authFooter}>
           <Link to="/register">没有账号？去注册</Link>
         </div>
       </Card>

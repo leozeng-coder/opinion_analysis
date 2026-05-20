@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 	adminhandler "opinion-analysis/src/api/handler/admin"
@@ -17,8 +18,8 @@ import (
 	"opinion-analysis/pkg/response"
 )
 
-func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager) *gin.Engine {
-	store := repository.NewStore(db)
+func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager) *gin.Engine {
+	store := repository.NewStore(db, repository.NewDigestRepository(rdb))
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -41,6 +42,7 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service, ragPr
 	crawlerH := userhandler.NewCrawlerHandler(store)
 	aiChatH := userhandler.NewAIChatHandler(taggerSvc)
 	chatSessionH := userhandler.NewChatSessionHandler(store, taggerSvc)
+	dashboardH := userhandler.NewDashboardHandler(store)
 
 	adminUserH := adminhandler.NewUserHandler(store)
 	adminSettingH := adminhandler.NewSettingHandler(store)
@@ -60,6 +62,8 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service, ragPr
 		authorized := apiGroup.Group("", middleware.Auth())
 		{
 			authorized.GET("/auth/profile", authH.Profile)
+
+			authorized.GET("/dashboard", dashboardH.Overview)
 
 			articles := authorized.Group("/articles")
 			{

@@ -24,9 +24,11 @@ import {
 import { adminRagApi } from '@/api/admin-rag'
 import { adminSystemApi } from '@/api/admin-system'
 import type { RagStatus, SystemHealth, TaggerConfig } from '@/types'
+import PageHeader from '@/components/common/PageHeader'
+import page from '@/styles/page.module.css'
 import dayjs from 'dayjs'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const SystemPage: React.FC = () => {
   const [health, setHealth] = useState<SystemHealth | null>(null)
@@ -55,25 +57,25 @@ const SystemPage: React.FC = () => {
   const llmProbe = health?.llm
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ marginTop: 0, marginBottom: 0 }}>
-          <ThunderboltOutlined style={{ marginRight: 8 }} />系统状态
-        </Title>
-        <Button icon={<ReloadOutlined />} onClick={() => void fetchAll()} loading={loading}>
-          刷新
-        </Button>
-      </div>
+    <div className={page.pageShell}>
+      <PageHeader
+        title="系统状态"
+        subtitle="数据库、大模型 API、爬虫与 RAG 服务健康概览"
+        icon={<ThunderboltOutlined />}
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={() => void fetchAll()} loading={loading} className={page.ghostBtn}>
+            刷新
+          </Button>
+        }
+      />
 
       {loading && !health ? (
-        <Spin />
+        <Spin style={{ display: 'block', margin: '40px auto' }} />
       ) : (
         <>
-          {/* ── 顶部状态卡 ────────────────────────────────────────────────── */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-            {/* DB */}
-            <Col xs={24} sm={12} md={6} style={{ display: 'flex' }}>
-              <Card size="small" style={{ flex: 1 }}>
+          <Row gutter={[20, 20]}>
+            <Col xs={24} sm={12} md={6} className={page.colStretch}>
+              <Card bordered={false} className={page.panelCard} style={{ flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Text strong>数据库 (MySQL)</Text>
                   {health?.database ? (
@@ -95,9 +97,10 @@ const SystemPage: React.FC = () => {
             </Col>
 
             {/* LLM */}
-            <Col xs={24} sm={24} md={12} style={{ display: 'flex' }}>
+            <Col xs={24} sm={24} md={12} className={page.colStretch}>
               <Card
-                size="small"
+                bordered={false}
+                className={page.panelCard}
                 style={{ flex: 1 }}
                 styles={{ body: { padding: '12px 16px' } }}
                 extra={
@@ -149,15 +152,15 @@ const SystemPage: React.FC = () => {
             </Col>
 
             {/* Pending tagging */}
-            <Col xs={12} sm={12} md={3} style={{ display: 'flex' }}>
-              <Card size="small" style={{ flex: 1 }}>
+            <Col xs={12} sm={12} md={3} className={page.colStretch}>
+              <Card bordered={false} className={`${page.panelCard} ${page.statCard}`} style={{ flex: 1 }}>
                 <Statistic title="待打标文章" value={health?.pendingTagging ?? '-'} suffix="篇" />
               </Card>
             </Col>
 
             {/* Last crawler run */}
-            <Col xs={12} sm={12} md={3} style={{ display: 'flex' }}>
-              <Card size="small" style={{ flex: 1 }} title="最近爬取">
+            <Col xs={12} sm={12} md={3} className={page.colStretch}>
+              <Card bordered={false} className={page.panelCard} style={{ flex: 1 }} title="最近爬取">
                 {health?.lastCrawlerRun ? (
                   <div style={{ fontSize: 12 }}>
                     <div><Text type="secondary">{health.lastCrawlerRun.spiders}</Text></div>
@@ -186,6 +189,8 @@ const SystemPage: React.FC = () => {
 
           {/* ── RAG 服务状态 ──────────────────────────────────────────────── */}
           <Card
+            bordered={false}
+            className={page.panelCard}
             title={
               <span>
                 <DatabaseOutlined style={{ marginRight: 8 }} />

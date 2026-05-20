@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import {
-  Badge, Button, Form, Input, message, Modal, Popconfirm, Select, Space, Table, Tag, Typography,
+  Badge, Button, Card, Form, Input, message, Modal, Popconfirm, Select, Space, Table, Tag, Typography,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { DatabaseOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { adminDataSourceApi } from '@/api/admin-datasource'
+import PageHeader from '@/components/common/PageHeader'
+import ui from '@/styles/page.module.css'
 import type { DataSource } from '@/types'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const TYPE_OPTIONS = [
   { label: 'weibo', value: 'weibo' }, { label: 'weixin', value: 'weixin' },
@@ -100,14 +102,22 @@ const DataSourcePage: React.FC = () => {
   ]
 
   return (
-    <div>
-      <Title level={4} style={{ marginTop: 0 }}>数据源管理</Title>
-      <Space style={{ marginBottom: 16 }}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建数据源</Button>
-        <Button icon={<ReloadOutlined />} onClick={() => void fetch()}>刷新</Button>
-      </Space>
+    <div className={ui.pageShell}>
+      <PageHeader
+        title="数据源管理"
+        subtitle="配置舆情数据的来源平台与连接信息"
+        icon={<DatabaseOutlined />}
+        extra={
+          <Space>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>新建数据源</Button>
+            <Button icon={<ReloadOutlined />} className={ui.ghostBtn} onClick={() => void fetch()}>刷新</Button>
+          </Space>
+        }
+      />
+      <Card bordered={false} className={`${ui.panelCard} ${ui.tableWrap}`}>
       <Table<DataSource> rowKey="id" columns={columns} dataSource={list} loading={loading}
         pagination={{ pageSize: 30, showSizeChanger: false }} size="middle" scroll={{ x: 980 }} />
+      </Card>
 
       <Modal title={editing ? '编辑数据源' : '新建数据源'} open={modalOpen}
         onCancel={() => setModalOpen(false)} onOk={() => void handleSubmit()}

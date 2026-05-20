@@ -1,0 +1,169 @@
+/* 全站页面壳层与通用组件样式 — 与用户端 frontend 保持一致 */
+
+.pageShell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-gap);
+  padding: 20px 20px 24px;
+  min-height: calc(100vh - 96px);
+  background: var(--app-bg);
+  border-radius: var(--app-radius);
+}
+
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pageHeaderMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pageHeaderIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--c-blue-soft);
+  color: var(--c-blue);
+  font-size: 17px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.pageTitle {
+  margin: 0 !important;
+  font-weight: 600 !important;
+  color: var(--app-text) !important;
+  letter-spacing: -0.02em;
+  line-height: 1.35 !important;
+}
+
+.pageSubtitle {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+  line-height: 1.5;
+  max-width: 720px;
+}
+
+.pageExtra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ghostBtn {
+  color: var(--app-text-secondary) !important;
+  border-color: var(--app-border) !important;
+  background: var(--app-surface) !important;
+  box-shadow: var(--app-shadow);
+}
+
+.panelCard {
+  border: 1px solid var(--app-border) !important;
+  border-radius: var(--app-radius) !important;
+  box-shadow: var(--app-shadow) !important;
+  background: var(--app-surface) !important;
+  overflow: hidden;
+}
+
+.panelCard :global(.ant-card-head) {
+  min-height: 44px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--app-border);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.panelCard :global(.ant-card-head-title) {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--app-text);
+  padding: 12px 0;
+}
+
+.panelCard :global(.ant-card-body) {
+  padding: 16px 18px;
+}
+
+.colStretch {
+  display: flex;
+  flex-direction: column;
+}
+
+.softTagBlue {
+  margin: 0 !important;
+  border: none !important;
+  background: var(--c-blue-soft) !important;
+  color: var(--c-blue-text) !important;
+  border-radius: 6px !important;
+}
+
+.softTagRose {
+  margin: 0 !important;
+  border: none !important;
+  background: var(--c-rose-soft) !important;
+  color: var(--c-rose-text) !important;
+  border-radius: 6px !important;
+}
+
+.softTagAmber {
+  margin: 0 !important;
+  border: none !important;
+  background: var(--c-amber-soft) !important;
+  color: var(--c-amber-text) !important;
+  border-radius: 6px !important;
+}
+
+.softTagSage {
+  margin: 0 !important;
+  border: none !important;
+  background: var(--c-sage-soft) !important;
+  color: var(--c-sage-text) !important;
+  border-radius: 6px !important;
+}
+
+.softTagNeutral {
+  margin: 0 !important;
+  border: none !important;
+  background: rgba(15, 23, 42, 0.05) !important;
+  color: var(--app-text-secondary) !important;
+  border-radius: 6px !important;
+}
+
+.infoBanner {
+  border-radius: 10px !important;
+  border: 1px solid rgba(77, 147, 232, 0.28) !important;
+  background: var(--c-blue-bg) !important;
+}
+
+.tableWrap :global(.ant-card-body) {
+  padding: 0 !important;
+}
+
+.tableWrap :global(.ant-table) {
+  border-radius: 0 !important;
+}
+
+.tabsPanel :global(.ant-tabs-nav) {
+  margin-bottom: 16px;
+}
+
+.statCard {
+  text-align: center;
+  height: 100%;
+}
+
+.statCard :global(.ant-card-body) {
+  padding: 20px 16px !important;
+}

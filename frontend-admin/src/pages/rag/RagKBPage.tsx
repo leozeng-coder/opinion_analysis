@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import {
   Badge,
   Button,
+  Card,
   Input,
   Popconfirm,
   Select,
@@ -12,12 +13,14 @@ import {
   Typography,
   message,
 } from 'antd'
-import { DeleteOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { DatabaseOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { adminRagApi } from '@/api/admin-rag'
+import PageHeader from '@/components/common/PageHeader'
+import ui from '@/styles/page.module.css'
 import type { RagKBArticle } from '@/types'
 import dayjs from 'dayjs'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const RagKBPage: React.FC = () => {
   const [list, setList] = useState<RagKBArticle[]>([])
@@ -70,15 +73,20 @@ const RagKBPage: React.FC = () => {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Title level={4} style={{ margin: 0 }}>知识库文章管理</Title>
-        <Button icon={<ReloadOutlined />} onClick={() => void fetchList(page)} loading={loading}>
-          刷新
-        </Button>
-      </div>
+    <div className={ui.pageShell}>
+      <PageHeader
+        title="知识库文章管理"
+        subtitle="查看与管理已向量化入库的舆情文章"
+        icon={<DatabaseOutlined />}
+        extra={
+          <Button icon={<ReloadOutlined />} className={ui.ghostBtn} onClick={() => void fetchList(page)} loading={loading}>
+            刷新
+          </Button>
+        }
+      />
 
-      <Space wrap style={{ marginBottom: 16 }}>
+      <Card bordered={false} className={`${ui.panelCard} ${ui.toolbar}`}>
+      <Space wrap>
         <Input
           placeholder="搜索标题/内容"
           allowClear
@@ -117,7 +125,9 @@ const RagKBPage: React.FC = () => {
         />
         <Text type="secondary" style={{ fontSize: 12 }}>共 {total} 条</Text>
       </Space>
+      </Card>
 
+      <Card bordered={false} className={`${ui.panelCard} ${ui.tableWrap}`}>
       <Table<RagKBArticle>
         size="small"
         rowKey="id"
@@ -192,6 +202,7 @@ const RagKBPage: React.FC = () => {
           },
         ]}
       />
+      </Card>
     </div>
   )
 }

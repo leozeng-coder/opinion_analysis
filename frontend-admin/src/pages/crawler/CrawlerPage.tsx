@@ -11,8 +11,10 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs, { Dayjs } from 'dayjs'
 import { crawlerApi } from '@/api/crawler'
 import type { CrawlerRunFilter, CrawlerRunLog, CrawlerRunProgress, CrawlerSpiderConfig } from '@/types'
+import PageHeader from '@/components/common/PageHeader'
+import ui from '@/styles/page.module.css'
 
-const { Title, Paragraph, Text } = Typography
+const { Paragraph, Text } = Typography
 const { RangePicker } = DatePicker
 
 const SPIDER_OPTIONS = [
@@ -260,13 +262,18 @@ const CrawlerPage: React.FC = () => {
   ]
 
   return (
-    <div>
-      <Title level={4} style={{ marginTop: 0 }}><CloudSyncOutlined style={{ marginRight: 8 }} />爬虫运维</Title>
-      <Alert type="info" showIcon style={{ marginBottom: 16 }}
+    <div className={ui.pageShell}>
+      <PageHeader
+        title="爬虫运维"
+        subtitle="管理定时爬虫配置、立即执行与运行记录"
+        icon={<CloudSyncOutlined />}
+      />
+
+      <Alert type="info" showIcon className={ui.infoBanner}
         message="定时任务由本机 scheduler.py 执行，间隔来自数据库；「立即执行」由后端拉起子进程（需配置 Python venv）。" />
 
       {pendingRunId !== null && activeProgress && (
-        <Card size="small" title={`任务 #${activeProgress.id} 进度`} style={{ marginBottom: 16 }}
+        <Card bordered={false} className={ui.panelCard} title={`任务 #${activeProgress.id} 进度`}
           extra={<Button size="small" onClick={() => { setPendingRunId(null); setActiveProgress(null) }}>取消等待</Button>}>
           <Progress percent={activeProgress.progress}
             status={activeProgress.status === 'running' ? 'active' : activeProgress.status === 'failed' ? 'exception' : 'success'} />
@@ -283,19 +290,23 @@ const CrawlerPage: React.FC = () => {
         <Button icon={<ReloadOutlined />} onClick={() => { void fetchSpiders(); void fetchRuns(1) }}>刷新</Button>
       </Space>
 
+      <Card bordered={false} className={`${ui.panelCard} ${ui.tableWrap}`} title="爬虫配置">
       <Table<CrawlerSpiderConfig> rowKey="spiderKey" loading={loading} columns={spiderColumns}
-        dataSource={spiders} pagination={false} size="middle" style={{ marginBottom: 32 }} />
+        dataSource={spiders} pagination={false} size="middle" />
+      </Card>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <Title level={5} style={{ margin: 0 }}>运行记录</Title>
-        <Select allowClear placeholder="状态筛选" style={{ width: 140 }} value={statusFilter || undefined}
-          onChange={(v) => setStatusFilter(v ?? '')}
-          options={[{ label: '成功', value: 'success' }, { label: '失败', value: 'failed' }, { label: '运行中', value: 'running' }]} />
-      </div>
+      <Card bordered={false} className={`${ui.panelCard} ${ui.tableWrap}`}
+        title="运行记录"
+        extra={
+          <Select allowClear placeholder="状态筛选" style={{ width: 140 }} value={statusFilter || undefined}
+            onChange={(v) => setStatusFilter(v ?? '')}
+            options={[{ label: '成功', value: 'success' }, { label: '失败', value: 'failed' }, { label: '运行中', value: 'running' }]} />
+        }>
       <Table<CrawlerRunLog> rowKey="id" columns={runColumns} dataSource={filteredRuns}
         pagination={{ total: runTotal, pageSize: 15, showSizeChanger: false, onChange: (p) => void fetchRuns(p) }}
         size="middle" scroll={{ x: 1200 }}
         rowClassName={(r) => r.status === 'failed' ? 'ant-table-row-error' : ''} />
+      </Card>
 
       {/* 进度 modal */}
       <Modal title={progressModalId != null ? `任务 #${progressModalId} 进度` : ''} open={progressModalId !== null}

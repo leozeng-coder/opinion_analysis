@@ -117,10 +117,11 @@ class KeywordManager:
         
         try:
             cursor = self.connection.cursor()
-            query = "SELECT * FROM daily_topics WHERE extract_date = %s"
-            cursor.execute(query, (extract_date,))
+            topic_id = f"topic_{extract_date.strftime('%Y%m%d')}"
+            query = "SELECT * FROM daily_topics WHERE extract_date = %s AND topic_id = %s"
+            cursor.execute(query, (extract_date, topic_id))
             result = cursor.fetchone()
-            
+
             if result:
                 # 解析关键词JSON
                 result['keywords'] = json.loads(result['keywords'])
@@ -272,12 +273,18 @@ class KeywordManager:
             target_date = date.today()
         
         topics_data = self.get_daily_topics(target_date)
-        
+        digest = None
+        try:
+            from common.digest_redis import load_daily_digest
+            digest = load_daily_digest(target_date)
+        except Exception:
+            pass
+
         if topics_data:
             return {
                 'date': target_date,
                 'keywords_count': len(topics_data.get('keywords', [])),
-                'summary': topics_data.get('summary', ''),
+                'summary': (digest or {}).get('text', ''),
                 'has_data': True
             }
         else:

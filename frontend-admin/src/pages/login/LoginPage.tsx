@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Alert, Button, Card, Form, Input, message, Typography } from 'antd'
-import { LockOutlined, UserOutlined } from '@ant-design/icons'
+import { ApartmentOutlined, LockOutlined, UserOutlined } from '@ant-design/icons'
 import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/store/auth'
 import type { User } from '@/types'
+import auth from '@/styles/auth.module.css'
 
 const { Title, Text } = Typography
 
@@ -37,14 +38,12 @@ const LoginPage: React.FC = () => {
   }
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#f0f2f5',
-    }}>
-      <Card style={{ width: 380, boxShadow: '0 2px 16px rgba(0,0,0,0.1)' }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Title level={3} style={{ marginBottom: 4 }}>舆情分析系统 管理后台</Title>
-          <Text type="secondary">需要 admin 角色账号</Text>
+    <div className={auth.authPage}>
+      <Card bordered={false} className={auth.authCard}>
+        <div className={auth.authHeader}>
+          <div className={auth.authLogo}><ApartmentOutlined /></div>
+          <Title level={3} className={auth.authTitle}>舆情分析 · 管理后台</Title>
+          <Text className={auth.authSubtitle}>需要 admin 角色账号</Text>
         </div>
         {errorMsg && <Alert type="error" message={errorMsg} style={{ marginBottom: 16 }} />}
         <Form layout="vertical" onFinish={(v) => void onFinish(v as { username: string; password: string })}>

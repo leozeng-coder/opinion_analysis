@@ -13,14 +13,17 @@ import {
   Tag,
   Tooltip,
   Typography,
+  Card,
 } from 'antd'
 import { CopyOutlined, KeyOutlined, ReloadOutlined, UserAddOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { adminUserApi } from '@/api/admin-user'
+import PageHeader from '@/components/common/PageHeader'
+import ui from '@/styles/page.module.css'
 import type { User } from '@/types'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const roleOptions = [
   { label: 'admin', value: 'admin' },
@@ -28,7 +31,11 @@ const roleOptions = [
   { label: 'viewer', value: 'viewer' },
 ]
 
-const roleColor: Record<string, string> = { admin: 'red', analyst: 'blue', viewer: 'default' }
+const roleTagClass: Record<string, string> = {
+  admin: ui.softTagRose,
+  analyst: ui.softTagBlue,
+  viewer: ui.softTagNeutral,
+}
 
 const UsersPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([])
@@ -160,17 +167,24 @@ const UsersPage: React.FC = () => {
   ]
 
   return (
-    <div>
-      <Title level={4} style={{ marginTop: 0 }}>用户管理</Title>
-      <Space style={{ marginBottom: 16 }} wrap>
-        <Input.Search
-          placeholder="搜索用户名 / 邮箱 / 昵称"
-          allowClear
-          style={{ width: 260 }}
-          onSearch={(v) => { setKeyword(v); setPage(1); void fetch(1, v) }}
-        />
-        <Button icon={<ReloadOutlined />} onClick={() => void fetch(page)}>刷新</Button>
-      </Space>
+    <div className={ui.pageShell}>
+      <PageHeader
+        title="用户管理"
+        subtitle="管理系统用户账号、角色与权限"
+        icon={<UserAddOutlined />}
+        extra={
+          <Space wrap>
+            <Input.Search
+              placeholder="搜索用户名 / 邮箱 / 昵称"
+              allowClear
+              style={{ width: 260 }}
+              onSearch={(v) => { setKeyword(v); setPage(1); void fetch(1, v) }}
+            />
+            <Button icon={<ReloadOutlined />} className={ui.ghostBtn} onClick={() => void fetch(page)}>刷新</Button>
+          </Space>
+        }
+      />
+      <Card bordered={false} className={`${ui.panelCard} ${ui.tableWrap}`}>
       <Table<User>
         rowKey="id"
         columns={columns}
@@ -186,6 +200,7 @@ const UsersPage: React.FC = () => {
         size="middle"
         scroll={{ x: 980 }}
       />
+      </Card>
 
       <Modal
         title={<Space><KeyOutlined />重置密码成功</Space>}

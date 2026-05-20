@@ -1,0 +1,50 @@
+.topicCard :global(.ant-card-head) {
+  min-height: 48px;
+}
+
+.topicCard :global(.ant-card-body) {
+  padding: 12px 18px 16px !important;
+}
+
+.topicTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.topicRank {
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.rankTop { color: var(--c-rose-text); }
+.rankMid { color: var(--c-amber-text); }
+.rankRest { color: var(--app-text-secondary); }
+
+.topicIcon {
+  color: var(--c-amber);
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.topicName {
+  flex: 1;
+  font-size: 14px;
+}
+
+.topicHint {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.topicProgress {
+  margin-bottom: 0;
+}
+
+.topicProgress :global(.ant-progress-text) {
+  font-size: 12px;
+  color: var(--app-text-secondary);
+}

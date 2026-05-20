@@ -44,9 +44,11 @@ import type {
   UpdateRagConfigPayload,
   SystemSetting,
 } from '@/types'
+import PageHeader from '@/components/common/PageHeader'
+import ui from '@/styles/page.module.css'
 import dayjs from 'dayjs'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const PRESETS = [
   { label: 'DeepSeek',  baseUrl: 'https://api.deepseek.com',                          model: 'deepseek-chat' },
@@ -482,17 +484,25 @@ const ConfigPage: React.FC = () => {
   const regOn = regEnabled?.value === 'true'
   const thresholdSetting = getSetting('dashboard.hot_topic_threshold')
 
-  if (loading && !cfg) return <Spin size="large" style={{ display: 'block', marginTop: 100, textAlign: 'center' }} />
+  if (loading && !cfg) {
+    return (
+      <div className={ui.pageShell}>
+        <Spin size="large" style={{ display: 'block', margin: '80px auto' }} />
+      </div>
+    )
+  }
 
   return (
-    <div>
-      <Title level={4} style={{ marginTop: 0, marginBottom: 24 }}>
-        <SettingOutlined style={{ marginRight: 8 }} />系统配置
-      </Title>
+    <div className={ui.pageShell}>
+      <PageHeader
+        title="系统配置"
+        subtitle="RAG 向量库、AI 打标、Embedding 与仪表盘参数"
+        icon={<SettingOutlined />}
+      />
 
-      {/* ── Card 1: RAG Embedding 配置 ─────────────────────────────────── */}
       <Card
-        style={{ marginBottom: 24 }}
+        bordered={false}
+        className={ui.panelCard}
         title={
           <span>
             <DatabaseOutlined style={{ marginRight: 8 }} />
@@ -715,11 +725,12 @@ const ConfigPage: React.FC = () => {
 
       {/* ── Card 2: 大模型配置 ──────────────────────────────────────────── */}
       <Card
-        style={{ marginBottom: 24 }}
+        bordered={false}
+        className={ui.panelCard}
         title={
           <span>
             <RobotOutlined style={{ marginRight: 8 }} />
-            大模型配置（AI 自动打标）
+            大模型配置
           </span>
         }
         extra={
@@ -829,7 +840,7 @@ const ConfigPage: React.FC = () => {
       </Card>
 
       {/* ── Card 3: 系统设置 ─────────────────────────────────────────────── */}
-      <Card title="系统设置" loading={settingsLoading}>
+      <Card bordered={false} className={ui.panelCard} title="系统设置" loading={settingsLoading}>
         <Row gutter={[16, 16]}>
           <Col xs={24} lg={12}>
             <Card type="inner" title="注册与访问控制">

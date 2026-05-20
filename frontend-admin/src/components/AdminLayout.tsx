@@ -14,6 +14,7 @@ import {
 import { Avatar, Breadcrumb, Layout, Menu, Space, Typography } from 'antd'
 import type { MenuProps } from 'antd'
 import { useAuthStore } from '@/store/auth'
+import styles from './AdminLayout.module.css'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
@@ -54,20 +55,18 @@ const AdminLayout: React.FC = () => {
   const currentLabel = routeLabels[location.pathname] ?? ''
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className={styles.layout}>
       <Sider
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
         theme="dark"
         width={220}
-        style={{ position: 'sticky', top: 0, height: '100vh', overflow: 'auto' }}
+        className={styles.sider}
       >
-        <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px' }}>
-          <Space>
-            <ApartmentOutlined style={{ color: '#fff', fontSize: 20 }} />
-            {!collapsed && <Text style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>舆情分析管理</Text>}
-          </Space>
+        <div className={styles.logo}>
+          <span className={styles.logoIcon}><ApartmentOutlined /></span>
+          {!collapsed && <span>舆情分析管理</span>}
         </div>
         <Menu
           theme="dark"
@@ -78,28 +77,18 @@ const AdminLayout: React.FC = () => {
       </Sider>
 
       <Layout>
-        <Header
-          style={{
-            background: '#fff',
-            padding: '0 24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            borderBottom: '1px solid #f0f0f0',
-            height: 56,
-          }}
-        >
+        <Header className={styles.header}>
           <Breadcrumb items={[{ title: '管理后台' }, { title: currentLabel }]} />
-          <Space style={{ cursor: 'pointer' }} onClick={handleLogout}>
-            <Avatar style={{ backgroundColor: '#1677ff' }}>
+          <Space className={styles.userTrigger} size={10} onClick={handleLogout}>
+            <Avatar size="small" style={{ background: 'var(--c-blue)' }}>
               {user?.nickname?.[0] ?? user?.username?.[0] ?? 'A'}
             </Avatar>
-            <Text>{user?.nickname ?? user?.username}</Text>
-            <LogoutOutlined />
+            <Text style={{ color: 'var(--app-text)' }}>{user?.nickname ?? user?.username}</Text>
+            <LogoutOutlined style={{ color: 'var(--app-text-secondary)' }} />
           </Space>
         </Header>
 
-        <Content style={{ margin: 24, minHeight: 360 }}>
+        <Content className={styles.content}>
           <Outlet />
         </Content>
       </Layout>

@@ -14,3 +14,9 @@ DB_CHARSET = "utf8mb4"
 
 # DeepSeek API密钥（从 https://platform.deepseek.com 获取）
 DEEPSEEK_API_KEY = "sk-YOUR_DEEPSEEK_API_KEY"
+
+# Redis（今日 AI 摘要；与 backend/config/config.yaml 的 redis 保持一致）
+REDIS_HOST = "127.0.0.1"
+REDIS_PORT = 6379
+REDIS_PASSWORD = ""
+REDIS_DB = 0

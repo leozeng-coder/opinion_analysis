@@ -14,9 +14,10 @@ type Store struct {
 	Audit      *AuditRepository
 	DataSource *DataSourceRepository
 	RAG        *RAGRepository
+	Digest     *DigestRepository
 }
 
-func NewStore(db *gorm.DB) *Store {
+func NewStore(db *gorm.DB, digest *DigestRepository) *Store {
 	return &Store{
 		User:       NewUserRepository(db),
 		Article:    NewArticleRepository(db),
@@ -28,5 +29,6 @@ func NewStore(db *gorm.DB) *Store {
 		Audit:      NewAuditRepository(db),
 		DataSource: NewDataSourceRepository(db),
 		RAG:        NewRAGRepository(db),
+		Digest:     digest,
 	}
 }

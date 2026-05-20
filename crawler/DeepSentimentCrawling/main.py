@@ -151,10 +151,7 @@ class DeepSentimentCrawling:
         for topic in recent_topics:
             extract_date = topic['extract_date']
             keywords_count = len(topic.get('keywords', []))
-            summary_preview = topic.get('summary', '')[:100] + "..." if len(topic.get('summary', '')) > 100 else topic.get('summary', '')
-            
             print(f"   📅 {extract_date}: {keywords_count} 个关键词")
-            print(f"      摘要: {summary_preview}")
             print()
     
     def show_platform_guide(self):

@@ -93,7 +93,7 @@ const TaggerPage: React.FC = () => {
               value={pending ?? '-'}
               suffix="篇"
               loading={loading}
-              valueStyle={{ color: pending && pending > 0 ? '#fa8c16' : '#52c41a', fontSize: 32 }}
+              valueStyle={{ color: pending && pending > 0 ? '#E8A84A' : '#42C48C', fontSize: 32 }}
             />
           </Card>
         </Col>

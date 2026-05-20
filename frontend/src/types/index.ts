@@ -150,3 +150,58 @@ export interface ArticleStats {
   trend: { date: string; count: number }[]
   hotTopicCount?: number
 }
+
+// 仪表盘
+export interface DashboardKPIMetric {
+  count: number
+  changePercent?: number
+}
+
+export interface DashboardNegativeRatio {
+  percent: number
+  changePoints?: number
+}
+
+export interface DashboardSummary {
+  date: string
+  text: string
+  keywords: string[]
+}
+
+export interface SentimentTrendPoint {
+  date: string
+  positive: number
+  neutral: number
+  negative: number
+  total: number
+}
+
+export interface DashboardCrawlerRun {
+  id: number
+  spiders: string
+  status: string
+  startedAt: string
+  finishedAt?: string
+}
+
+export interface DashboardStatus {
+  lastCrawlerRun?: DashboardCrawlerRun
+  pendingTagging: number
+  latestArticleAt?: string
+}
+
+export interface DashboardOverview {
+  summary?: DashboardSummary
+  kpi: {
+    todayNew: DashboardKPIMetric
+    hotTopics: DashboardKPIMetric
+    todayAlerts: DashboardKPIMetric
+    negativeRatio: DashboardNegativeRatio
+  }
+  sentimentTrend: SentimentTrendPoint[]
+  hotTags: TagCount[]
+  recentAlerts: AlertRecord[]
+  recentNegative: Article[]
+  platform: { platform: string; count: number }[]
+  status: DashboardStatus
+}

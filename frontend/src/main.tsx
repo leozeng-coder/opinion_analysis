@@ -4,11 +4,12 @@ import { ConfigProvider, App as AntApp } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import 'dayjs/locale/zh-cn'
 import App from './App'
-import './index.css'
+import '@/styles/global.css'
+import { appTheme } from '@/styles/theme'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#1677ff' } }}>
+    <ConfigProvider locale={zhCN} theme={appTheme}>
       <AntApp>
         <App />
       </AntApp>

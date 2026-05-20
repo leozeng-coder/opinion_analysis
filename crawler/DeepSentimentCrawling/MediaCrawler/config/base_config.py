@@ -9,8 +9,8 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 # 基础配置
-PLATFORM = "xhs"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
-KEYWORDS = "黑神话钟馗,九三阅兵,种地吧,董璇,非亲生,医美风险,游戏科学,阅兵准备,热巴,醉驾判无罪"  # 关键词搜索配置，以英文逗号分隔
+PLATFORM = "zhihu"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
+KEYWORDS = "U17国足,土地出让金,兆易创新,汛情造谣,中俄关系,长三角,岚图汽车,BLG,崩坏3,Token"  # 关键词搜索配置，以英文逗号分隔
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据)

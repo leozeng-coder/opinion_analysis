@@ -1,0 +1,33 @@
+:root {
+  --app-bg: #f2f6fc;
+  --app-surface: #ffffff;
+  --app-border: rgba(15, 23, 42, 0.07);
+  --app-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 16px rgba(15, 23, 42, 0.05);
+  --app-shadow-hover: 0 4px 20px rgba(77, 147, 232, 0.12);
+  --app-radius: 12px;
+  --app-gap: 20px;
+  --app-text: rgba(15, 23, 42, 0.84);
+  --app-text-secondary: rgba(15, 23, 42, 0.50);
+  --app-text-muted: rgba(15, 23, 42, 0.38);
+  --c-blue: #4d93e8;
+  --c-blue-bg: #e6f2fe;
+  --c-blue-soft: rgba(77, 147, 232, 0.18);
+  --c-blue-text: #2d7ad8;
+  --c-amber: #e8a84a;
+  --c-amber-bg: #fef5e7;
+  --c-amber-soft: rgba(232, 168, 74, 0.20);
+  --c-amber-text: #c87820;
+  --c-rose: #ec6b6b;
+  --c-rose-bg: #fef0f0;
+  --c-rose-soft: rgba(236, 107, 107, 0.18);
+  --c-rose-text: #d84848;
+  --c-sage: #42c48c;
+  --c-sage-bg: #e8faf2;
+  --c-sage-soft: rgba(66, 196, 140, 0.18);
+  --c-sage-text: #28a868;
+  --c-up: #e05858;
+  --c-down: #38c078;
+  --sider-bg: #1e293b;
+  --sider-bg-deep: #172033;
+  --header-bg: #ffffff;
+}

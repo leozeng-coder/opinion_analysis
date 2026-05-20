@@ -41,3 +41,11 @@ func (r *AlertRepository) ListRecords(page, pageSize int, startAt *time.Time) ([
 	err := q.Preload("Rule").Order("created_at desc").Offset(offset).Limit(pageSize).Find(&list).Error
 	return list, total, err
 }
+
+func (r *AlertRepository) CountRecordsBetween(start, end time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.AlertRecord{}).
+		Where("created_at >= ? AND created_at < ?", start, end).
+		Count(&count).Error
+	return count, err
+}

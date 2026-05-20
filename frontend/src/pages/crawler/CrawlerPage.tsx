@@ -13,8 +13,10 @@ import { crawlerApi } from '@/api/crawler'
 import type {
   CrawlerRunFilter, CrawlerRunLog, CrawlerRunProgress, CrawlerSpiderConfig,
 } from '@/types'
+import PageHeader from '@/components/common/PageHeader'
+import page from '@/styles/page.module.css'
 
-const { Title, Paragraph, Text } = Typography
+const { Paragraph, Text } = Typography
 const { RangePicker } = DatePicker
 
 const SPIDER_OPTIONS = [
@@ -388,28 +390,25 @@ const CrawlerPage: React.FC = () => {
   ]
 
   return (
-    <div>
-      <Title level={4} style={{ marginTop: 0 }}>
-        <CloudSyncOutlined style={{ marginRight: 8 }} />
-        爬虫调度
-      </Title>
-      <Paragraph type="secondary" style={{ marginBottom: 16 }}>
-        定时任务由本机常驻进程 <Text code>scheduler.py</Text> 执行，间隔从数据库读取；
-        修改下方配置后保存，约 2 分钟内会自动重载。「立即执行」与「按关键词抓取」都由后端拉起一次性子进程
-        （需本机已配置 Python 虚拟环境）。
-      </Paragraph>
+    <div className={page.pageShell}>
+      <PageHeader
+        title="爬虫调度"
+        subtitle="定时任务由本机常驻进程 scheduler.py 执行；「立即执行」与「按关键词抓取」由后端拉起一次性子进程（需本机 Python 虚拟环境）。"
+        icon={<CloudSyncOutlined />}
+      />
+
       <Alert
         type="info"
         showIcon
-        style={{ marginBottom: 16 }}
+        className={page.infoBanner}
         message="单次抓取可能要几分钟；外网慢时最长约 15 分钟会自动结束（见运行日志）。运行中可查看下方进度条，或在表格中点「查询」轮询进度接口。"
       />
 
       {pendingRunId !== null && activeProgress && (
         <Card
-          size="small"
+          bordered={false}
+          className={page.panelCard}
           title={`任务 #${activeProgress.id} 进度`}
-          style={{ marginBottom: 16 }}
           extra={
             <Button
               size="small"
@@ -462,6 +461,7 @@ const CrawlerPage: React.FC = () => {
         <Button onClick={() => { void fetchSpiders(); void fetchRuns(1) }}>刷新</Button>
       </Space>
 
+      <Card bordered={false} className={`${page.panelCard} ${page.tableWrap}`} title="爬虫配置">
       <Table<CrawlerSpiderConfig>
         rowKey="spiderKey"
         loading={loading}
@@ -469,10 +469,10 @@ const CrawlerPage: React.FC = () => {
         dataSource={spiders}
         pagination={false}
         size="middle"
-        style={{ marginBottom: 32 }}
       />
+      </Card>
 
-      <Title level={5}>最近运行记录</Title>
+      <Card bordered={false} className={`${page.panelCard} ${page.tableWrap}`} title="最近运行记录">
       <Table<CrawlerRunLog>
         rowKey="id"
         columns={runColumns}
@@ -486,6 +486,7 @@ const CrawlerPage: React.FC = () => {
         size="middle"
         scroll={{ x: 1300 }}
       />
+      </Card>
 
       <Modal
         title={progressModalId != null ? `任务 #${progressModalId} 进度` : '进度'}

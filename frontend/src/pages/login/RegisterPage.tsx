@@ -1,10 +1,11 @@
 import React from 'react'
 import { Form, Input, Button, Card, message, Typography } from 'antd'
-import { UserOutlined, LockOutlined, MailOutlined, IdcardOutlined } from '@ant-design/icons'
+import { UserOutlined, LockOutlined, MailOutlined, IdcardOutlined, RadarChartOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
+import auth from '@/styles/auth.module.css'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 const RegisterPage: React.FC = () => {
   const navigate = useNavigate()
@@ -32,16 +33,14 @@ const RegisterPage: React.FC = () => {
   }
 
   return (
-    <div style={{
-      height: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', background: '#f0f2f5',
-    }}>
-      <Card style={{ width: 380, boxShadow: '0 4px 24px rgba(0,0,0,.08)' }}>
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Title level={3} style={{ margin: 0 }}>注册账号</Title>
-          <Typography.Text type="secondary">舆情分析系统</Typography.Text>
+    <div className={auth.authPage}>
+      <Card bordered={false} className={auth.authCard}>
+        <div className={auth.authHeader}>
+          <div className={auth.authLogo}><RadarChartOutlined /></div>
+          <Title level={3} className={auth.authTitle}>注册账号</Title>
+          <Text className={auth.authSubtitle}>舆情分析系统</Text>
         </div>
-        <Form onFinish={onFinish} size="large" autoComplete="off" layout="vertical" style={{ marginBottom: 0 }}>
+        <Form onFinish={onFinish} size="large" autoComplete="off" layout="vertical">
           <Form.Item
             name="username"
             label="用户名"
@@ -76,13 +75,13 @@ const RegisterPage: React.FC = () => {
           <Form.Item name="nickname" label="昵称（可选）">
             <Input prefix={<IdcardOutlined />} placeholder="显示名称" />
           </Form.Item>
-          <Form.Item>
+          <Form.Item style={{ marginBottom: 0 }}>
             <Button type="primary" htmlType="submit" block loading={loading}>
               注册
             </Button>
           </Form.Item>
         </Form>
-        <div style={{ textAlign: 'center' }}>
+        <div className={auth.authFooter}>
           <Link to="/login">已有账号？去登录</Link>
         </div>
       </Card>

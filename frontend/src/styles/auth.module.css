@@ -1,0 +1,62 @@
+.authPage {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(77, 147, 232, 0.22), transparent),
+    var(--app-bg);
+}
+
+.authCard {
+  width: 100%;
+  max-width: 400px;
+  border: 1px solid var(--app-border) !important;
+  border-radius: var(--app-radius) !important;
+  box-shadow: var(--app-shadow-hover) !important;
+  background: var(--app-surface) !important;
+}
+
+.authCard :global(.ant-card-body) {
+  padding: 36px 32px 28px !important;
+}
+
+.authHeader {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.authLogo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--c-blue-soft);
+  color: var(--c-blue);
+  font-size: 22px;
+  margin-bottom: 14px;
+}
+
+.authTitle {
+  margin: 0 0 6px !important;
+  font-weight: 600 !important;
+  color: var(--app-text) !important;
+}
+
+.authSubtitle {
+  font-size: 13px;
+  color: var(--app-text-secondary);
+}
+
+.authFooter {
+  text-align: center;
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.authFooter a {
+  color: var(--c-blue);
+}

@@ -1,13 +1,1 @@
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
-
-#root {
-  height: 100vh;
-}
+/* 保留占位；全局样式见 styles/global.css */
