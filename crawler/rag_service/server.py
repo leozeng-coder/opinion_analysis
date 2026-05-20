@@ -1026,12 +1026,8 @@ def search(body: SearchRequest) -> Dict[str, Any]:
 
 @app.post("/v1/sync")
 def sync_now(background_tasks: BackgroundTasks, body: SyncRequest = SyncRequest()) -> Dict[str, Any]:
-    try:
-        client = ensure_milvus_client()
-        assert_embedding_dimensions_match(client)
-    except DimensionMismatchError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
     if body.async_:
+        # 异步模式立即返回；Milvus/嵌入模型加载在后台执行（避免阻塞 HTTP 导致 Go 代理超时）。
         background_tasks.add_task(_run_sync_background, body.sync_log_id)
         return {
             "ok": True,
@@ -1039,6 +1035,11 @@ def sync_now(background_tasks: BackgroundTasks, body: SyncRequest = SyncRequest(
             "sync_log_id": body.sync_log_id,
             "message": "submitted",
         }
+    try:
+        client = ensure_milvus_client()
+        assert_embedding_dimensions_match(client)
+    except DimensionMismatchError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     return incremental_sync(sync_log_id=body.sync_log_id, mode="manual")
 
 

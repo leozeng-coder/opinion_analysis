@@ -265,7 +265,7 @@ func (h *RAGHandler) TriggerSync(c *gin.Context) {
 	}
 
 	payload, _ := json.Marshal(map[string]any{"sync_log_id": logRow.ID, "async": true})
-	client := &http.Client{Timeout: 8 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 	req, err := http.NewRequestWithContext(
 		c.Request.Context(),
 		http.MethodPost,

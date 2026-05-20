@@ -79,7 +79,10 @@ func (c *Client) Search(ctx context.Context, query string, topK int) ([]Chunk, e
 	if err := json.Unmarshal(respBody, &out); err != nil {
 		return nil, err
 	}
-	return out.Chunks, nil
+
+	// 相关性过滤：移除低分结果
+	filtered := FilterByRelevance(out.Chunks, 0.3)
+	return filtered, nil
 }
 
 func truncate(s string, n int) string {
@@ -90,12 +93,51 @@ func truncate(s string, n int) string {
 	return string(r[:n]) + "…"
 }
 
+// FilterByRelevance 过滤低相关性结果（基于 score 阈值）。
+func FilterByRelevance(chunks []Chunk, minScore float64) []Chunk {
+	if len(chunks) == 0 {
+		return chunks
+	}
+
+	var filtered []Chunk
+	for _, ch := range chunks {
+		if ch.Score >= minScore {
+			filtered = append(filtered, ch)
+		}
+	}
+
+	// 如果过滤后为空，但原始结果不为空，则保留得分最高的一条（降级策略）
+	if len(filtered) == 0 && len(chunks) > 0 {
+		best := chunks[0]
+		for _, ch := range chunks {
+			if ch.Score > best.Score {
+				best = ch
+			}
+		}
+		filtered = []Chunk{best}
+	}
+
+	return filtered
+}
+
 // FormatContext 将检索结果拼成可供 LLM 阅读的文本。
 func FormatContext(chunks []Chunk) string {
 	if len(chunks) == 0 {
 		return ""
 	}
 	var b strings.Builder
+
+	// 添加检索质量提示
+	avgScore := 0.0
+	for _, ch := range chunks {
+		avgScore += ch.Score
+	}
+	avgScore /= float64(len(chunks))
+
+	if avgScore < 0.5 {
+		b.WriteString("[检索提示：以下结果相关性较低，仅供参考]\n\n")
+	}
+
 	for i, ch := range chunks {
 		if i > 0 {
 			b.WriteString("\n---\n")

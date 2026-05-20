@@ -23,6 +23,8 @@ import {
   StopOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   chatSessionApi,
   type ChatSession,
@@ -221,21 +223,84 @@ const AiAssistantPage: React.FC = () => {
 
     setInput('')
     setLoading(true)
+
+    // 添加用户消息到界面
+    const userMsg: ChatMessage = {
+      id: Date.now(),
+      sessionId: currentSessionId ?? 0,
+      role: 'user',
+      content: text,
+      createdAt: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, userMsg])
+
+    // 创建助手消息占位符
+    const assistantMsg: ChatMessage = {
+      id: Date.now() + 1,
+      sessionId: currentSessionId ?? 0,
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, assistantMsg])
+
+    let newSessionId = currentSessionId
+    let newTitle = ''
+
     try {
-      const res = await chatSessionApi.chat({
-        sessionId: currentSessionId ?? undefined,
-        content: text,
-      })
-      setCurrentSessionId(res.sessionId)
+      await chatSessionApi.chatStream(
+        {
+          sessionId: currentSessionId ?? undefined,
+          content: text,
+        },
+        {
+          onSession: (data) => {
+            newSessionId = data.sessionId
+            newTitle = data.title
+            setCurrentSessionId(data.sessionId)
+          },
+          onContent: (chunk) => {
+            setMessages((prev) => {
+              const updated = [...prev]
+              const lastMsg = updated[updated.length - 1]
+              if (lastMsg && lastMsg.role === 'assistant') {
+                updated[updated.length - 1] = {
+                  ...lastMsg,
+                  content: lastMsg.content + chunk
+                }
+              }
+              return updated
+            })
+          },
+          onDone: (data) => {
+            if (data.title) {
+              newTitle = data.title
+            }
+          },
+          onError: (error) => {
+            message.error(error)
+          },
+        }
+      )
+
+      // 流式完成后刷新会话列表
       await loadSessions()
-      await loadSession(res.sessionId)
-    } catch {
+
+      // 如果标题有更新，同步到会话列表
+      if (newTitle && newSessionId) {
+        setSessions((prev) =>
+          prev.map((s) => (s.id === newSessionId ? { ...s, title: newTitle } : s))
+        )
+      }
+    } catch (err) {
       message.error('发送失败')
       setInput(text)
+      // 移除添加的消息
+      setMessages((prev) => prev.slice(0, -2))
     } finally {
       setLoading(false)
     }
-  }, [input, loading, currentSessionId, loadSessions, loadSession])
+  }, [input, loading, currentSessionId, loadSessions])
 
   const currentSession = sessions.find((s) => s.id === currentSessionId)
   const titleBar = currentSession?.title ?? '舆情分析助手'
@@ -338,38 +403,44 @@ const AiAssistantPage: React.FC = () => {
             }
             ref={threadRef}
           >
-            {messages.length === 0 ? (
-              <div className={styles.heroEmpty}>
-                <h2 className={styles.heroTitle}>{HERO_HEADING}</h2>
-                <p className={styles.heroLead}>{WELCOME_SHORT}</p>
-                <p className={styles.heroMuted}>{WELCOME_DETAIL}</p>
-              </div>
-            ) : (
-              messages.map((m) => {
-                const isUser = m.role === 'user'
-                return (
-                  <article key={m.id} className={styles.block}>
-                    {isUser ? (
-                      <div className={styles.userBlock}>
-                        <div className={styles.userContent}>{m.content}</div>
-                      </div>
-                    ) : (
-                      <div className={styles.assistantBlock}>
-                        <p className={styles.assistantProse}>{m.content}</p>
-                      </div>
-                    )}
-                  </article>
-                )
-              })
-            )}
-            {loading && (
-              <div className={styles.block}>
-                <div className={styles.thinkingRow}>
-                  <Spin size="small" />
-                  <span>正在生成回复…</span>
+            <div className={styles.docInner}>
+              {messages.length === 0 ? (
+                <div className={styles.heroEmpty}>
+                  <h2 className={styles.heroTitle}>{HERO_HEADING}</h2>
+                  <p className={styles.heroLead}>{WELCOME_SHORT}</p>
+                  <p className={styles.heroMuted}>{WELCOME_DETAIL}</p>
                 </div>
-              </div>
-            )}
+              ) : (
+                messages.map((m) => {
+                  const isUser = m.role === 'user'
+                  return (
+                    <article key={m.id} className={styles.block}>
+                      {isUser ? (
+                        <div className={styles.userBlock}>
+                          <div className={styles.userContent}>{m.content}</div>
+                        </div>
+                      ) : (
+                        <div className={styles.assistantBlock}>
+                          <div className={styles.assistantProse}>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {m.content}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      )}
+                    </article>
+                  )
+                })
+              )}
+              {loading && (
+                <div className={styles.block}>
+                  <div className={styles.thinkingRow}>
+                    <Spin size="small" />
+                    <span>正在生成回复…</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </main>
 
           <div className={styles.composerDock}>
@@ -423,7 +494,6 @@ const AiAssistantPage: React.FC = () => {
                 />
               </div>
               <Text type="secondary" className={styles.composerMeta}>
-                切换账号后即看不到他人的会话；内容请结合实际数据核验
               </Text>
             </div>
           </div>

@@ -1,7 +1,10 @@
 package user
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -81,6 +84,7 @@ func (h *AIChatHandler) Chat(c *gin.Context) {
 	}
 
 	var retrievalCtx string
+	var ragUsed bool
 	if useRAG && h.ragClient != nil {
 		q := lastUserQuestion(hist)
 		if q != "" {
@@ -92,26 +96,75 @@ func (h *AIChatHandler) Chat(c *gin.Context) {
 			} else {
 				log.Printf("[ai-chat] RAG search returned %d chunks for query: %q", len(chunks), q)
 				retrievalCtx = rag.FormatContext(chunks)
+				ragUsed = true
 			}
 		}
 	} else if useRAG && h.ragClient == nil {
 		log.Printf("[ai-chat] RAG requested but ragClient is nil (check rag.enabled in config.yaml)")
 	}
 
-	reply, err := h.taggerSvc.ChatCompletion(
+	// 设置 SSE 响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		response.ServerError(c)
+		return
+	}
+
+	// 先发送元信息
+	metaInfo := map[string]interface{}{
+		"ragUsed": ragUsed,
+	}
+	metaJSON, _ := json.Marshal(metaInfo)
+	fmt.Fprintf(c.Writer, "event: meta\ndata: %s\n\n", metaJSON)
+	flusher.Flush()
+
+	// 流式调用 LLM
+	contentCh, errCh := h.taggerSvc.ChatCompletionStream(
 		c.Request.Context(),
 		hist,
 		strings.TrimSpace(req.PageHint),
 		retrievalCtx,
 	)
-	if err != nil {
-		if strings.Contains(err.Error(), "api key not configured") {
-			response.Fail(c, 503, "大模型未配置：请在管理后台「系统状态」中配置 API Key，或设置环境变量 DEEPSEEK_API_KEY")
+
+	for {
+		select {
+		case chunk, ok := <-contentCh:
+			if !ok {
+				// 流结束，发送完成事件
+				doneData := map[string]bool{"done": true}
+				doneJSON, _ := json.Marshal(doneData)
+				fmt.Fprintf(c.Writer, "event: done\ndata: %s\n\n", doneJSON)
+				flusher.Flush()
+				return
+			}
+			// 发送增量内容
+			chunkData := map[string]string{"content": chunk}
+			chunkJSON, _ := json.Marshal(chunkData)
+			fmt.Fprintf(c.Writer, "data: %s\n\n", chunkJSON)
+			flusher.Flush()
+
+		case err := <-errCh:
+			if err != nil {
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "api key not configured") {
+					errMsg = "大模型未配置：请在管理后台「系统状态」中配置 API Key，或设置环境变量 DEEPSEEK_API_KEY"
+				} else {
+					errMsg = "模型调用失败：" + TruncateErrMsg(errMsg, 200)
+				}
+				errData := map[string]string{"error": errMsg}
+				errJSON, _ := json.Marshal(errData)
+				fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errJSON)
+				flusher.Flush()
+				return
+			}
+
+		case <-c.Request.Context().Done():
 			return
 		}
-		response.Fail(c, 502, "模型调用失败："+TruncateErrMsg(err.Error(), 200))
-		return
 	}
-
-	response.OK(c, gin.H{"reply": reply})
 }

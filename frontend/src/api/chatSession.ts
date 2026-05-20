@@ -34,6 +34,13 @@ export interface ChatResponse {
   reply: string
 }
 
+export interface StreamChatCallbacks {
+  onSession?: (data: { sessionId: number; title: string; ragUsed: boolean }) => void
+  onContent: (chunk: string) => void
+  onDone?: (data: { done: boolean; title?: string }) => void
+  onError?: (error: string) => void
+}
+
 function buildChatBody(data: ChatRequest): Record<string, unknown> {
   const body: Record<string, unknown> = { content: data.content }
   if (data.sessionId != null) body.sessionId = data.sessionId
@@ -70,4 +77,110 @@ export const chatSessionApi = {
       buildChatBody(data),
       { timeout: 120000 }
     )) as ChatResponse,
+
+  /** 流式聊天，通过回调接收增量内容 */
+  chatStream: async (data: ChatRequest, callbacks: StreamChatCallbacks) => {
+    // 从 localStorage 获取 token（与 zustand store 同步）
+    const token = localStorage.getItem('auth-storage')
+    let authToken = ''
+    if (token) {
+      try {
+        const parsed = JSON.parse(token)
+        authToken = parsed.state?.token || ''
+      } catch {
+        // ignore
+      }
+    }
+
+    const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+    const url = `${baseURL}/ai/sessions/chat`
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 120000) // 2分钟超时
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify(buildChatBody(data)),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let streamCompleted = false
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            streamCompleted = true
+            break
+          }
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.trim() || line.startsWith(':')) continue
+
+            if (line.startsWith('event:')) {
+              // 事件类型行，跳过
+              continue
+            }
+
+            if (line.startsWith('data:')) {
+              const data = line.substring(5).trim()
+              try {
+                const parsed = JSON.parse(data)
+
+                // 处理不同类型的事件
+                if (parsed.sessionId !== undefined) {
+                  // session 事件
+                  callbacks.onSession?.(parsed)
+                } else if (parsed.content !== undefined) {
+                  // 增量内容
+                  callbacks.onContent(parsed.content)
+                } else if (parsed.done === true) {
+                  // 完成事件
+                  streamCompleted = true
+                  callbacks.onDone?.(parsed)
+                } else if (parsed.error !== undefined) {
+                  // 错误事件
+                  callbacks.onError?.(parsed.error)
+                  throw new Error(parsed.error)
+                } else if (parsed.ragUsed !== undefined) {
+                  // meta 事件（无状态聊天）
+                  // 可以忽略或记录
+                }
+              } catch (e) {
+                console.warn('Failed to parse SSE data:', data, e)
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+
+      if (!streamCompleted) {
+        console.warn('Stream ended without done event')
+      }
+    } finally {
+      clearTimeout(timeoutId)
+    }
+  },
 }

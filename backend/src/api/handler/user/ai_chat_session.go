@@ -1,7 +1,10 @@
 package user
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -198,30 +201,89 @@ func (h *ChatSessionHandler) Chat(c *gin.Context) {
 		useRAG = *req.UseRAG
 	}
 	var retrievalCtx string
+	var ragUsed bool
 	if useRAG && h.ragClient != nil {
 		chunks, err := h.ragClient.Search(c.Request.Context(), content, 8)
 		if err != nil {
 			log.Printf("[session-chat] RAG error: %v", err)
-		} else {
+		} else if len(chunks) > 0 {
 			retrievalCtx = rag.FormatContext(chunks)
+			ragUsed = true
+			log.Printf("[session-chat] RAG returned %d chunks for query", len(chunks))
+		} else {
+			log.Printf("[session-chat] RAG returned 0 chunks, falling back to general knowledge")
 		}
 	}
 
-	reply, err := h.taggerSvc.ChatCompletion(
-		c.Request.Context(), hist, strings.TrimSpace(req.PageHint), retrievalCtx,
-	)
-	if err != nil {
-		if strings.Contains(err.Error(), "api key not configured") {
-			response.Fail(c, 503, "大模型未配置：请在管理后台「系统状态」中配置 API Key")
-			return
-		}
-		response.Fail(c, 502, "模型调用失败："+TruncateErrMsg(err.Error(), 200))
+	// 设置 SSE 响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		response.ServerError(c)
 		return
 	}
 
+	// 先发送会话信息
+	sessionInfo := map[string]interface{}{
+		"sessionId": session.ID,
+		"title":     session.Title,
+		"ragUsed":   ragUsed,
+	}
+	sessionJSON, _ := json.Marshal(sessionInfo)
+	fmt.Fprintf(c.Writer, "event: session\ndata: %s\n\n", sessionJSON)
+	flusher.Flush()
+
+	// 流式调用 LLM
+	contentCh, errCh := h.taggerSvc.ChatCompletionStream(
+		c.Request.Context(), hist, strings.TrimSpace(req.PageHint), retrievalCtx,
+	)
+
+	var fullReply strings.Builder
+	for {
+		select {
+		case chunk, ok := <-contentCh:
+			if !ok {
+				// 流结束
+				goto StreamEnd
+			}
+			fullReply.WriteString(chunk)
+			// 发送增量内容
+			chunkData := map[string]string{"content": chunk}
+			chunkJSON, _ := json.Marshal(chunkData)
+			fmt.Fprintf(c.Writer, "data: %s\n\n", chunkJSON)
+			flusher.Flush()
+
+		case err := <-errCh:
+			if err != nil {
+				errMsg := err.Error()
+				if strings.Contains(errMsg, "api key not configured") {
+					errMsg = "大模型未配置：请在管理后台「系统状态」中配置 API Key"
+				} else {
+					errMsg = "模型调用失败：" + TruncateErrMsg(errMsg, 200)
+				}
+				errData := map[string]string{"error": errMsg}
+				errJSON, _ := json.Marshal(errData)
+				fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", errJSON)
+				flusher.Flush()
+				return
+			}
+
+		case <-c.Request.Context().Done():
+			return
+		}
+	}
+
+StreamEnd:
+	// 保存消息到数据库
+	reply := fullReply.String()
 	_ = h.chat.CreateMessage(&model.ChatMessage{SessionID: session.ID, Role: "user", Content: content})
 	_ = h.chat.CreateMessage(&model.ChatMessage{SessionID: session.ID, Role: "assistant", Content: reply})
 
+	// 更新会话
 	outTitle := session.Title
 	updates := map[string]interface{}{"updated_at": time.Now()}
 	if req.SessionID != nil && len(dbMsgs) == 0 {
@@ -233,9 +295,12 @@ func (h *ChatSessionHandler) Chat(c *gin.Context) {
 		log.Printf("[session-chat] bump session: %v", err)
 	}
 
-	response.OK(c, gin.H{
-		"sessionId": session.ID,
-		"title":     outTitle,
-		"reply":     reply,
-	})
+	// 发送完成事件
+	doneData := map[string]interface{}{
+		"done":  true,
+		"title": outTitle,
+	}
+	doneJSON, _ := json.Marshal(doneData)
+	fmt.Fprintf(c.Writer, "event: done\ndata: %s\n\n", doneJSON)
+	flusher.Flush()
 }

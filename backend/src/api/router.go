@@ -106,6 +106,9 @@ func NewRouter(db *gorm.DB, logger *zap.Logger, taggerSvc *tagger.Service, ragPr
 
 			authorized.POST("/ai/chat", aiChatH.Chat)
 
+			// 测试 SSE 流式输出
+			authorized.GET("/ai/test-stream", userhandler.TestStreamHandler)
+
 			aiSessions := authorized.Group("/ai/sessions")
 			{
 				aiSessions.GET("", chatSessionH.ListSessions)
