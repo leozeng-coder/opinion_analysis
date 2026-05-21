@@ -10,7 +10,7 @@
 
 # 基础配置
 PLATFORM = "zhihu"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
-KEYWORDS = "U17国足,土地出让金,兆易创新,汛情造谣,中俄关系,长三角,岚图汽车,BLG,崩坏3,Token"  # 关键词搜索配置，以英文逗号分隔
+KEYWORDS = "抖音直播,考公,SpaceX上市,失业率,山姆,杨梅泡药,武契奇访华,AI,特朗普,商业航天"  # 关键词搜索配置，以英文逗号分隔
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据)

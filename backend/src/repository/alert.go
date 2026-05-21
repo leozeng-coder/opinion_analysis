@@ -21,8 +21,30 @@ func (r *AlertRepository) ListRules() ([]model.AlertRule, error) {
 	return list, err
 }
 
+func (r *AlertRepository) ListActiveRules() ([]model.AlertRule, error) {
+	var list []model.AlertRule
+	err := r.db.Where("status = ?", 1).Find(&list).Error
+	return list, err
+}
+
 func (r *AlertRepository) CreateRule(rule *model.AlertRule) error {
 	return r.db.Create(rule).Error
+}
+
+func (r *AlertRepository) FindRule(id string) (*model.AlertRule, error) {
+	var rule model.AlertRule
+	err := r.db.First(&rule, id).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+func (r *AlertRepository) UpdateRule(id string, fields map[string]interface{}) error {
+	return r.db.Model(&model.AlertRule{}).Where("id = ?", id).Updates(fields).Error
 }
 
 func (r *AlertRepository) DeleteRule(id string) error {
@@ -48,4 +70,22 @@ func (r *AlertRepository) CountRecordsBetween(start, end time.Time) (int64, erro
 		Where("created_at >= ? AND created_at < ?", start, end).
 		Count(&count).Error
 	return count, err
+}
+
+func (r *AlertRepository) CreateRecord(record *model.AlertRecord) error {
+	return r.db.Create(record).Error
+}
+
+func (r *AlertRepository) ExistsByDedupKey(key string) (bool, error) {
+	if key == "" {
+		return false, nil
+	}
+	var count int64
+	err := r.db.Model(&model.AlertRecord{}).Where("dedup_key = ?", key).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *AlertRepository) UpdateLastTriggered(ruleID uint, t time.Time) error {
+	return r.db.Model(&model.AlertRule{}).Where("id = ?", ruleID).
+		Update("last_triggered_at", t).Error
 }

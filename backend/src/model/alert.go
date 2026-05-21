@@ -10,17 +10,18 @@ import (
 type AlertRule struct {
 	ID         uint           `gorm:"primarykey" json:"id"`
 	Name       string         `gorm:"size:128;not null" json:"name"`
-	Keywords   string         `gorm:"type:json" json:"keywords"`
+	Keywords   string         `gorm:"type:text" json:"keywords"`
 	Sentiment  string         `gorm:"size:16" json:"sentiment"`
 	Threshold  int            `json:"threshold"`
 	Interval   int            `json:"interval"`
 	NotifyType string         `gorm:"size:32" json:"notifyType"`
-	NotifyConf string         `gorm:"type:json" json:"notifyConf"`
-	Status     int8           `gorm:"default:1" json:"status"`
-	CreatedBy  uint           `json:"createdBy"`
-	CreatedAt  time.Time      `json:"createdAt"`
-	UpdatedAt  time.Time      `json:"updatedAt"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	NotifyConf string         `gorm:"type:text" json:"notifyConf"`
+	Status          int8           `gorm:"default:1" json:"status"`
+	LastTriggeredAt *time.Time     `json:"lastTriggeredAt,omitempty"`
+	CreatedBy       uint           `json:"createdBy"`
+	CreatedAt       time.Time      `json:"createdAt"`
+	UpdatedAt       time.Time      `json:"updatedAt"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // AlertRecord 预警记录
@@ -31,5 +32,6 @@ type AlertRecord struct {
 	Title     string    `gorm:"size:512" json:"title"`
 	Content   string    `gorm:"type:text" json:"content"`
 	Status    string    `gorm:"size:16;default:pending" json:"status"`
+	DedupKey  string    `gorm:"size:128;uniqueIndex" json:"-"`
 	CreatedAt time.Time `json:"createdAt"`
 }

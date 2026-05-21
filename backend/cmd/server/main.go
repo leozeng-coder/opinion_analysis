@@ -18,6 +18,7 @@ import (
 	"opinion-analysis/src/api"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
 )
@@ -87,6 +88,13 @@ func seedSystemSettings(db *gorm.DB) {
 		{Key: "rag.chunk_overlap", Value: "72", Desc: "RAG 切块重叠字符数"},
 		{Key: "rag.sync_interval_sec", Value: "120", Desc: "RAG 定时增量同步间隔（秒）"},
 		{Key: "rag.sync_batch", Value: "100", Desc: "RAG 单次同步最多处理文章数"},
+		{Key: "alert.on_crawl", Value: "true", Desc: "爬虫任务成功完成后是否自动触发告警评估"},
+		{Key: "smtp.host", Value: "", Desc: "SMTP 服务器地址"},
+		{Key: "smtp.port", Value: "465", Desc: "SMTP 端口（465=SSL, 587=STARTTLS）"},
+		{Key: "smtp.username", Value: "", Desc: "SMTP 用户名"},
+		{Key: "smtp.password", Value: "", Desc: "SMTP 密码或应用专用密码"},
+		{Key: "smtp.from", Value: "", Desc: "发件人地址（可选，默认使用 username）"},
+		{Key: "smtp.use_tls", Value: "false", Desc: "587 端口是否启用 STARTTLS（465 端口请保持 false）"},
 	}
 	for _, s := range desired {
 		var existing model.SystemSetting
@@ -227,6 +235,7 @@ func main() {
 	go taggerSvc.Start(ctx)
 
 	ragProc := ragprocess.NewManager()
+	alertEngine := alertengine.New(repository.NewStore(db, nil))
 	if config.Cfg.RAG.Managed && config.Cfg.RAG.AutoStart {
 		go func() {
 			startCtx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
@@ -244,7 +253,7 @@ func main() {
 		}
 	}()
 
-	r := api.NewRouter(db, rdb, logger, taggerSvc, ragProc)
+	r := api.NewRouter(db, rdb, logger, taggerSvc, ragProc, alertEngine)
 
 	addr := fmt.Sprintf(":%s", config.Cfg.Server.Port)
 	logger.Info("server starting", zap.String("addr", addr))

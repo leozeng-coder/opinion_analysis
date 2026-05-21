@@ -337,3 +337,46 @@ func aggregateTagsInMemory(db *gorm.DB, startAt, endAt, platform string, limit i
 	}
 	return out
 }
+
+func (r *ArticleRepository) alertRuleQuery(keywords []string, sentiment string, since time.Time) *gorm.DB {
+	q := r.db.Model(&model.Article{}).
+		Where("platform != ?", "github-trending-today").
+		Where("created_at >= ?", since)
+	if sentiment != "" {
+		q = q.Where("sentiment = ?", sentiment)
+	}
+	if len(keywords) > 0 {
+		conds := make([]string, 0, len(keywords))
+		args := make([]any, 0, len(keywords)*2)
+		for _, kw := range keywords {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			conds = append(conds, "(title LIKE ? OR content LIKE ?)")
+			args = append(args, "%"+kw+"%", "%"+kw+"%")
+		}
+		if len(conds) > 0 {
+			q = q.Where("("+strings.Join(conds, " OR ")+")", args...)
+		}
+	}
+	return q
+}
+
+func (r *ArticleRepository) CountForAlertRule(keywords []string, sentiment string, since time.Time) (int64, error) {
+	var count int64
+	err := r.alertRuleQuery(keywords, sentiment, since).Count(&count).Error
+	return count, err
+}
+
+func (r *ArticleRepository) ListSampleForAlertRule(keywords []string, sentiment string, since time.Time, limit int) ([]model.Article, error) {
+	if limit < 1 {
+		limit = 5
+	}
+	var list []model.Article
+	err := r.alertRuleQuery(keywords, sentiment, since).
+		Order("created_at desc").
+		Limit(limit).
+		Find(&list).Error
+	return list, err
+}

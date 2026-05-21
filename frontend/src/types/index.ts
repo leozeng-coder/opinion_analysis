@@ -80,6 +80,19 @@ export interface AlertRule {
   createdAt: string
 }
 
+export interface AlertRulePayload {
+  name: string
+  keywordList?: string[]
+  sentiment?: string
+  threshold?: number
+  interval?: number
+  notifyType: string
+  notifyEmail?: string
+  notifyWebhook?: string
+  notifyPhone?: string
+  status?: number
+}
+
 // 预警记录
 export interface AlertRecord {
   id: number

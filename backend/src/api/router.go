@@ -13,12 +13,13 @@ import (
 	userhandler "opinion-analysis/src/api/handler/user"
 	"opinion-analysis/src/middleware"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
 	"opinion-analysis/pkg/response"
 )
 
-func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager) *gin.Engine {
+func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager, alertEngine *alertengine.Engine) *gin.Engine {
 	store := repository.NewStore(db, repository.NewDigestRepository(rdb))
 
 	r := gin.New()
@@ -38,8 +39,8 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	authH := userhandler.NewAuthHandler(store)
 	articleH := userhandler.NewArticleHandler(store)
 	topicH := userhandler.NewTopicHandler(store)
-	alertH := userhandler.NewAlertHandler(store)
-	crawlerH := userhandler.NewCrawlerHandler(store)
+	alertH := userhandler.NewAlertHandler(store, alertEngine)
+	crawlerH := userhandler.NewCrawlerHandler(store, alertEngine)
 	aiChatH := userhandler.NewAIChatHandler(taggerSvc)
 	chatSessionH := userhandler.NewChatSessionHandler(store, taggerSvc)
 	dashboardH := userhandler.NewDashboardHandler(store)
@@ -87,11 +88,19 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					middleware.RequireRole("admin", "analyst"),
 					middleware.Audit(db, "alert_rule", "create"),
 					alertH.CreateRule)
+				alerts.PUT("/rules/:id",
+					middleware.RequireRole("admin", "analyst"),
+					middleware.Audit(db, "alert_rule", "update"),
+					alertH.UpdateRule)
 				alerts.DELETE("/rules/:id",
 					middleware.RequireRole("admin", "analyst"),
 					middleware.Audit(db, "alert_rule", "delete"),
 					alertH.DeleteRule)
 				alerts.GET("/records", alertH.ListRecords)
+				alerts.POST("/evaluate",
+					middleware.RequireRole("admin", "analyst"),
+					middleware.Audit(db, "alert", "evaluate"),
+					alertH.Evaluate)
 			}
 
 			crawler := authorized.Group("/crawler")
@@ -179,6 +188,13 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				admin.POST("/system/settings/history/:id/reapply",
 					middleware.Audit(db, "system_config", "reapply_setting_history"),
 					adminSystemH.ReapplySettingHistory)
+				admin.GET("/system/smtp", adminSystemH.GetSmtp)
+				admin.PUT("/system/smtp",
+					middleware.Audit(db, "system_config", "update_smtp"),
+					adminSystemH.UpdateSmtp)
+				admin.POST("/system/smtp/test",
+					middleware.Audit(db, "system_config", "test_smtp"),
+					adminSystemH.TestSmtp)
 
 				admin.GET("/rag/status", adminRagH.Status)
 				admin.GET("/rag/runs", adminRagH.ListRuns)

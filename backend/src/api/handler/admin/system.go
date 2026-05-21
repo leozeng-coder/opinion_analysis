@@ -14,6 +14,7 @@ import (
 	"opinion-analysis/pkg/response"
 	"opinion-analysis/pkg/utils"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/tagger"
 )
 
@@ -357,4 +358,111 @@ func (h *SystemHandler) ReapplySettingHistory(c *gin.Context) {
 		"domain":  row.Domain,
 		"warning": warn,
 	})
+}
+
+type updateSmtpReq struct {
+	Host     *string `json:"host"`
+	Port     *int    `json:"port"`
+	Username *string `json:"username"`
+	Password *string `json:"password"`
+	From     *string `json:"from"`
+	UseTLS   *bool   `json:"useTls"`
+	OnCrawl  *bool   `json:"onCrawl"`
+}
+
+type testSmtpReq struct {
+	To string `json:"to" binding:"required,email"`
+}
+
+// GetSmtp 返回 SMTP 配置（密码脱敏）。
+func (h *SystemHandler) GetSmtp(c *gin.Context) {
+	cfg, err := h.system.GetSmtpConfig()
+	if err != nil {
+		response.ServerError(c)
+		return
+	}
+	alertCfg := h.system.GetAlertConfig()
+	response.OK(c, gin.H{
+		"host":        cfg.Host,
+		"port":        cfg.Port,
+		"username":    cfg.Username,
+		"from":        cfg.From,
+		"useTls":      cfg.UseTLS,
+		"passwordSet": cfg.Password != "",
+		"password":    utils.MaskString(cfg.Password),
+		"onCrawl":     alertCfg.OnCrawl,
+	})
+}
+
+// UpdateSmtp 保存 SMTP 与告警全局配置。
+func (h *SystemHandler) UpdateSmtp(c *gin.Context) {
+	var req updateSmtpReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, 400, err.Error())
+		return
+	}
+	cur, err := h.system.GetSmtpConfig()
+	if err != nil {
+		response.ServerError(c)
+		return
+	}
+	merged := cur
+	if req.Host != nil {
+		merged.Host = strings.TrimSpace(*req.Host)
+	}
+	if req.Port != nil && *req.Port > 0 {
+		merged.Port = *req.Port
+	}
+	if req.Username != nil {
+		merged.Username = strings.TrimSpace(*req.Username)
+	}
+	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+		merged.Password = strings.TrimSpace(*req.Password)
+	}
+	if req.From != nil {
+		merged.From = strings.TrimSpace(*req.From)
+	}
+	if req.UseTLS != nil {
+		merged.UseTLS = *req.UseTLS
+	}
+	uid := uint(0)
+	if v, ok := c.Get("userID"); ok {
+		if id, ok2 := v.(uint); ok2 {
+			uid = id
+		}
+	}
+	if err := h.system.SaveSmtpConfig(merged, uid); err != nil {
+		response.ServerError(c)
+		return
+	}
+	if req.OnCrawl != nil {
+		val := "false"
+		if *req.OnCrawl {
+			val = "true"
+		}
+		if _, err := h.system.UpsertSetting("alert.on_crawl", val, uid); err != nil {
+			response.ServerError(c)
+			return
+		}
+	}
+	response.OK(c, gin.H{"message": "告警邮件配置已保存"})
+}
+
+// TestSmtp 发送测试邮件（需先保存配置）。
+func (h *SystemHandler) TestSmtp(c *gin.Context) {
+	var req testSmtpReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, 400, err.Error())
+		return
+	}
+	cfg, err := h.system.GetSmtpConfig()
+	if err != nil {
+		response.ServerError(c)
+		return
+	}
+	if err := alertengine.SendTestMail(cfg, strings.TrimSpace(req.To)); err != nil {
+		response.Fail(c, 400, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"message": "测试邮件已发送"})
 }

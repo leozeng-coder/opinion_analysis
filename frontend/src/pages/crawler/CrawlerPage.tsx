@@ -393,7 +393,7 @@ const CrawlerPage: React.FC = () => {
     <div className={page.pageShell}>
       <PageHeader
         title="爬虫调度"
-        subtitle="定时任务由本机常驻进程 scheduler.py 执行；「立即执行」与「按关键词抓取」由后端拉起一次性子进程（需本机 Python 虚拟环境）。"
+        subtitle="定时任务由本机常驻进程 scheduler.py 执行；「立即执行」与「按关键词抓取」由后端拉起一次性子进程。"
         icon={<CloudSyncOutlined />}
       />
 

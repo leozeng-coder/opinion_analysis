@@ -21,6 +21,7 @@ import (
 	"opinion-analysis/pkg/response"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/alertengine"
 )
 
 var allowedSpiderKeys = map[string]struct{}{
@@ -32,10 +33,11 @@ var defaultBasicSpiders = []string{"broad-topic"}
 
 type CrawlerHandler struct {
 	crawler *repository.CrawlerRepository
+	alerts  *alertengine.Engine
 }
 
-func NewCrawlerHandler(store *repository.Store) *CrawlerHandler {
-	return &CrawlerHandler{crawler: store.Crawler}
+func NewCrawlerHandler(store *repository.Store, alerts *alertengine.Engine) *CrawlerHandler {
+	return &CrawlerHandler{crawler: store.Crawler, alerts: alerts}
 }
 
 func (h *CrawlerHandler) ListSpiders(c *gin.Context) {
@@ -251,6 +253,16 @@ func (h *CrawlerHandler) runSubprocess(logID uint, root, py, spiders, filterJSON
 		log.Printf("[crawler task] subprocess_finish_skip run_id=%d status=%s elapsed=%v (row not in running)", logID, status, elapsed)
 	} else {
 		log.Printf("[crawler task] subprocess_finish run_id=%d status=%s elapsed=%v", logID, status, elapsed)
+		if status == "success" && h.alerts != nil && h.alerts.OnCrawlEnabled() {
+			go func() {
+				res, err := h.alerts.EvaluateAll(context.Background(), "crawl")
+				if err != nil {
+					log.Printf("[crawler task] alert_evaluate run_id=%d err=%v", logID, err)
+				} else {
+					log.Printf("[crawler task] alert_evaluate run_id=%d triggered=%d skipped=%d", logID, res.Triggered, res.Skipped)
+				}
+			}()
+		}
 	}
 }
 
