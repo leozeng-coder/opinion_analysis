@@ -10,7 +10,7 @@
 
 # 基础配置
 PLATFORM = "zhihu"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
-KEYWORDS = "霸王归来,月经期洗澡停经,AI,洪洞大槐树整改,孙颖莎,特朗普,小鹏GX上市,英伟达财报,王鹤棣,北方华创"  # 关键词搜索配置，以英文逗号分隔
+KEYWORDS = "崩了,摆渡车,FSD,药水杨梅,3岁女童,半导体,NBA,硕士学位,520,强制加班"  # 关键词搜索配置，以英文逗号分隔
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据)

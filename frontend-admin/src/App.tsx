@@ -7,9 +7,10 @@ import PrivateAdminRoute from '@/components/PrivateAdminRoute'
 const LoginPage = lazy(() => import('@/pages/login/LoginPage'))
 const UsersPage = lazy(() => import('@/pages/users/UsersPage'))
 const SystemPage = lazy(() => import('@/pages/system/SystemPage'))
-const ConfigPage = lazy(() => import('@/pages/config/ConfigPage'))
+const SystemConfigPage = lazy(() => import('@/pages/config/SystemConfigPage'))
+const AIConfigPage = lazy(() => import('@/pages/config/AIConfigPage'))
+const CrawlerConfigPage = lazy(() => import('@/pages/config/CrawlerConfigPage'))
 const TasksPage = lazy(() => import('@/pages/tasks/TasksPage'))
-const CrawlerPage = lazy(() => import('@/pages/crawler/CrawlerPage'))
 const DataSourcePage = lazy(() => import('@/pages/datasource/DataSourcePage'))
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'))
 const RagKBPage = lazy(() => import('@/pages/rag/RagKBPage'))
@@ -27,16 +28,19 @@ const App: React.FC = () => (
         <Route element={<PrivateAdminRoute />}>
           <Route element={<AdminLayout />}>
             <Route path="/system" element={<SystemPage />} />
-            <Route path="/config" element={<ConfigPage />} />
+            <Route path="/config/system" element={<SystemConfigPage />} />
+            <Route path="/config/ai" element={<AIConfigPage />} />
+            <Route path="/config/crawler" element={<CrawlerConfigPage />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/users" element={<UsersPage />} />
-            <Route path="/crawler" element={<CrawlerPage />} />
             <Route path="/rag-kb" element={<RagKBPage />} />
             <Route path="/datasources" element={<DataSourcePage />} />
             <Route path="/audit" element={<AuditPage />} />
             {/* 旧路由重定向 */}
-            <Route path="/settings" element={<Navigate to="/config" replace />} />
+            <Route path="/config" element={<Navigate to="/config/system" replace />} />
+            <Route path="/settings" element={<Navigate to="/config/system" replace />} />
             <Route path="/tagger" element={<Navigate to="/tasks" replace />} />
+            <Route path="/crawler" element={<Navigate to="/config/crawler" replace />} />
             <Route path="/" element={<Navigate to="/system" replace />} />
           </Route>
         </Route>

@@ -4,16 +4,13 @@ import {
   Button,
   Card,
   Col,
-  Descriptions,
   Form,
   Input,
   InputNumber,
-  Modal,
   Popconfirm,
   Row,
   Select,
   Space,
-  Spin,
   Switch,
   Table,
   Tag,
@@ -22,22 +19,14 @@ import {
 } from 'antd'
 import {
   DatabaseOutlined,
-  KeyOutlined,
   ReloadOutlined,
   RobotOutlined,
   SaveOutlined,
-  SettingOutlined,
-  BellOutlined,
-  MailOutlined,
 } from '@ant-design/icons'
 import { adminRagApi } from '@/api/admin-rag'
 import { adminSystemApi } from '@/api/admin-system'
-import { adminSettingApi } from '@/api/admin-setting'
-import { adminSmtpApi, alertApi } from '@/api/admin-smtp'
 import type {
-  RagConfig,
   RagStatus,
-  RagSyncLog,
   SystemConfigResponse,
   ConfigSnapshot,
   RagSnapshotConfig,
@@ -45,7 +34,6 @@ import type {
   TaggerConfig,
   UpdateTaggerPayload,
   UpdateRagConfigPayload,
-  SystemSetting,
 } from '@/types'
 import PageHeader from '@/components/common/PageHeader'
 import ui from '@/styles/page.module.css'
@@ -54,11 +42,11 @@ import dayjs from 'dayjs'
 const { Text } = Typography
 
 const PRESETS = [
-  { label: 'DeepSeek',  baseUrl: 'https://api.deepseek.com',                          model: 'deepseek-chat' },
-  { label: 'OpenAI',    baseUrl: 'https://api.openai.com',                            model: 'gpt-4o' },
+  { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com', model: 'gpt-4o' },
   { label: '百炼/Qwen', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
-  { label: 'Kimi',      baseUrl: 'https://api.moonshot.cn/v1',                        model: 'moonshot-v1-8k' },
-  { label: '智谱/GLM',  baseUrl: 'https://open.bigmodel.cn/api/paas/v4',              model: 'glm-4-flash' },
+  { label: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { label: '智谱/GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
 ]
 
 const EMBED_API_PRESETS = [
@@ -97,28 +85,15 @@ interface RagFormValues {
   sync_batch: number
 }
 
-interface SmtpFormValues {
-  host: string
-  port: number
-  username: string
-  password: string
-  from: string
-  useTls: boolean
-  onCrawl: boolean
-}
-
-const ConfigPage: React.FC = () => {
-  // tagger config
+const AIConfigPage: React.FC = () => {
   const [cfg, setCfg] = useState<SystemConfigResponse | null>(null)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<TaggerFormValues>()
 
-  // tagger history
   const [taggerHistory, setTaggerHistory] = useState<ConfigSnapshot[]>([])
   const [taggerHistTotal, setTaggerHistTotal] = useState(0)
   const [taggerHistPage, setTaggerHistPage] = useState(1)
 
-  // RAG embed config
   const [ragForm] = Form.useForm<RagFormValues>()
   const ragProvider = Form.useWatch('embed_provider', ragForm) ?? 'local'
   const ragSyncEnabledWatch = Form.useWatch('sync_enabled', ragForm) ?? true
@@ -129,40 +104,26 @@ const ConfigPage: React.FC = () => {
   const [rebuildingMilvus, setRebuildingMilvus] = useState(false)
   const [restartingRag, setRestartingRag] = useState(false)
 
-  // RAG history
   const [ragHistory, setRagHistory] = useState<ConfigSnapshot[]>([])
   const [ragHistTotal, setRagHistTotal] = useState(0)
   const [ragHistPage, setRagHistPage] = useState(1)
 
-  // system settings
-  const [settings, setSettings] = useState<SystemSetting[]>([])
-  const [settingsLoading, setSettingsLoading] = useState(false)
-  const [settingsSaving, setSettingsSaving] = useState<string | null>(null)
-  const [thresholdInput, setThresholdInput] = useState<number>(2)
-
-  const [smtpForm] = Form.useForm<SmtpFormValues>()
-  const smtpPort = Form.useWatch('port', smtpForm) ?? 465
-  const smtpUsername = Form.useWatch('username', smtpForm) ?? ''
-  const smtpFrom = Form.useWatch('from', smtpForm) ?? ''
-  const [smtpSaving, setSmtpSaving] = useState(false)
-  const [smtpPasswordSet, setSmtpPasswordSet] = useState(false)
-  const [evaluating, setEvaluating] = useState(false)
-  const [testEmail, setTestEmail] = useState('')
-  const [testingMail, setTestingMail] = useState(false)
-
   const [loading, setLoading] = useState(false)
 
-  const applyTaggerToForm = useCallback((t: TaggerConfig) => {
-    form.setFieldsValue({
-      enabled: t.enabled,
-      llmModel: t.llmModel,
-      llmBaseUrl: t.llmBaseUrl,
-      llmApiKey: '',
-      intervalSeconds: t.intervalSeconds,
-      batchSize: t.batchSize,
-      maxPerTick: t.maxPerTick,
-    })
-  }, [form])
+  const applyTaggerToForm = useCallback(
+    (t: TaggerConfig) => {
+      form.setFieldsValue({
+        enabled: t.enabled,
+        llmModel: t.llmModel,
+        llmBaseUrl: t.llmBaseUrl,
+        llmApiKey: '',
+        intervalSeconds: t.intervalSeconds,
+        batchSize: t.batchSize,
+        maxPerTick: t.maxPerTick,
+      })
+    },
+    [form]
+  )
 
   const loadRagHistory = useCallback(async (page: number) => {
     const r = await adminSystemApi.settingHistory({ domain: 'rag', page, pageSize: 8 })
@@ -177,33 +138,6 @@ const ConfigPage: React.FC = () => {
     setTaggerHistTotal(r.total)
     setTaggerHistPage(page)
   }, [])
-
-  const loadSettings = useCallback(async () => {
-    setSettingsLoading(true)
-    try {
-      const res = await adminSettingApi.list()
-      setSettings(res)
-      const t = res.find((s) => s.key === 'dashboard.hot_topic_threshold')
-      if (t) setThresholdInput(parseInt(t.value, 10) || 2)
-    } finally {
-      setSettingsLoading(false)
-    }
-  }, [])
-
-  const loadSmtpConfig = useCallback(async () => {
-    const cfg = await adminSmtpApi.getConfig().catch(() => null)
-    if (!cfg) return
-    setSmtpPasswordSet(cfg.passwordSet)
-    smtpForm.setFieldsValue({
-      host: cfg.host,
-      port: cfg.port,
-      username: cfg.username,
-      from: cfg.from,
-      useTls: cfg.useTls,
-      onCrawl: cfg.onCrawl,
-      password: '',
-    })
-  }, [smtpForm])
 
   const refreshRagConfigForm = useCallback(async () => {
     const cfg2 = await adminRagApi.getConfig().catch(() => null)
@@ -235,15 +169,15 @@ const ConfigPage: React.FC = () => {
       if (c?.tagger) applyTaggerToForm(c.tagger)
       setRagStatus(rs as RagStatus | null)
       await refreshRagConfigForm()
-      await Promise.all([loadRagHistory(1), loadTaggerHistory(1), loadSettings(), loadSmtpConfig()])
+      await Promise.all([loadRagHistory(1), loadTaggerHistory(1)])
     } finally {
       setLoading(false)
     }
-  }, [applyTaggerToForm, loadRagHistory, loadTaggerHistory, loadSettings, loadSmtpConfig, refreshRagConfigForm])
+  }, [applyTaggerToForm, loadRagHistory, loadTaggerHistory, refreshRagConfigForm])
 
-  useEffect(() => { void fetchAll() }, [fetchAll])
-
-  // ── handlers ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    void fetchAll()
+  }, [fetchAll])
 
   const handleDeleteHistory = async (id: number, reload: () => Promise<void>) => {
     try {
@@ -368,6 +302,7 @@ const ConfigPage: React.FC = () => {
   }
 
   const handleRagRestart = () => {
+    const { Modal } = require('antd')
     Modal.confirm({
       title: '重启 RAG 服务',
       content: '将停止占用端口的旧 RAG 进程并重新拉起（加载最新代码与配置）。本地模型首次加载可能需 1～2 分钟，是否继续？',
@@ -411,6 +346,7 @@ const ConfigPage: React.FC = () => {
   }
 
   const handleRagRebuildAndSync = () => {
+    const { Modal } = require('antd')
     Modal.confirm({
       title: '重建 Milvus 向量库',
       content:
@@ -439,148 +375,48 @@ const ConfigPage: React.FC = () => {
     })
   }
 
-  const handleRegToggle = async (checked: boolean) => {
-    setSettingsSaving('registration_enabled')
-    try {
-      await adminSettingApi.update('registration_enabled', checked ? 'true' : 'false')
-      void message.success(`开放注册已${checked ? '开启' : '关闭'}`)
-      void loadSettings()
-    } finally {
-      setSettingsSaving(null)
-    }
-  }
-
-  const handleThresholdSave = async () => {
-    setSettingsSaving('dashboard.hot_topic_threshold')
-    try {
-      await adminSettingApi.update('dashboard.hot_topic_threshold', String(thresholdInput))
-      void message.success('热点话题阈值已保存')
-      void loadSettings()
-    } finally {
-      setSettingsSaving(null)
-    }
-  }
-
-  const handleSaveSmtp = async (values: SmtpFormValues) => {
-    setSmtpSaving(true)
-    try {
-      const payload: Parameters<typeof adminSmtpApi.updateConfig>[0] = {
-        host: values.host.trim(),
-        port: values.port,
-        username: values.username.trim(),
-        from: values.from.trim(),
-        useTls: values.useTls,
-        onCrawl: values.onCrawl,
-      }
-      const pwd = (values.password ?? '').trim()
-      if (!pwd && !smtpPasswordSet) {
-        message.warning('首次配置请填写 SMTP 密码（邮箱授权码）')
-        return
-      }
-      if (pwd) payload.password = pwd
-      await adminSmtpApi.updateConfig(payload)
-      message.success('告警邮件配置已保存')
-      smtpForm.setFieldValue('password', '')
-      void loadSmtpConfig()
-    } finally {
-      setSmtpSaving(false)
-    }
-  }
-
-  const handleTestSmtp = async () => {
-    const to = testEmail.trim()
-    if (!to) {
-      message.warning('请填写测试收件邮箱')
-      return
-    }
-    let values: SmtpFormValues
-    try {
-      values = await smtpForm.validateFields(['host', 'port', 'username'])
-    } catch {
-      message.warning('请先填写 SMTP 服务器和用户名')
-      return
-    }
-    const pwd = (smtpForm.getFieldValue('password') ?? '').trim()
-    if (!pwd && !smtpPasswordSet) {
-      message.warning('请填写 SMTP 密码（邮箱授权码），首次配置必填')
-      return
-    }
-    setTestingMail(true)
-    try {
-      // 先保存再测试，确保密码写入数据库
-      const savePayload: Parameters<typeof adminSmtpApi.updateConfig>[0] = {
-        host: values.host.trim(),
-        port: values.port,
-        username: values.username.trim(),
-        from: (values.from ?? '').trim(),
-        useTls: values.useTls,
-        onCrawl: smtpForm.getFieldValue('onCrawl'),
-      }
-      if (pwd) savePayload.password = pwd
-      await adminSmtpApi.updateConfig(savePayload)
-      setSmtpPasswordSet(true)
-      smtpForm.setFieldValue('password', '')
-
-      const res = await adminSmtpApi.test(to)
-      message.success(res.message || '测试邮件已发送')
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setTestingMail(false)
-    }
-  }
-
-  const handleEvaluateAlerts = async () => {
-    setEvaluating(true)
-    try {
-      const res = await alertApi.evaluate(true)
-      if ('triggered' in res) {
-        message.success(`评估完成：${res.evaluated} 条规则，触发 ${res.triggered} 条，跳过 ${res.skipped} 条`)
-      } else {
-        message.success(res.message)
-      }
-    } finally {
-      setEvaluating(false)
-    }
-  }
-
-  const smtpFromMismatch = (() => {
-    const u = smtpUsername.trim()
-    const f = smtpFrom.trim()
-    if (!u || !f) return false
-    const ud = u.includes('@') ? u.split('@').pop()?.toLowerCase() : ''
-    const fd = f.includes('@') ? f.split('@').pop()?.toLowerCase() : ''
-    return ud && fd && ud !== fd
-  })()
-
-  const handlePortChange = (port: number | null) => {
-    if (port === 465) smtpForm.setFieldValue('useTls', false)
-    if (port === 587) smtpForm.setFieldValue('useTls', true)
-  }
-
-  // ── column defs ───────────────────────────────────────────────────────────
-
   const ragSnapshotColumns = [
     {
-      title: '嵌入来源', width: 88,
+      title: '嵌入来源',
+      width: 88,
       render: (_: unknown, row: ConfigSnapshot) =>
-        (row.config as RagSnapshotConfig).embed_provider === 'api'
-          ? <Tag color="purple">API</Tag>
-          : <Tag color="blue">本地</Tag>,
+        (row.config as RagSnapshotConfig).embed_provider === 'api' ? (
+          <Tag color="purple">API</Tag>
+        ) : (
+          <Tag color="blue">本地</Tag>
+        ),
     },
-    { title: '模型', width: 160, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_model || '-' },
-    { title: 'API URL', width: 200, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_api_base || '-' },
-    { title: 'API Key', width: 120, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_api_key || '-' },
+    {
+      title: '模型',
+      width: 160,
+      ellipsis: true,
+      render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_model || '-',
+    },
+    {
+      title: 'API URL',
+      width: 200,
+      ellipsis: true,
+      render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_api_base || '-',
+    },
+    {
+      title: 'API Key',
+      width: 120,
+      ellipsis: true,
+      render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).embed_api_key || '-',
+    },
     { title: '切块', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).chunk_max_chars },
     { title: '重叠', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).chunk_overlap },
-    { title: '同步间隔', width: 88, render: (_: unknown, row: ConfigSnapshot) => `${(row.config as RagSnapshotConfig).sync_interval_sec}s` },
+    {
+      title: '同步间隔',
+      width: 88,
+      render: (_: unknown, row: ConfigSnapshot) => `${(row.config as RagSnapshotConfig).sync_interval_sec}s`,
+    },
     { title: '批量', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as RagSnapshotConfig).sync_batch },
     {
-      title: '定时同步', width: 88,
+      title: '定时同步',
+      width: 88,
       render: (_: unknown, row: ConfigSnapshot) =>
-        (row.config as RagSnapshotConfig).sync_enabled
-          ? <Tag color="success">开</Tag>
-          : <Tag>关</Tag>,
+        (row.config as RagSnapshotConfig).sync_enabled ? <Tag color="success">开</Tag> : <Tag>关</Tag>,
     },
     { title: '操作者', width: 88, dataIndex: 'updatedByName', render: (v: string) => v || '-' },
     { title: '时间', width: 128, dataIndex: 'createdAt', render: (t: string) => dayjs(t).format('MM-DD HH:mm:ss') },
@@ -589,16 +425,34 @@ const ConfigPage: React.FC = () => {
 
   const taggerSnapshotColumns = [
     {
-      title: '启用', width: 64,
+      title: '启用',
+      width: 64,
       render: (_: unknown, row: ConfigSnapshot) =>
-        (row.config as TaggerSnapshotConfig).enabled
-          ? <Tag color="success">是</Tag>
-          : <Tag>否</Tag>,
+        (row.config as TaggerSnapshotConfig).enabled ? <Tag color="success">是</Tag> : <Tag>否</Tag>,
     },
-    { title: '模型', width: 140, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_model || '-' },
-    { title: 'API URL', width: 200, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_base_url || '-' },
-    { title: 'API Key', width: 120, ellipsis: true, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_api_key || '-' },
-    { title: '轮询间隔', width: 88, render: (_: unknown, row: ConfigSnapshot) => `${(row.config as TaggerSnapshotConfig).interval_seconds}s` },
+    {
+      title: '模型',
+      width: 140,
+      ellipsis: true,
+      render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_model || '-',
+    },
+    {
+      title: 'API URL',
+      width: 200,
+      ellipsis: true,
+      render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_base_url || '-',
+    },
+    {
+      title: 'API Key',
+      width: 120,
+      ellipsis: true,
+      render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).llm_api_key || '-',
+    },
+    {
+      title: '轮询间隔',
+      width: 88,
+      render: (_: unknown, row: ConfigSnapshot) => `${(row.config as TaggerSnapshotConfig).interval_seconds}s`,
+    },
     { title: '批次', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).batch_size },
     { title: '上限', width: 72, render: (_: unknown, row: ConfigSnapshot) => (row.config as TaggerSnapshotConfig).max_per_tick },
     { title: '操作者', width: 88, dataIndex: 'updatedByName', render: (v: string) => v || '-' },
@@ -606,33 +460,18 @@ const ConfigPage: React.FC = () => {
     historyActionColumn('tagger', () => loadTaggerHistory(taggerHistPage)),
   ]
 
-  // ── derived ───────────────────────────────────────────────────────────────
-
   const tagger = cfg?.tagger
   const apiKeyHint = tagger?.apiKeySet
     ? `已配置（${tagger.llmApiKey || '***'}），留空则保留`
     : '尚未配置，必须填写后台任务才能运行'
   const ragApiKeyHint = ragApiKeySet ? '已配置，留空则保留当前值' : '使用第三方 API 时必须填写'
 
-  const getSetting = (key: string) => settings.find((s) => s.key === key)
-  const regEnabled = getSetting('registration_enabled')
-  const regOn = regEnabled?.value === 'true'
-  const thresholdSetting = getSetting('dashboard.hot_topic_threshold')
-
-  if (loading && !cfg) {
-    return (
-      <div className={ui.pageShell}>
-        <Spin size="large" style={{ display: 'block', margin: '80px auto' }} />
-      </div>
-    )
-  }
-
   return (
     <div className={ui.pageShell}>
       <PageHeader
-        title="系统配置"
-        subtitle="RAG 向量库、AI 打标、Embedding 与仪表盘参数"
-        icon={<SettingOutlined />}
+        title="AI 配置"
+        subtitle="RAG 向量库、AI 打标、Embedding 模型配置"
+        icon={<RobotOutlined />}
       />
 
       <Card
@@ -752,7 +591,9 @@ const ConfigPage: React.FC = () => {
               >
                 <Input
                   disabled={ragFieldLocked('rag.embed_model')}
-                  placeholder={ragProvider === 'api' ? 'text-embedding-3-small' : 'paraphrase-multilingual-MiniLM-L12-v2'}
+                  placeholder={
+                    ragProvider === 'api' ? 'text-embedding-3-small' : 'paraphrase-multilingual-MiniLM-L12-v2'
+                  }
                 />
               </Form.Item>
             </Col>
@@ -780,10 +621,7 @@ const ConfigPage: React.FC = () => {
                     name="embed_api_base"
                     rules={[{ required: true, message: '请输入 API Base URL' }]}
                   >
-                    <Input
-                      disabled={ragFieldLocked('rag.embed_api_base')}
-                      placeholder="https://api.openai.com/v1"
-                    />
+                    <Input disabled={ragFieldLocked('rag.embed_api_base')} placeholder="https://api.openai.com/v1" />
                   </Form.Item>
                   <Space wrap style={{ marginBottom: 16 }}>
                     {EMBED_API_PRESETS.map((p) => (
@@ -799,11 +637,7 @@ const ConfigPage: React.FC = () => {
                   </Space>
                 </Col>
                 <Col xs={24} md={10}>
-                  <Form.Item
-                    label="Embedding API Key"
-                    name="embed_api_key"
-                    extra={ragApiKeyHint}
-                  >
+                  <Form.Item label="Embedding API Key" name="embed_api_key" extra={ragApiKeyHint}>
                     <Input.Password
                       disabled={ragFieldLocked('rag.embed_api_key')}
                       autoComplete="new-password"
@@ -815,7 +649,12 @@ const ConfigPage: React.FC = () => {
             )}
             <Col xs={24} md={6}>
               <Form.Item label="切块最大字符" name="chunk_max_chars">
-                <InputNumber min={128} max={2000} style={{ width: '100%' }} disabled={ragFieldLocked('rag.chunk_max_chars')} />
+                <InputNumber
+                  min={128}
+                  max={2000}
+                  style={{ width: '100%' }}
+                  disabled={ragFieldLocked('rag.chunk_max_chars')}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} md={6}>
@@ -825,7 +664,12 @@ const ConfigPage: React.FC = () => {
             </Col>
             <Col xs={24} md={6}>
               <Form.Item label="定时同步间隔（秒）" name="sync_interval_sec">
-                <InputNumber min={30} max={86400} style={{ width: '100%' }} disabled={ragFieldLocked('rag.sync_interval_sec')} />
+                <InputNumber
+                  min={30}
+                  max={86400}
+                  style={{ width: '100%' }}
+                  disabled={ragFieldLocked('rag.sync_interval_sec')}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} md={6}>
@@ -842,7 +686,11 @@ const ConfigPage: React.FC = () => {
 
         <Table<ConfigSnapshot>
           size="small"
-          title={() => <Text type="secondary" style={{ fontSize: 12 }}>Embedding 配置变更历史</Text>}
+          title={() => (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Embedding 配置变更历史
+            </Text>
+          )}
           rowKey="id"
           style={{ marginTop: 8 }}
           scroll={{ x: 1400 }}
@@ -858,7 +706,6 @@ const ConfigPage: React.FC = () => {
         />
       </Card>
 
-      {/* ── Card 2: 大模型配置 ──────────────────────────────────────────── */}
       <Card
         bordered={false}
         className={ui.panelCard}
@@ -875,7 +722,9 @@ const ConfigPage: React.FC = () => {
         }
       >
         <div style={{ marginBottom: 16 }}>
-          <Text type="secondary" style={{ marginRight: 8, fontSize: 12 }}>快速填入：</Text>
+          <Text type="secondary" style={{ marginRight: 8, fontSize: 12 }}>
+            快速填入：
+          </Text>
           <Space wrap size="small">
             {PRESETS.map((p) => (
               <Button
@@ -948,17 +797,29 @@ const ConfigPage: React.FC = () => {
               <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={saving}>
                 保存
               </Button>
-              <Button onClick={() => { if (cfg?.tagger) applyTaggerToForm(cfg.tagger) }}>
+              <Button
+                onClick={() => {
+                  if (cfg?.tagger) applyTaggerToForm(cfg.tagger)
+                }}
+              >
                 重置
               </Button>
-              {cfg?.note && <Text type="secondary" style={{ fontSize: 12 }}>{cfg.note}</Text>}
+              {cfg?.note && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {cfg.note}
+                </Text>
+              )}
             </Space>
           </Form.Item>
         </Form>
 
         <Table<ConfigSnapshot>
           size="small"
-          title={() => <Text type="secondary" style={{ fontSize: 12 }}>大模型配置变更历史</Text>}
+          title={() => (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              大模型配置变更历史
+            </Text>
+          )}
           rowKey="id"
           style={{ marginTop: 16 }}
           scroll={{ x: 1200 }}
@@ -973,206 +834,8 @@ const ConfigPage: React.FC = () => {
           columns={taggerSnapshotColumns}
         />
       </Card>
-
-      {/* ── Card 3: 系统设置 ─────────────────────────────────────────────── */}
-      <Card bordered={false} className={ui.panelCard} title="系统设置" loading={settingsLoading}>
-        <Row gutter={[16, 16]}>
-          <Col xs={24} lg={12}>
-            <Card type="inner" title="注册与访问控制">
-              <Descriptions column={1} size="middle">
-                <Descriptions.Item
-                  label={
-                    <div>
-                      <div style={{ fontWeight: 500 }}>开放注册</div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {regEnabled?.desc ?? '是否允许用户自行注册账号'}
-                      </Text>
-                    </div>
-                  }
-                >
-                  <Switch
-                    checked={regOn}
-                    loading={settingsSaving === 'registration_enabled'}
-                    onChange={(checked) => void handleRegToggle(checked)}
-                    checkedChildren="开"
-                    unCheckedChildren="关"
-                  />
-                  {regEnabled && (
-                    <Text type="secondary" style={{ marginLeft: 12, fontSize: 12 }}>
-                      最后修改：{dayjs(regEnabled.updatedAt).format('YYYY-MM-DD HH:mm')}
-                    </Text>
-                  )}
-                </Descriptions.Item>
-              </Descriptions>
-              <div style={{ marginTop: 8, padding: '8px 12px', background: '#f9f9f9', borderRadius: 4, fontSize: 12, color: '#888' }}>
-                关闭后 <Text code style={{ fontSize: 12 }}>/api/auth/register</Text> 将返回 1004 错误，已有账号不受影响。
-              </div>
-            </Card>
-          </Col>
-          <Col xs={24} lg={12}>
-            <Card type="inner" title="仪表盘配置">
-              <Descriptions column={1} size="middle">
-                <Descriptions.Item
-                  label={
-                    <div>
-                      <div style={{ fontWeight: 500 }}>热点话题阈值</div>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {thresholdSetting?.desc ?? 'AI 标签在文章中出现 ≥ 该值视为热点话题'}
-                      </Text>
-                    </div>
-                  }
-                >
-                  <Space wrap>
-                    <InputNumber
-                      min={1}
-                      max={999}
-                      value={thresholdInput}
-                      onChange={(v) => setThresholdInput(v ?? 2)}
-                      style={{ width: 140 }}
-                      addonAfter="篇"
-                    />
-                    <Button
-                      type="primary"
-                      size="small"
-                      loading={settingsSaving === 'dashboard.hot_topic_threshold'}
-                      onClick={() => void handleThresholdSave()}
-                    >
-                      保存
-                    </Button>
-                    {thresholdSetting && (
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        最后修改：{dayjs(thresholdSetting.updatedAt).format('YYYY-MM-DD HH:mm')}
-                      </Text>
-                    )}
-                  </Space>
-                </Descriptions.Item>
-              </Descriptions>
-              <div style={{ marginTop: 8, padding: '8px 12px', background: '#f9f9f9', borderRadius: 4, fontSize: 12, color: '#888' }}>
-                仪表盘「热点话题」统计 AI 标签出现次数 ≥ 阈值的标签数量；阈值越高，话题越聚焦。
-              </div>
-            </Card>
-          </Col>
-          <Col xs={24}>
-            <Card
-              type="inner"
-              title={
-                <span>
-                  <BellOutlined style={{ marginRight: 8 }} />
-                  告警邮件与触发
-                </span>
-              }
-              extra={
-                <Button
-                  icon={<BellOutlined />}
-                  loading={evaluating}
-                  onClick={() => void handleEvaluateAlerts()}
-                >
-                  立即评估告警
-                </Button>
-              }
-            >
-              <Form
-                form={smtpForm}
-                layout="vertical"
-                onFinish={(v) => void handleSaveSmtp(v)}
-                initialValues={{ port: 465, useTls: false, onCrawl: true }}
-              >
-                <Row gutter={16}>
-                  <Col xs={24} md={8}>
-                    <Form.Item label="爬虫完成后自动评估" name="onCrawl" valuePropName="checked">
-                      <Switch checkedChildren="开" unCheckedChildren="关" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={16}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      开启后，每次爬虫任务成功结束会自动检查预警规则；规则间隔与去重由每条规则的「检测间隔」控制。
-                    </Text>
-                  </Col>
-                </Row>
-                {smtpFromMismatch && (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    style={{ marginBottom: 16 }}
-                    message="发件人域名与 SMTP 账号不一致"
-                    description="163/QQ 等邮箱要求发件人与登录账号同域名。请留空发件人，或改为与用户名相同的 163 邮箱。"
-                  />
-                )}
-                <Row gutter={16}>
-                  <Col xs={24} md={8}>
-                    <Form.Item label="SMTP 服务器" name="host" rules={[{ required: true, message: '请输入 SMTP 地址' }]}>
-                      <Input placeholder="smtp.163.com" prefix={<MailOutlined />} />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={4}>
-                    <Form.Item
-                      label="端口"
-                      name="port"
-                      rules={[{ required: true }]}
-                      extra={smtpPort === 465 ? '465=SSL' : '587=STARTTLS'}
-                    >
-                      <InputNumber min={1} max={65535} style={{ width: '100%' }} onChange={handlePortChange} />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={6}>
-                    <Form.Item label="用户名" name="username" rules={[{ required: true, message: '请输入用户名' }]}>
-                      <Input placeholder="xxx@163.com" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={6}>
-                    <Form.Item
-                      label="密码"
-                      name="password"
-                      extra={smtpPasswordSet ? '已配置，留空则保留' : '163/QQ 请填邮箱授权码，不是登录密码'}
-                    >
-                      <Input.Password autoComplete="new-password" placeholder={smtpPasswordSet ? '留空保留' : '授权码'} />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={8}>
-                    <Form.Item
-                      label="发件人（可选）"
-                      name="from"
-                      extra="须与用户名同域名，留空则自动使用用户名"
-                    >
-                      <Input placeholder="留空 = 用户名" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={4}>
-                    <Form.Item
-                      label="STARTTLS"
-                      name="useTls"
-                      valuePropName="checked"
-                      extra={smtpPort === 465 ? '465 端口请关闭' : '587 端口请开启'}
-                    >
-                      <Switch
-                        checkedChildren="开"
-                        unCheckedChildren="关"
-                        disabled={smtpPort === 465}
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Space wrap>
-                  <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={smtpSaving}>
-                    保存告警配置
-                  </Button>
-                  <Input
-                    placeholder="测试收件邮箱"
-                    value={testEmail}
-                    onChange={(e) => setTestEmail(e.target.value)}
-                    style={{ width: 220 }}
-                  />
-                  <Button loading={testingMail} onClick={() => void handleTestSmtp()}>
-                    发送测试邮件
-                  </Button>
-                </Space>
-              </Form>
-            </Card>
-          </Col>
-        </Row>
-      </Card>
     </div>
   )
 }
 
-export default ConfigPage
+export default AIConfigPage

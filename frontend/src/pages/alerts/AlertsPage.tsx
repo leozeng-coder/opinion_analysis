@@ -490,11 +490,7 @@ const AlertsPage: React.FC = () => {
               ]} />
             </Form.Item>
             <Form.Item name="timeRangeDays" label="时间范围" style={{ width: 140, marginBottom: 0 }}>
-              <Select options={[
-                { value: 1, label: '最近1天' },
-                { value: 3, label: '最近3天' },
-                { value: 7, label: '最近7天' },
-              ]} />
+              <InputNumber min={1} max={365} style={{ width: '100%' }} addonAfter="天" placeholder="如: 3" />
             </Form.Item>
           </Space>
 
