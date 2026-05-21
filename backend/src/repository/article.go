@@ -338,23 +338,28 @@ func aggregateTagsInMemory(db *gorm.DB, startAt, endAt, platform string, limit i
 	return out
 }
 
+func effectiveArticleTimeSQL() string {
+	return "COALESCE(NULLIF(published_at, '0001-01-01 00:00:00'), NULLIF(published_at, '0000-00-00 00:00:00'), created_at)"
+}
+
 func (r *ArticleRepository) alertRuleQuery(keywords []string, sentiment string, since time.Time) *gorm.DB {
 	q := r.db.Model(&model.Article{}).
 		Where("platform != ?", "github-trending-today").
-		Where("created_at >= ?", since)
+		Where(effectiveArticleTimeSQL()+" >= ?", since)
 	if sentiment != "" {
 		q = q.Where("sentiment = ?", sentiment)
 	}
 	if len(keywords) > 0 {
 		conds := make([]string, 0, len(keywords))
-		args := make([]any, 0, len(keywords)*2)
+		args := make([]any, 0, len(keywords)*3)
 		for _, kw := range keywords {
 			kw = strings.TrimSpace(kw)
 			if kw == "" {
 				continue
 			}
-			conds = append(conds, "(title LIKE ? OR content LIKE ?)")
-			args = append(args, "%"+kw+"%", "%"+kw+"%")
+			like := "%" + kw + "%"
+			conds = append(conds, "(title LIKE ? OR content LIKE ? OR keywords LIKE ?)")
+			args = append(args, like, like, like)
 		}
 		if len(conds) > 0 {
 			q = q.Where("("+strings.Join(conds, " OR ")+")", args...)
@@ -375,7 +380,7 @@ func (r *ArticleRepository) ListSampleForAlertRule(keywords []string, sentiment 
 	}
 	var list []model.Article
 	err := r.alertRuleQuery(keywords, sentiment, since).
-		Order("created_at desc").
+		Order("published_at desc").
 		Limit(limit).
 		Find(&list).Error
 	return list, err

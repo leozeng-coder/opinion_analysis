@@ -11,6 +11,23 @@ import PageHeader from '@/components/common/PageHeader'
 import page from '@/styles/page.module.css'
 import type { AlertRule, AlertRecord, AlertRulePayload } from '@/types'
 
+function formatRuleKeywords(raw: string): string {
+  if (!raw || raw === '[]') return '全部'
+  const trimmed = raw.trim()
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      if (Array.isArray(parsed)) {
+        const list = parsed.map((k) => String(k).trim()).filter(Boolean)
+        return list.length > 0 ? list.join('、') : '全部'
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return trimmed
+}
+
 const NOTIFY_TYPE_LABEL: Record<string, string> = {
   email: '邮件',
   webhook: 'Webhook',
@@ -47,9 +64,22 @@ function buildPayload(values: Record<string, unknown>): AlertRulePayload {
 }
 
 function ruleToFormValues(rule: AlertRule): Record<string, unknown> {
-  const keywordList = rule.keywords
-    ? rule.keywords.split(',').map((k) => k.trim()).filter(Boolean)
-    : []
+  let keywordList: string[] = []
+  if (rule.keywords) {
+    const raw = rule.keywords.trim()
+    if (raw.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(raw) as unknown
+        if (Array.isArray(parsed)) {
+          keywordList = parsed.map((k) => String(k).trim()).filter(Boolean)
+        }
+      } catch {
+        keywordList = raw.split(',').map((k) => k.trim()).filter(Boolean)
+      }
+    } else {
+      keywordList = raw.split(',').map((k) => k.trim()).filter(Boolean)
+    }
+  }
   const values: Record<string, unknown> = {
     name: rule.name,
     keywordList,
@@ -152,6 +182,30 @@ const AlertsPage: React.FC = () => {
       const res = await alertApi.evaluate(true)
       if ('triggered' in res) {
         message.success(`评估完成：触发 ${res.triggered} 条，跳过 ${res.skipped} 条`)
+        if (res.details?.length) {
+          const skipped = res.details.filter((d) => !d.triggered && d.skipReason)
+          if (skipped.length > 0) {
+            Modal.info({
+              title: '未触发原因',
+              width: 560,
+              content: (
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {skipped.map((d) => (
+                    <li key={d.ruleId} style={{ marginBottom: 8 }}>
+                      <strong>{d.ruleName}</strong>：{d.skipReason}
+                      {d.matchCount != null && d.threshold != null && (
+                        <span style={{ color: '#888' }}>
+                          {' '}
+                          （匹配 {d.matchCount}/{d.threshold}，窗口自 {d.windowStart ?? '今日 0 点'}）
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ),
+            })
+          }
+        }
         fetchRecords()
       } else {
         message.success(res.message)
@@ -163,7 +217,7 @@ const AlertsPage: React.FC = () => {
 
   const ruleColumns: ColumnsType<AlertRule> = [
     { title: '规则名称', dataIndex: 'name' },
-    { title: '关键词', dataIndex: 'keywords', render: (v) => v || '全部' },
+    { title: '关键词', dataIndex: 'keywords', render: (v: string) => formatRuleKeywords(v) },
     {
       title: '触发情感', dataIndex: 'sentiment', width: 90,
       render: (s) => s
@@ -308,10 +362,10 @@ const AlertsPage: React.FC = () => {
           </Space>
 
           <Space style={{ width: '100%', marginTop: 16 }} size={16}>
-            <Form.Item name="threshold" label="触发阈值" extra="达到该条数时触发">
+            <Form.Item name="threshold" label="触发阈值" extra="今日匹配文章数达到此值才告警，测试建议设为 1">
               <InputNumber min={1} style={{ width: 140 }} addonAfter="条" />
             </Form.Item>
-            <Form.Item name="interval" label="检测间隔" extra="两次检测的最小间隔">
+            <Form.Item name="interval" label="检测间隔" extra="两次告警之间的最小冷却时间（分钟），不影响统计窗口（统计今日 0 点至今的文章）">
               <InputNumber min={1} style={{ width: 140 }} addonAfter="分钟" />
             </Form.Item>
           </Space>

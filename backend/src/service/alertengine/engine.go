@@ -25,11 +25,23 @@ func New(store *repository.Store) *Engine {
 
 // EvaluateResult 单次评估汇总。
 type EvaluateResult struct {
-	Evaluated int      `json:"evaluated"`
-	Triggered int      `json:"triggered"`
-	Skipped   int      `json:"skipped"`
-	Errors    []string `json:"errors,omitempty"`
-	Source    string   `json:"source"`
+	Evaluated int          `json:"evaluated"`
+	Triggered int          `json:"triggered"`
+	Skipped   int          `json:"skipped"`
+	Errors    []string     `json:"errors,omitempty"`
+	Source    string       `json:"source"`
+	Details   []RuleResult `json:"details,omitempty"`
+}
+
+// RuleResult 单条规则评估结果。
+type RuleResult struct {
+	RuleID      uint   `json:"ruleId"`
+	RuleName    string `json:"ruleName"`
+	Triggered   bool   `json:"triggered"`
+	SkipReason  string `json:"skipReason,omitempty"`
+	MatchCount  int64  `json:"matchCount,omitempty"`
+	Threshold   int    `json:"threshold,omitempty"`
+	WindowStart string `json:"windowStart,omitempty"`
 }
 
 func (e *Engine) OnCrawlEnabled() bool {
@@ -57,16 +69,19 @@ func (e *Engine) EvaluateAll(ctx context.Context, source string) (EvaluateResult
 		default:
 		}
 		rule := &rules[i]
-		triggered, skipReason, evalErr := e.evaluateRule(ctx, rule, smtpCfg)
+		rr, evalErr := e.evaluateRule(ctx, rule, smtpCfg)
+		result.Details = append(result.Details, rr)
 		if evalErr != nil {
 			log.Printf("[alert] rule=%d error: %v", rule.ID, evalErr)
-			result.Errors = append(result.Errors, evalErr.Error())
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", rule.Name, evalErr))
 			continue
 		}
-		if triggered {
+		if rr.Triggered {
 			result.Triggered++
-		} else if skipReason != "" {
+		} else if rr.SkipReason != "" {
 			result.Skipped++
+			log.Printf("[alert] rule=%d %s skipped: %s (match=%d threshold=%d)",
+				rule.ID, rule.Name, rr.SkipReason, rr.MatchCount, rr.Threshold)
 		}
 	}
 	log.Printf("[alert] done source=%s evaluated=%d triggered=%d skipped=%d",
@@ -78,33 +93,43 @@ func (e *Engine) evaluateRule(
 	ctx context.Context,
 	rule *model.AlertRule,
 	smtpCfg repository.SmtpConfigData,
-) (triggered bool, skipReason string, err error) {
-	now := time.Now()
-	interval := time.Duration(ruleIntervalMinutes(rule)) * time.Minute
-	windowStart := now.Add(-interval)
-
-	if rule.LastTriggeredAt != nil && now.Sub(*rule.LastTriggeredAt) < interval {
-		return false, "cooldown", nil
+) (RuleResult, error) {
+	rr := RuleResult{
+		RuleID: rule.ID, RuleName: rule.Name, Threshold: rule.Threshold,
 	}
+	now := time.Now()
+	cooldown := time.Duration(ruleIntervalMinutes(rule)) * time.Minute
+
+	if rule.LastTriggeredAt != nil && now.Sub(*rule.LastTriggeredAt) < cooldown {
+		rr.SkipReason = fmt.Sprintf("冷却中（距上次触发不足 %d 分钟）", ruleIntervalMinutes(rule))
+		return rr, nil
+	}
+
+	windowStart := countWindowStart(now, rule)
+	rr.WindowStart = windowStart.Format("2006-01-02 15:04")
 
 	keywords := parseRuleKeywords(rule.Keywords)
 	sentiment := strings.TrimSpace(rule.Sentiment)
 
 	count, err := e.store.Article.CountForAlertRule(keywords, sentiment, windowStart)
 	if err != nil {
-		return false, "", err
+		return rr, err
 	}
+	rr.MatchCount = count
+
 	if int(count) < rule.Threshold {
-		return false, "below threshold", nil
+		rr.SkipReason = fmt.Sprintf("未达阈值（%d/%d 条）", count, rule.Threshold)
+		return rr, nil
 	}
 
-	dedupKey := fmt.Sprintf("rule:%d:win:%s:cnt:%d", rule.ID, windowStart.Truncate(time.Minute).Format("200601021504"), count)
+	dedupKey := fmt.Sprintf("rule:%d:day:%s:cnt:%d", rule.ID, now.Format("20060102"), count)
 	exists, err := e.store.Alert.ExistsByDedupKey(dedupKey)
 	if err != nil {
-		return false, "", err
+		return rr, err
 	}
 	if exists {
-		return false, "dedup", nil
+		rr.SkipReason = fmt.Sprintf("今日已告警过相同匹配数（%d 条，去重）", count)
+		return rr, nil
 	}
 
 	samples, _ := e.store.Article.ListSampleForAlertRule(keywords, sentiment, windowStart, 5)
@@ -115,14 +140,26 @@ func (e *Engine) evaluateRule(
 		Status: "pending", DedupKey: dedupKey,
 	}
 	if err := e.store.Alert.CreateRecord(record); err != nil {
-		return false, "", err
+		return rr, err
 	}
 	_ = e.store.Alert.UpdateLastTriggered(rule.ID, now)
 
 	if notifyErr := e.notify(ctx, rule, record, smtpCfg); notifyErr != nil {
-		return true, "", fmt.Errorf("record created, notify failed: %w", notifyErr)
+		rr.Triggered = true
+		return rr, fmt.Errorf("record created, notify failed: %w", notifyErr)
 	}
-	return true, "", nil
+	rr.Triggered = true
+	return rr, nil
+}
+
+// countWindowStart 统计窗口：默认今日 0 点至今（按 published_at）；若今日已触发过则从上次触发时间起算。
+func countWindowStart(now time.Time, rule *model.AlertRule) time.Time {
+	loc := now.Location()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	if rule.LastTriggeredAt != nil && rule.LastTriggeredAt.After(todayStart) {
+		return *rule.LastTriggeredAt
+	}
+	return todayStart
 }
 
 func ruleIntervalMinutes(rule *model.AlertRule) int {

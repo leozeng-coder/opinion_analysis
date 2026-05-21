@@ -16,9 +16,28 @@ export const alertApi = {
     request.get<never, PageData<AlertRecord>>('/alerts/records', { params }),
 
   evaluate: (sync = true) =>
-    request.post<never, { evaluated: number; triggered: number; skipped: number; errors?: string[]; source: string } | { message: string }>(
+    request.post<never, AlertEvaluateResult | { message: string }>(
       '/alerts/evaluate',
       {},
       { params: sync ? { sync: '1' } : undefined },
     ),
+}
+
+export interface AlertRuleResult {
+  ruleId: number
+  ruleName: string
+  triggered: boolean
+  skipReason?: string
+  matchCount?: number
+  threshold?: number
+  windowStart?: string
+}
+
+export interface AlertEvaluateResult {
+  evaluated: number
+  triggered: number
+  skipped: number
+  errors?: string[]
+  source: string
+  details?: AlertRuleResult[]
 }
