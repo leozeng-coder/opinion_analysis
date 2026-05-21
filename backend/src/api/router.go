@@ -97,6 +97,8 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					middleware.Audit(db, "alert_rule", "delete"),
 					alertH.DeleteRule)
 				alerts.GET("/records", alertH.ListRecords)
+				alerts.GET("/records/:id", alertH.GetRecordDetail)
+				alerts.PATCH("/records/:id/read", alertH.MarkAsRead)
 				alerts.POST("/evaluate",
 					middleware.RequireRole("admin", "analyst"),
 					middleware.Audit(db, "alert", "evaluate"),

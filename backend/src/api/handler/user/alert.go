@@ -332,3 +332,24 @@ func (h *AlertHandler) Evaluate(c *gin.Context) {
 	}()
 	response.OK(c, gin.H{"message": "告警评估已在后台启动"})
 }
+
+func (h *AlertHandler) GetRecordDetail(c *gin.Context) {
+	record, err := h.alerts.FindRecord(c.Param("id"))
+	if err != nil {
+		response.ServerError(c)
+		return
+	}
+	if record == nil {
+		response.Fail(c, 404, "预警记录不存在")
+		return
+	}
+	response.OK(c, record)
+}
+
+func (h *AlertHandler) MarkAsRead(c *gin.Context) {
+	if err := h.alerts.MarkAsRead(c.Param("id")); err != nil {
+		response.ServerError(c)
+		return
+	}
+	response.OK(c, nil)
+}

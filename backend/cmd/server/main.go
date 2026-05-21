@@ -235,7 +235,7 @@ func main() {
 	go taggerSvc.Start(ctx)
 
 	ragProc := ragprocess.NewManager()
-	alertEngine := alertengine.New(repository.NewStore(db, nil))
+	alertEngine := alertengine.New(repository.NewStore(db, nil), taggerSvc)
 	if config.Cfg.RAG.Managed && config.Cfg.RAG.AutoStart {
 		go func() {
 			startCtx, cancel := context.WithTimeout(context.Background(), 180*time.Second)

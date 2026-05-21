@@ -344,8 +344,10 @@ func effectiveArticleTimeSQL() string {
 
 func (r *ArticleRepository) alertRuleQuery(keywords []string, sentiment string, since time.Time) *gorm.DB {
 	q := r.db.Model(&model.Article{}).
-		Where("platform != ?", "github-trending-today").
-		Where(effectiveArticleTimeSQL()+" >= ?", since)
+		Where("published_at IS NOT NULL").
+		Where("published_at != ?", "0000-00-00 00:00:00").
+		Where("published_at != ?", "0001-01-01 00:00:00").
+		Where("published_at >= ?", since)
 	if sentiment != "" {
 		q = q.Where("sentiment = ?", sentiment)
 	}

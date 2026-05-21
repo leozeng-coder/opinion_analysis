@@ -10,7 +10,7 @@
 
 # 基础配置
 PLATFORM = "zhihu"  # 平台，xhs | dy | ks | bili | wb | tieba | zhihu
-KEYWORDS = "失业率,于娜,520结婚登记,鸣潮,贵州茅台,问界M9,原神,物业费,小满节气,Angelababy"  # 关键词搜索配置，以英文逗号分隔
+KEYWORDS = "NBA季后赛,悟空跳挑战,杨梅泡药,德国高科技议程,石油库存下降,英国海合会贸易协议,爱情公寓5虚假感,月经期洗澡停经,黑袍纠察队结局,蒙古国荒漠化"  # 关键词搜索配置，以英文逗号分隔
 LOGIN_TYPE = "qrcode"  # qrcode or phone or cookie
 COOKIES = ""
 CRAWLER_TYPE = "search"  # 爬取类型，search(关键词搜索) | detail(帖子详情)| creator(创作者主页数据)

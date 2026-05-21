@@ -15,6 +15,12 @@ export const alertApi = {
   listRecords: (params?: { page?: number; pageSize?: number; startAt?: string }) =>
     request.get<never, PageData<AlertRecord>>('/alerts/records', { params }),
 
+  getRecordDetail: (id: number) =>
+    request.get<never, AlertRecord>(`/alerts/records/${id}`),
+
+  markAsRead: (id: number) =>
+    request.patch(`/alerts/records/${id}/read`),
+
   evaluate: (sync = true) =>
     request.post<never, AlertEvaluateResult | { message: string }>(
       '/alerts/evaluate',

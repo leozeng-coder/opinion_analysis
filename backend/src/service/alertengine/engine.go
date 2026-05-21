@@ -11,16 +11,22 @@ import (
 
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/tagger"
 )
+
+type AIService interface {
+	ChatCompletion(ctx context.Context, history []tagger.ChatMessage, pageHint string, retrievalContext string) (string, error)
+}
 
 // Engine 告警评估与通知引擎。
 type Engine struct {
 	store *repository.Store
+	ai    AIService
 	mu    sync.Mutex
 }
 
-func New(store *repository.Store) *Engine {
-	return &Engine{store: store}
+func New(store *repository.Store, ai AIService) *Engine {
+	return &Engine{store: store, ai: ai}
 }
 
 // EvaluateResult 单次评估汇总。
@@ -59,6 +65,7 @@ func (e *Engine) EvaluateAll(ctx context.Context, source string) (EvaluateResult
 		return result, err
 	}
 	result.Evaluated = len(rules)
+	log.Printf("[alert] evaluating %d active rules (source=%s)", len(rules), source)
 
 	smtpCfg, _ := e.store.System.GetSmtpConfig()
 
@@ -133,7 +140,7 @@ func (e *Engine) evaluateRule(
 	}
 
 	samples, _ := e.store.Article.ListSampleForAlertRule(keywords, sentiment, windowStart, 5)
-	title, content := buildAlertContent(rule, count, windowStart, keywords, sentiment, samples)
+	title, content := e.buildAlertContent(ctx, rule, count, windowStart, keywords, sentiment, samples)
 
 	record := &model.AlertRecord{
 		RuleID: rule.ID, Title: title, Content: content,
@@ -194,7 +201,8 @@ func parseRuleKeywords(raw string) []string {
 	return out
 }
 
-func buildAlertContent(
+func (e *Engine) buildAlertContent(
+	ctx context.Context,
 	rule *model.AlertRule,
 	count int64,
 	windowStart time.Time,
@@ -211,14 +219,75 @@ func buildAlertContent(
 		sentLabel = "全部"
 	}
 	title = fmt.Sprintf("[%s] 舆情预警：%d 条匹配", rule.Name, count)
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "规则：%s\n", rule.Name)
 	fmt.Fprintf(&b, "时间窗口：%s ~ 现在\n", windowStart.Format("2006-01-02 15:04"))
 	fmt.Fprintf(&b, "关键词：%s\n", kwLabel)
 	fmt.Fprintf(&b, "情感：%s\n", sentLabel)
 	fmt.Fprintf(&b, "匹配条数：%d（阈值 %d）\n\n", count, rule.Threshold)
+
+	// AI 分析
+	if e.ai != nil && len(samples) > 0 {
+		aiAnalysis := e.generateAIAnalysis(ctx, rule, samples, kwLabel, sentLabel)
+		if aiAnalysis != "" {
+			fmt.Fprintf(&b, "【AI 分析】\n%s\n\n", aiAnalysis)
+		}
+	}
+
+	fmt.Fprintf(&b, "【匹配文章】\n")
 	for i, a := range samples {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, a.Title)
 	}
 	return title, b.String()
+}
+
+func (e *Engine) generateAIAnalysis(ctx context.Context, rule *model.AlertRule, samples []model.Article, kwLabel, sentLabel string) string {
+	// 构建文章摘要
+	var articleSummary strings.Builder
+	for i, a := range samples {
+		fmt.Fprintf(&articleSummary, "%d. 标题：%s\n", i+1, a.Title)
+		// 使用 Content 的前 200 个字符作为摘要
+		if a.Content != "" {
+			content := a.Content
+			runes := []rune(content)
+			if len(runes) > 200 {
+				content = string(runes[:200]) + "..."
+			}
+			fmt.Fprintf(&articleSummary, "   内容摘要：%s\n", content)
+		}
+		if a.Sentiment != "" {
+			fmt.Fprintf(&articleSummary, "   情感：%s\n", a.Sentiment)
+		}
+	}
+
+	prompt := fmt.Sprintf(`请分析以下舆情预警信息，提供简洁的分析建议（200字以内）：
+
+规则：%s
+关键词：%s
+情感：%s
+匹配文章数：%d
+
+匹配的文章：
+%s
+
+请从以下角度简要分析：
+1. 舆情趋势和主要关注点
+2. 潜在风险或机会
+3. 建议采取的行动`, rule.Name, kwLabel, sentLabel, len(samples), articleSummary.String())
+
+	history := []tagger.ChatMessage{
+		{Role: "user", Content: prompt},
+	}
+
+	// 设置超时
+	aiCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	reply, err := e.ai.ChatCompletion(aiCtx, history, "", "")
+	if err != nil {
+		log.Printf("[alert] AI analysis failed: %v", err)
+		return ""
+	}
+	return reply
 }

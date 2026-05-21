@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import {
   Table, Button, Modal, Form, Input, Select, InputNumber,
-  Space, Tag, Popconfirm, Tabs, message, Card, Switch,
+  Space, Tag, Popconfirm, Tabs, message, Card, Switch, Drawer, Typography, Divider,
 } from 'antd'
-import { PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, EyeOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
+import ReactMarkdown from 'react-markdown'
 import { alertApi } from '@/api/alert'
 import PageHeader from '@/components/common/PageHeader'
 import page from '@/styles/page.module.css'
@@ -28,10 +29,60 @@ function formatRuleKeywords(raw: string): string {
   return trimmed
 }
 
+interface ParsedAlertContent {
+  rule?: string
+  timeWindow?: string
+  keywords?: string
+  sentiment?: string
+  matchCount?: string
+  aiAnalysis?: string
+  articles?: string[]
+}
+
+function parseAlertContent(content: string): ParsedAlertContent {
+  const result: ParsedAlertContent = {}
+  const lines = content.split('\n')
+
+  let currentSection = ''
+  const articleLines: string[] = []
+  const aiLines: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+
+    if (trimmed.startsWith('规则：')) {
+      result.rule = trimmed.substring(3)
+    } else if (trimmed.startsWith('时间窗口：')) {
+      result.timeWindow = trimmed.substring(5)
+    } else if (trimmed.startsWith('关键词：')) {
+      result.keywords = trimmed.substring(4)
+    } else if (trimmed.startsWith('情感：')) {
+      result.sentiment = trimmed.substring(3)
+    } else if (trimmed.startsWith('匹配条数：')) {
+      result.matchCount = trimmed.substring(5)
+    } else if (trimmed === '【AI 分析】') {
+      currentSection = 'ai'
+    } else if (trimmed === '【匹配文章】') {
+      currentSection = 'articles'
+    } else if (trimmed && currentSection === 'ai') {
+      aiLines.push(trimmed)
+    } else if (trimmed && currentSection === 'articles') {
+      articleLines.push(trimmed)
+    }
+  }
+
+  if (aiLines.length > 0) {
+    result.aiAnalysis = aiLines.join('\n')
+  }
+  if (articleLines.length > 0) {
+    result.articles = articleLines
+  }
+
+  return result
+}
+
 const NOTIFY_TYPE_LABEL: Record<string, string> = {
   email: '邮件',
-  webhook: 'Webhook',
-  sms: '短信',
 }
 
 const SENTIMENT_LABEL: Record<string, string> = {
@@ -42,7 +93,7 @@ const SENTIMENT_LABEL: Record<string, string> = {
 const DEFAULT_FORM = {
   threshold: 10,
   interval: 60,
-  status: 1,
+  status: true,
   notifyType: 'email',
   sentiment: '',
   keywordList: [] as string[],
@@ -55,10 +106,10 @@ function buildPayload(values: Record<string, unknown>): AlertRulePayload {
     sentiment: (values.sentiment as string | undefined) ?? '',
     threshold: values.threshold as number,
     interval: values.interval as number,
-    notifyType: values.notifyType as string,
+    notifyType: 'email',
     notifyEmail: values.notifyEmail as string | undefined,
-    notifyWebhook: values.notifyWebhook as string | undefined,
-    notifyPhone: values.notifyPhone as string | undefined,
+    notifyWebhook: undefined,
+    notifyPhone: undefined,
     status: values.status ? 1 : 0,
   }
 }
@@ -86,12 +137,10 @@ function ruleToFormValues(rule: AlertRule): Record<string, unknown> {
     sentiment: rule.sentiment || '',
     threshold: rule.threshold,
     interval: rule.interval,
-    notifyType: rule.notifyType,
+    notifyType: 'email',
     status: rule.status === 1,
   }
-  if (rule.notifyType === 'email') values.notifyEmail = rule.notifyConf !== '-' ? rule.notifyConf : ''
-  if (rule.notifyType === 'webhook') values.notifyWebhook = rule.notifyConf !== '-' ? rule.notifyConf : ''
-  if (rule.notifyType === 'sms') values.notifyPhone = rule.notifyConf !== '-' ? rule.notifyConf : ''
+  values.notifyEmail = rule.notifyConf !== '-' ? rule.notifyConf : ''
   return values
 }
 
@@ -104,8 +153,9 @@ const AlertsPage: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [evaluating, setEvaluating] = useState(false)
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false)
+  const [currentRecord, setCurrentRecord] = useState<AlertRecord | null>(null)
   const [form] = Form.useForm()
-  const notifyType = Form.useWatch('notifyType', form)
 
   const fetchRules = async () => {
     try {
@@ -215,6 +265,25 @@ const AlertsPage: React.FC = () => {
     }
   }
 
+  const handleViewDetail = async (record: AlertRecord) => {
+    try {
+      const detail = await alertApi.getRecordDetail(record.id)
+      setCurrentRecord(detail)
+      setDetailDrawerOpen(true)
+      if (detail.status === 'pending') {
+        await alertApi.markAsRead(record.id)
+        fetchRecords()
+      }
+    } catch {
+      /* error toast from interceptor */
+    }
+  }
+
+  const closeDetailDrawer = () => {
+    setDetailDrawerOpen(false)
+    setCurrentRecord(null)
+  }
+
   const ruleColumns: ColumnsType<AlertRule> = [
     { title: '规则名称', dataIndex: 'name' },
     { title: '关键词', dataIndex: 'keywords', render: (v: string) => formatRuleKeywords(v) },
@@ -268,6 +337,14 @@ const AlertsPage: React.FC = () => {
     {
       title: '时间', dataIndex: 'createdAt', width: 160,
       render: (t) => dayjs(t).format('YYYY-MM-DD HH:mm'),
+    },
+    {
+      title: '操作', width: 80, fixed: 'right',
+      render: (_, r) => (
+        <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => void handleViewDetail(r)}>
+          查看
+        </Button>
+      ),
     },
   ]
 
@@ -375,57 +452,119 @@ const AlertsPage: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="notifyType"
-            label="通知方式"
-            rules={[{ required: true, message: '请选择通知方式' }]}
+            name="notifyEmail"
+            label="通知邮箱"
+            rules={[
+              { required: true, message: '请输入邮箱' },
+              { type: 'email', message: '邮箱格式不正确' },
+            ]}
           >
-            <Select options={[
-              { value: 'email', label: '邮件' },
-              { value: 'webhook', label: 'Webhook' },
-              { value: 'sms', label: '短信' },
-            ]} />
+            <Input placeholder="admin@example.com" />
           </Form.Item>
-
-          {notifyType === 'email' && (
-            <Form.Item
-              name="notifyEmail"
-              label="通知邮箱"
-              rules={[
-                { required: true, message: '请输入邮箱' },
-                { type: 'email', message: '邮箱格式不正确' },
-              ]}
-            >
-              <Input placeholder="admin@example.com" />
-            </Form.Item>
-          )}
-
-          {notifyType === 'webhook' && (
-            <Form.Item
-              name="notifyWebhook"
-              label="Webhook 地址"
-              rules={[
-                { required: true, message: '请输入 Webhook 地址' },
-                { type: 'url', message: '请输入有效的 URL' },
-              ]}
-            >
-              <Input placeholder="https://example.com/hook" />
-            </Form.Item>
-          )}
-
-          {notifyType === 'sms' && (
-            <Form.Item
-              name="notifyPhone"
-              label="手机号"
-              rules={[
-                { required: true, message: '请输入手机号' },
-                { pattern: /^1\d{10}$/, message: '请输入 11 位手机号' },
-              ]}
-            >
-              <Input placeholder="13800138000" maxLength={11} />
-            </Form.Item>
-          )}
         </Form>
       </Modal>
+
+      <Drawer
+        title="预警详情"
+        open={detailDrawerOpen}
+        onClose={closeDetailDrawer}
+        width={720}
+      >
+        {currentRecord && (() => {
+          const parsed = parseAlertContent(currentRecord.content)
+          return (
+            <div>
+              <Typography.Title level={5} style={{ marginTop: 0 }}>
+                {currentRecord.title}
+              </Typography.Title>
+
+              <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                <Card size="small" title="基本信息" style={{ background: '#fafafa' }}>
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {parsed.rule && (
+                      <div>
+                        <span style={{ color: '#666' }}>触发规则：</span>
+                        <Tag className={page.softTagSage}>{parsed.rule}</Tag>
+                      </div>
+                    )}
+                    {parsed.timeWindow && (
+                      <div>
+                        <span style={{ color: '#666' }}>时间窗口：</span>
+                        <span>{parsed.timeWindow}</span>
+                      </div>
+                    )}
+                    {parsed.keywords && (
+                      <div>
+                        <span style={{ color: '#666' }}>关键词：</span>
+                        <span>{parsed.keywords}</span>
+                      </div>
+                    )}
+                    {parsed.sentiment && (
+                      <div>
+                        <span style={{ color: '#666' }}>情感：</span>
+                        <span>{parsed.sentiment}</span>
+                      </div>
+                    )}
+                    {parsed.matchCount && (
+                      <div>
+                        <span style={{ color: '#666' }}>匹配条数：</span>
+                        <span>{parsed.matchCount}</span>
+                      </div>
+                    )}
+                    <div>
+                      <span style={{ color: '#666' }}>触发时间：</span>
+                      <span>{dayjs(currentRecord.createdAt).format('YYYY-MM-DD HH:mm:ss')}</span>
+                    </div>
+                  </Space>
+                </Card>
+
+                {parsed.aiAnalysis && (
+                  <Card size="small" title="AI 分析" style={{ background: '#f0f9ff' }}>
+                    <div style={{
+                      lineHeight: 1.8,
+                      paddingLeft: '4px',
+                    } as React.CSSProperties}>
+                      <ReactMarkdown
+                        components={{
+                          ol: ({ children }) => (
+                            <ol style={{ paddingLeft: '1.5em', margin: '0.5em 0' }}>{children}</ol>
+                          ),
+                          ul: ({ children }) => (
+                            <ul style={{ paddingLeft: '1.5em', margin: '0.5em 0' }}>{children}</ul>
+                          ),
+                          li: ({ children }) => (
+                            <li style={{ marginBottom: '0.25em' }}>{children}</li>
+                          ),
+                          p: ({ children }) => (
+                            <p style={{ margin: '0.5em 0' }}>{children}</p>
+                          ),
+                          strong: ({ children }) => (
+                            <strong style={{ fontWeight: 600 }}>{children}</strong>
+                          ),
+                        }}
+                      >
+                        {parsed.aiAnalysis}
+                      </ReactMarkdown>
+                    </div>
+                  </Card>
+                )}
+
+                {parsed.articles && parsed.articles.length > 0 && (
+                  <Card size="small" title={`匹配文章（${parsed.articles.length} 条）`}>
+                    <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      {parsed.articles.map((article, idx) => (
+                        <li key={idx} style={{ marginBottom: 8 }}>
+                          {article}
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                )}
+              </Space>
+            </div>
+          )
+        })()}
+      </Drawer>
     </div>
   )
 }

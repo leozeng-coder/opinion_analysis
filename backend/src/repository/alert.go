@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -24,6 +25,10 @@ func (r *AlertRepository) ListRules() ([]model.AlertRule, error) {
 func (r *AlertRepository) ListActiveRules() ([]model.AlertRule, error) {
 	var list []model.AlertRule
 	err := r.db.Where("status = ?", 1).Find(&list).Error
+	log.Printf("[alert] ListActiveRules found %d rules with status=1", len(list))
+	for i := range list {
+		log.Printf("[alert]   rule %d: name=%s status=%d", list[i].ID, list[i].Name, list[i].Status)
+	}
 	return list, err
 }
 
@@ -88,4 +93,21 @@ func (r *AlertRepository) ExistsByDedupKey(key string) (bool, error) {
 func (r *AlertRepository) UpdateLastTriggered(ruleID uint, t time.Time) error {
 	return r.db.Model(&model.AlertRule{}).Where("id = ?", ruleID).
 		Update("last_triggered_at", t).Error
+}
+
+func (r *AlertRepository) FindRecord(id string) (*model.AlertRecord, error) {
+	var record model.AlertRecord
+	err := r.db.Preload("Rule").First(&record, id).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+func (r *AlertRepository) MarkAsRead(id string) error {
+	return r.db.Model(&model.AlertRecord{}).Where("id = ?", id).
+		Update("status", "read").Error
 }
