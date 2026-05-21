@@ -69,10 +69,13 @@ export interface Topic {
 export interface AlertRule {
   id: number
   name: string
-  keywords: string
+  remark?: string
+  keywordsAnd?: string
+  keywordsOr?: string
   sentiment: string
   threshold: number
   interval: number
+  timeRangeDays?: number
   notifyType: string
   notifyConf: string
   status: number
@@ -82,10 +85,13 @@ export interface AlertRule {
 
 export interface AlertRulePayload {
   name: string
-  keywordList?: string[]
+  remark?: string
+  keywordListAnd?: string[]
+  keywordListOr?: string[]
   sentiment?: string
   threshold?: number
   interval?: number
+  timeRangeDays?: number
   notifyType: string
   notifyEmail?: string
   notifyWebhook?: string

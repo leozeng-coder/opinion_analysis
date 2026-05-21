@@ -342,7 +342,7 @@ func effectiveArticleTimeSQL() string {
 	return "COALESCE(NULLIF(published_at, '0001-01-01 00:00:00'), NULLIF(published_at, '0000-00-00 00:00:00'), created_at)"
 }
 
-func (r *ArticleRepository) alertRuleQuery(keywords []string, sentiment string, since time.Time) *gorm.DB {
+func (r *ArticleRepository) alertRuleQuery(keywordsAnd []string, keywordsOr []string, sentiment string, since time.Time) *gorm.DB {
 	q := r.db.Model(&model.Article{}).
 		Where("published_at IS NOT NULL").
 		Where("published_at != ?", "0000-00-00 00:00:00").
@@ -351,10 +351,22 @@ func (r *ArticleRepository) alertRuleQuery(keywords []string, sentiment string, 
 	if sentiment != "" {
 		q = q.Where("sentiment = ?", sentiment)
 	}
-	if len(keywords) > 0 {
-		conds := make([]string, 0, len(keywords))
-		args := make([]any, 0, len(keywords)*3)
-		for _, kw := range keywords {
+	// AND keywords - all must match (each as separate WHERE clause)
+	if len(keywordsAnd) > 0 {
+		for _, kw := range keywordsAnd {
+			kw = strings.TrimSpace(kw)
+			if kw == "" {
+				continue
+			}
+			like := "%" + kw + "%"
+			q = q.Where("(title LIKE ? OR content LIKE ? OR keywords LIKE ?)", like, like, like)
+		}
+	}
+	// OR keywords - any can match (combined with OR)
+	if len(keywordsOr) > 0 {
+		conds := make([]string, 0, len(keywordsOr))
+		args := make([]any, 0, len(keywordsOr)*3)
+		for _, kw := range keywordsOr {
 			kw = strings.TrimSpace(kw)
 			if kw == "" {
 				continue
@@ -370,18 +382,18 @@ func (r *ArticleRepository) alertRuleQuery(keywords []string, sentiment string, 
 	return q
 }
 
-func (r *ArticleRepository) CountForAlertRule(keywords []string, sentiment string, since time.Time) (int64, error) {
+func (r *ArticleRepository) CountForAlertRule(keywordsAnd, keywordsOr []string, sentiment string, since time.Time) (int64, error) {
 	var count int64
-	err := r.alertRuleQuery(keywords, sentiment, since).Count(&count).Error
+	err := r.alertRuleQuery(keywordsAnd, keywordsOr, sentiment, since).Count(&count).Error
 	return count, err
 }
 
-func (r *ArticleRepository) ListSampleForAlertRule(keywords []string, sentiment string, since time.Time, limit int) ([]model.Article, error) {
+func (r *ArticleRepository) ListSampleForAlertRule(keywordsAnd, keywordsOr []string, sentiment string, since time.Time, limit int) ([]model.Article, error) {
 	if limit < 1 {
 		limit = 5
 	}
 	var list []model.Article
-	err := r.alertRuleQuery(keywords, sentiment, since).
+	err := r.alertRuleQuery(keywordsAnd, keywordsOr, sentiment, since).
 		Order("published_at desc").
 		Limit(limit).
 		Find(&list).Error

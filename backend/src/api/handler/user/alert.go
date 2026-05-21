@@ -26,18 +26,20 @@ func NewAlertHandler(store *repository.Store, engine *alertengine.Engine) *Alert
 }
 
 type alertRuleReq struct {
-	Name          string   `json:"name" binding:"required"`
-	Keywords      string   `json:"keywords"`
-	KeywordList   []string `json:"keywordList"`
-	Sentiment     string   `json:"sentiment"`
-	Threshold     int      `json:"threshold"`
-	Interval      int      `json:"interval"`
-	NotifyType    string   `json:"notifyType"`
-	NotifyEmail   string   `json:"notifyEmail"`
-	NotifyWebhook string   `json:"notifyWebhook"`
-	NotifyPhone   string   `json:"notifyPhone"`
-	NotifyConf    string   `json:"notifyConf"` // 兼容旧版 JSON 提交
-	Status        *int8    `json:"status"`
+	Name           string   `json:"name" binding:"required"`
+	Remark         string   `json:"remark"`
+	KeywordListAnd []string `json:"keywordListAnd"`
+	KeywordListOr  []string `json:"keywordListOr"`
+	Sentiment      string   `json:"sentiment"`
+	Threshold      int      `json:"threshold"`
+	Interval       int      `json:"interval"`
+	TimeRangeDays  *int     `json:"timeRangeDays"`
+	NotifyType     string   `json:"notifyType"`
+	NotifyEmail    string   `json:"notifyEmail"`
+	NotifyWebhook  string   `json:"notifyWebhook"`
+	NotifyPhone    string   `json:"notifyPhone"`
+	NotifyConf     string   `json:"notifyConf"`
+	Status         *int8    `json:"status"`
 }
 
 func normalizeSentiment(raw string) string {
@@ -48,29 +50,16 @@ func normalizeSentiment(raw string) string {
 	return s
 }
 
-func normalizeKeywordsFromReq(req alertRuleReq) string {
-	if len(req.KeywordList) > 0 {
-		parts := make([]string, 0, len(req.KeywordList))
-		for _, k := range req.KeywordList {
-			if k = strings.TrimSpace(k); k != "" {
-				parts = append(parts, k)
-			}
+func normalizeKeywordList(list []string) string {
+	parts := make([]string, 0, len(list))
+	for _, k := range list {
+		if k = strings.TrimSpace(k); k != "" {
+			parts = append(parts, k)
 		}
-		b, _ := json.Marshal(parts)
-		return string(b)
 	}
-	return normalizeAlertKeywords(req.Keywords)
-}
-
-func normalizeAlertKeywords(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	if len(parts) == 0 {
 		return "[]"
 	}
-	if json.Valid([]byte(raw)) {
-		return raw
-	}
-	parts := SplitNonEmpty(raw, ",")
 	b, _ := json.Marshal(parts)
 	return string(b)
 }
@@ -102,14 +91,21 @@ func ruleFieldsFromReq(req alertRuleReq) (map[string]interface{}, error) {
 		return nil, err
 	}
 	fields := map[string]interface{}{
-		"name":        strings.TrimSpace(req.Name),
-		"keywords":    normalizeKeywordsFromReq(req),
-		"sentiment":   normalizeSentiment(req.Sentiment),
-		"threshold":   req.Threshold,
-		"interval":    req.Interval,
-		"notify_type": req.NotifyType,
-		"notify_conf": notifyConf,
+		"name":         strings.TrimSpace(req.Name),
+		"remark":       strings.TrimSpace(req.Remark),
+		"keywords_and": normalizeKeywordList(req.KeywordListAnd),
+		"keywords_or":  normalizeKeywordList(req.KeywordListOr),
+		"sentiment":    normalizeSentiment(req.Sentiment),
+		"threshold":    req.Threshold,
+		"interval":     req.Interval,
+		"notify_type":  req.NotifyType,
+		"notify_conf":  notifyConf,
 	}
+	timeRange := 3 // default
+	if req.TimeRangeDays != nil && *req.TimeRangeDays > 0 {
+		timeRange = *req.TimeRangeDays
+	}
+	fields["time_range_days"] = timeRange
 	if req.Status != nil {
 		fields["status"] = *req.Status
 	}
@@ -117,7 +113,8 @@ func ruleFieldsFromReq(req alertRuleReq) (map[string]interface{}, error) {
 }
 
 func formatRuleResponse(rule *model.AlertRule) {
-	rule.Keywords = formatAlertKeywords(rule.Keywords)
+	rule.KeywordsAnd = formatAlertKeywords(rule.KeywordsAnd)
+	rule.KeywordsOr = formatAlertKeywords(rule.KeywordsOr)
 	rule.NotifyConf = formatNotifyConf(rule.NotifyType, rule.NotifyConf)
 }
 
@@ -203,7 +200,8 @@ func (h *AlertHandler) ListRules(c *gin.Context) {
 		return
 	}
 	for i := range list {
-		list[i].Keywords = formatAlertKeywords(list[i].Keywords)
+		list[i].KeywordsAnd = formatAlertKeywords(list[i].KeywordsAnd)
+		list[i].KeywordsOr = formatAlertKeywords(list[i].KeywordsOr)
 		list[i].NotifyConf = formatNotifyConf(list[i].NotifyType, list[i].NotifyConf)
 	}
 	response.OK(c, list)
@@ -230,15 +228,18 @@ func (h *AlertHandler) CreateRule(c *gin.Context) {
 		status = *req.Status
 	}
 	rule := model.AlertRule{
-		Name:       fields["name"].(string),
-		Keywords:   fields["keywords"].(string),
-		Sentiment:  fields["sentiment"].(string),
-		Threshold:  fields["threshold"].(int),
-		Interval:   fields["interval"].(int),
-		NotifyType: fields["notify_type"].(string),
-		NotifyConf: fields["notify_conf"].(string),
-		Status:     status,
-		CreatedBy:  uid,
+		Name:          fields["name"].(string),
+		Remark:        fields["remark"].(string),
+		KeywordsAnd:   fields["keywords_and"].(string),
+		KeywordsOr:    fields["keywords_or"].(string),
+		Sentiment:     fields["sentiment"].(string),
+		Threshold:     fields["threshold"].(int),
+		Interval:      fields["interval"].(int),
+		TimeRangeDays: fields["time_range_days"].(int),
+		NotifyType:    fields["notify_type"].(string),
+		NotifyConf:    fields["notify_conf"].(string),
+		Status:        status,
+		CreatedBy:     uid,
 	}
 	if err := h.alerts.CreateRule(&rule); err != nil {
 		response.ServerError(c)

@@ -115,10 +115,11 @@ func (e *Engine) evaluateRule(
 	windowStart := countWindowStart(now, rule)
 	rr.WindowStart = windowStart.Format("2006-01-02 15:04")
 
-	keywords := parseRuleKeywords(rule.Keywords)
+	keywordsAnd := parseRuleKeywords(rule.KeywordsAnd)
+	keywordsOr := parseRuleKeywords(rule.KeywordsOr)
 	sentiment := strings.TrimSpace(rule.Sentiment)
 
-	count, err := e.store.Article.CountForAlertRule(keywords, sentiment, windowStart)
+	count, err := e.store.Article.CountForAlertRule(keywordsAnd, keywordsOr, sentiment, windowStart)
 	if err != nil {
 		return rr, err
 	}
@@ -139,8 +140,8 @@ func (e *Engine) evaluateRule(
 		return rr, nil
 	}
 
-	samples, _ := e.store.Article.ListSampleForAlertRule(keywords, sentiment, windowStart, 5)
-	title, content := e.buildAlertContent(ctx, rule, count, windowStart, keywords, sentiment, samples)
+	samples, _ := e.store.Article.ListSampleForAlertRule(keywordsAnd, keywordsOr, sentiment, windowStart, 5)
+	title, content := e.buildAlertContent(ctx, rule, count, windowStart, keywordsAnd, keywordsOr, sentiment, samples)
 
 	record := &model.AlertRecord{
 		RuleID: rule.ID, Title: title, Content: content,
@@ -162,11 +163,22 @@ func (e *Engine) evaluateRule(
 // countWindowStart 统计窗口：默认今日 0 点至今（按 published_at）；若今日已触发过则从上次触发时间起算。
 func countWindowStart(now time.Time, rule *model.AlertRule) time.Time {
 	loc := now.Location()
+
+	// Calculate time range based on rule configuration
+	days := rule.TimeRangeDays
+	if days <= 0 {
+		days = 3 // default to 3 days
+	}
+
+	rangeStart := now.AddDate(0, 0, -days)
+
+	// If already triggered today, use last triggered time to avoid re-alerting
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	if rule.LastTriggeredAt != nil && rule.LastTriggeredAt.After(todayStart) {
 		return *rule.LastTriggeredAt
 	}
-	return todayStart
+
+	return rangeStart
 }
 
 func ruleIntervalMinutes(rule *model.AlertRule) int {
@@ -201,19 +213,32 @@ func parseRuleKeywords(raw string) []string {
 	return out
 }
 
+// buildKeywordLabel formats keywords for display
+func buildKeywordLabel(keywordsAnd, keywordsOr []string) string {
+	parts := []string{}
+	if len(keywordsAnd) > 0 {
+		parts = append(parts, "必含: "+strings.Join(keywordsAnd, "、"))
+	}
+	if len(keywordsOr) > 0 {
+		parts = append(parts, "任一: "+strings.Join(keywordsOr, "、"))
+	}
+	if len(parts) == 0 {
+		return "全部"
+	}
+	return strings.Join(parts, " | ")
+}
+
 func (e *Engine) buildAlertContent(
 	ctx context.Context,
 	rule *model.AlertRule,
 	count int64,
 	windowStart time.Time,
-	keywords []string,
+	keywordsAnd []string,
+	keywordsOr []string,
 	sentiment string,
 	samples []model.Article,
 ) (title, content string) {
-	kwLabel := "全部"
-	if len(keywords) > 0 {
-		kwLabel = strings.Join(keywords, "、")
-	}
+	kwLabel := buildKeywordLabel(keywordsAnd, keywordsOr)
 	sentLabel := sentiment
 	if sentLabel == "" {
 		sentLabel = "全部"
@@ -261,7 +286,27 @@ func (e *Engine) generateAIAnalysis(ctx context.Context, rule *model.AlertRule, 
 		}
 	}
 
-	prompt := fmt.Sprintf(`请分析以下舆情预警信息，提供简洁的分析建议（200字以内）：
+	// 构建分析提示词
+	var promptBuilder strings.Builder
+
+	// 如果有备注，使用备注指导分析方向
+	if remark := strings.TrimSpace(rule.Remark); remark != "" {
+		fmt.Fprintf(&promptBuilder, `请根据以下舆情预警信息，按照指定的分析方向提供简洁的分析建议（200字以内）：
+
+分析方向：%s
+
+规则：%s
+关键词：%s
+情感：%s
+匹配文章数：%d
+
+匹配的文章：
+%s
+
+请围绕上述分析方向，结合匹配的文章内容，提供针对性的分析和建议。`, remark, rule.Name, kwLabel, sentLabel, len(samples), articleSummary.String())
+	} else {
+		// 默认分析提示词
+		fmt.Fprintf(&promptBuilder, `请分析以下舆情预警信息，提供简洁的分析建议（200字以内）：
 
 规则：%s
 关键词：%s
@@ -275,7 +320,9 @@ func (e *Engine) generateAIAnalysis(ctx context.Context, rule *model.AlertRule, 
 1. 舆情趋势和主要关注点
 2. 潜在风险或机会
 3. 建议采取的行动`, rule.Name, kwLabel, sentLabel, len(samples), articleSummary.String())
+	}
 
+	prompt := promptBuilder.String()
 	history := []tagger.ChatMessage{
 		{Role: "user", Content: prompt},
 	}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   Table, Button, Modal, Form, Input, Select, InputNumber,
-  Space, Tag, Popconfirm, Tabs, message, Card, Switch, Drawer, Typography, Divider,
+  Space, Tag, Popconfirm, Tabs, message, Card, Switch, Drawer, Typography,
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, EyeOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -12,21 +12,33 @@ import PageHeader from '@/components/common/PageHeader'
 import page from '@/styles/page.module.css'
 import type { AlertRule, AlertRecord, AlertRulePayload } from '@/types'
 
-function formatRuleKeywords(raw: string): string {
-  if (!raw || raw === '[]') return '全部'
-  const trimmed = raw.trim()
-  if (trimmed.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(trimmed) as unknown
-      if (Array.isArray(parsed)) {
-        const list = parsed.map((k) => String(k).trim()).filter(Boolean)
-        return list.length > 0 ? list.join('、') : '全部'
-      }
-    } catch {
-      /* fall through */
+function formatRuleKeywords(andKw?: string, orKw?: string): string {
+  const parseList = (raw?: string): string[] => {
+    if (!raw || raw === '[]') return []
+    const trimmed = raw.trim()
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown
+        if (Array.isArray(parsed)) {
+          return parsed.map((k) => String(k).trim()).filter(Boolean)
+        }
+      } catch { /* fall through */ }
     }
+    return []
   }
-  return trimmed
+
+  const andList = parseList(andKw)
+  const orList = parseList(orKw)
+
+  const parts: string[] = []
+  if (andList.length > 0) {
+    parts.push(`必含: ${andList.join('、')}`)
+  }
+  if (orList.length > 0) {
+    parts.push(`任一: ${orList.join('、')}`)
+  }
+
+  return parts.length > 0 ? parts.join(' | ') : '全部'
 }
 
 interface ParsedAlertContent {
@@ -87,6 +99,7 @@ const NOTIFY_TYPE_LABEL: Record<string, string> = {
 
 const SENTIMENT_LABEL: Record<string, string> = {
   negative: '负面',
+  neutral: '中性',
   positive: '正面',
 }
 
@@ -96,14 +109,20 @@ const DEFAULT_FORM = {
   status: true,
   notifyType: 'email',
   sentiment: '',
-  keywordList: [] as string[],
+  keywordListAnd: [] as string[],
+  keywordListOr: [] as string[],
+  timeRangeDays: 3,
+  remark: '',
 }
 
 function buildPayload(values: Record<string, unknown>): AlertRulePayload {
   return {
     name: values.name as string,
-    keywordList: (values.keywordList as string[] | undefined) ?? [],
+    remark: (values.remark as string | undefined) ?? '',
+    keywordListAnd: (values.keywordListAnd as string[] | undefined) ?? [],
+    keywordListOr: (values.keywordListOr as string[] | undefined) ?? [],
     sentiment: (values.sentiment as string | undefined) ?? '',
+    timeRangeDays: (values.timeRangeDays as number | undefined) ?? 3,
     threshold: values.threshold as number,
     interval: values.interval as number,
     notifyType: 'email',
@@ -115,26 +134,29 @@ function buildPayload(values: Record<string, unknown>): AlertRulePayload {
 }
 
 function ruleToFormValues(rule: AlertRule): Record<string, unknown> {
-  let keywordList: string[] = []
-  if (rule.keywords) {
-    const raw = rule.keywords.trim()
-    if (raw.startsWith('[')) {
+  const parseKeywordList = (raw?: string): string[] => {
+    if (!raw) return []
+    const trimmed = raw.trim()
+    if (trimmed.startsWith('[')) {
       try {
-        const parsed = JSON.parse(raw) as unknown
+        const parsed = JSON.parse(trimmed) as unknown
         if (Array.isArray(parsed)) {
-          keywordList = parsed.map((k) => String(k).trim()).filter(Boolean)
+          return parsed.map((k) => String(k).trim()).filter(Boolean)
         }
       } catch {
-        keywordList = raw.split(',').map((k) => k.trim()).filter(Boolean)
+        return trimmed.split(',').map((k) => k.trim()).filter(Boolean)
       }
-    } else {
-      keywordList = raw.split(',').map((k) => k.trim()).filter(Boolean)
     }
+    return trimmed.split(',').map((k) => k.trim()).filter(Boolean)
   }
+
   const values: Record<string, unknown> = {
     name: rule.name,
-    keywordList,
+    remark: rule.remark || '',
+    keywordListAnd: parseKeywordList(rule.keywordsAnd),
+    keywordListOr: parseKeywordList(rule.keywordsOr),
     sentiment: rule.sentiment || '',
+    timeRangeDays: rule.timeRangeDays ?? 3,
     threshold: rule.threshold,
     interval: rule.interval,
     notifyType: 'email',
@@ -286,7 +308,11 @@ const AlertsPage: React.FC = () => {
 
   const ruleColumns: ColumnsType<AlertRule> = [
     { title: '规则名称', dataIndex: 'name' },
-    { title: '关键词', dataIndex: 'keywords', render: (v: string) => formatRuleKeywords(v) },
+    {
+      title: '关键词',
+      dataIndex: 'keywords',
+      render: (_, r) => formatRuleKeywords(r.keywordsAnd, r.keywordsOr)
+    },
     {
       title: '触发情感', dataIndex: 'sentiment', width: 90,
       render: (s) => s
@@ -414,26 +440,60 @@ const AlertsPage: React.FC = () => {
             <Input placeholder="如：负面舆情预警" />
           </Form.Item>
 
-          <Space style={{ width: '100%', alignItems: 'flex-start' }} size={16}>
+          <Form.Item name="remark" label="分析方向备注" extra="可选，填写后 AI 将按此方向生成分析建议">
+            <Input.TextArea
+              placeholder="如：关注食品安全风险、分析对品牌形象的影响、评估政策合规性等"
+              rows={2}
+              maxLength={200}
+              showCount
+            />
+          </Form.Item>
+
+          <Form.Item label="监测关键词" style={{ marginBottom: 8 }}>
             <Form.Item
-              name="keywordList"
-              label="监测关键词"
-              style={{ flex: 1, marginBottom: 0 }}
-              extra="选「全部」情感时可留空；输入后按回车添加"
+              name="keywordListAnd"
+              label="必须包含（AND）"
+              extra="所有关键词都必须匹配"
+              style={{ marginBottom: 12 }}
             >
               <Select
                 mode="tags"
-                placeholder="输入关键词后回车"
+                placeholder="输入关键词后回车，可留空"
                 tokenSeparators={[',', '，']}
                 open={false}
                 suffixIcon={null}
               />
             </Form.Item>
+            <Form.Item
+              name="keywordListOr"
+              label="任一包含（OR）"
+              extra="至少一个关键词匹配即可"
+              style={{ marginBottom: 0 }}
+            >
+              <Select
+                mode="tags"
+                placeholder="输入关键词后回车，可留空"
+                tokenSeparators={[',', '，']}
+                open={false}
+                suffixIcon={null}
+              />
+            </Form.Item>
+          </Form.Item>
+
+          <Space style={{ width: '100%' }} size={16}>
             <Form.Item name="sentiment" label="触发情感" style={{ width: 120, marginBottom: 0 }}>
               <Select options={[
                 { value: '', label: '全部' },
                 { value: 'negative', label: '负面' },
+                { value: 'neutral', label: '中性' },
                 { value: 'positive', label: '正面' },
+              ]} />
+            </Form.Item>
+            <Form.Item name="timeRangeDays" label="时间范围" style={{ width: 140, marginBottom: 0 }}>
+              <Select options={[
+                { value: 1, label: '最近1天' },
+                { value: 3, label: '最近3天' },
+                { value: 7, label: '最近7天' },
               ]} />
             </Form.Item>
           </Space>
