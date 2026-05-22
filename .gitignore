@@ -37,7 +37,13 @@ __pycache__/
 .venv/
 venv/
 
-# RAG Milvus Lite 本地数据
+# RAG Milvus Lite local data
+rag/data/
+rag/.venv/
+rag/config.py
+rag/logs/
+
+# Crawler runtime data (e.g. daily_keywords.txt)
 crawler/data/
 
 # 含有密钥的配置文件（参见 *.example 副本）

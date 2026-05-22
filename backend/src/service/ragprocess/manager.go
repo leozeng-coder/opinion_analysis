@@ -119,7 +119,7 @@ func (m *Manager) Restart(ctx context.Context) (RestartResult, error) {
 		return res, nil
 	}
 	res.OK = false
-	res.Message = "RAG 进程启动失败，请查看 crawler/logs/rag_service_managed.log"
+	res.Message = "RAG 进程启动失败，请查看 rag/logs/rag_service_managed.log"
 	return res, fmt.Errorf("%s", res.Message)
 }
 
@@ -221,7 +221,7 @@ func resolveExec() (root, python, script, workDir string, err error) {
 	}
 	rootRel := config.Cfg.RAG.Root
 	if rootRel == "" {
-		rootRel = "../crawler"
+		rootRel = "../rag"
 	}
 	root = filepath.Clean(filepath.Join(wd, rootRel))
 	if st, e := os.Stat(root); e != nil || !st.IsDir() {
@@ -230,7 +230,7 @@ func resolveExec() (root, python, script, workDir string, err error) {
 
 	scriptRel := strings.TrimSpace(config.Cfg.RAG.ServerScript)
 	if scriptRel == "" {
-		scriptRel = "rag_service/server.py"
+		scriptRel = "server.py"
 	}
 	script = filepath.Clean(filepath.Join(root, filepath.FromSlash(scriptRel)))
 	if _, e := os.Stat(script); e != nil {

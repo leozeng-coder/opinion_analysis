@@ -1,0 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+RAG service MySQL connection (copy to config.py).
+Crawler uses crawler/config.py separately; keep DB credentials in sync.
+"""
+
+DB_HOST = "localhost"
+DB_PORT = 3306
+DB_USER = "root"
+DB_PASSWORD = "YOUR_DB_PASSWORD"
+DB_NAME = "opinion_analysis"
+DB_CHARSET = "utf8mb4"

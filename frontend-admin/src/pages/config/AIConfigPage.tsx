@@ -333,7 +333,7 @@ const AIConfigPage: React.FC = () => {
             }
           }
           message.destroy()
-          message.warning('RAG 进程已提交启动，但等待就绪超时；请查看 crawler/logs/rag_service_managed.log')
+          message.warning('RAG 进程已提交启动，但等待就绪超时；请查看 rag/logs/rag_service_managed.log')
         } catch (e: unknown) {
           message.destroy()
           const err = e as { response?: { data?: { message?: string } }; message?: string }
@@ -531,7 +531,7 @@ const AIConfigPage: React.FC = () => {
         )}
         {!ragStatus?.serviceReachable && (
           <Text type="warning" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
-            RAG 服务当前不可达，仍可保存配置到数据库；保存后请重启 rag_service 使配置生效。
+            RAG 服务当前不可达，仍可保存配置到数据库；保存后请重启 RAG 服务使配置生效。
           </Text>
         )}
         {ragStatus?.dimensionMismatch && (

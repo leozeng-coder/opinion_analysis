@@ -38,6 +38,7 @@ if errorlevel 1 goto END
 
 call "%CRAWLER_ROOT%\.venv\Scripts\activate.bat"
 echo [crawler] pip sync ...
+set "PYTHONUTF8=1"
 if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
 if not defined PIP_TRUSTED_HOST set "PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn"
 if "%PIP_USE_OFFICIAL%"=="1" goto PIP_OFFICIAL

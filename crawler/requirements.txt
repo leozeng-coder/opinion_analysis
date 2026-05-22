@@ -1,29 +1,19 @@
-# =============================================================================
-# Python 版本：推荐 3.11；若使用 3.12/3.13，需较新的 playwright / pydantic（带预编译 wheel）。
-# =============================================================================
+# Python 3.11 recommended; 3.12/3.13 need newer playwright/pydantic wheels
 
-# ===============================
-# 数据库相关
-# ===============================
+# Database
 pymysql==1.1.0
 aiomysql==0.2.0
 aiosqlite==0.21.0
 
-# ===============================
-# HTTP请求和网络
-# ===============================
+# HTTP / networking
 httpx==0.28.1
 requests==2.32.3
 aiofiles~=23.2.1
 
-# ===============================
-# LLM API（BroadTopicExtractor / ArticleSyncBridge 使用 OpenAI 兼容 SDK）
-# ===============================
+# LLM API (BroadTopicExtractor / ArticleSyncBridge)
 openai>=1.40.0,<2
 
-# ===============================
-# 话题提取模块依赖
-# ===============================
+# Topic extraction
 numpy
 pandas==2.2.3
 regex
@@ -31,16 +21,14 @@ tqdm
 python-dateutil
 pytz
 
-# ===============================
-# MediaCrawler爬虫依赖
-# ===============================
+# MediaCrawler
 Pillow>=11.0.0,<12
-# 1.45 在 Py3.13 上常触发 greenlet 源码编译失败；1.49+ 提供兼容 wheel
+# playwright 1.49+ has wheels for Py3.13 (1.45 may build greenlet from source)
 playwright>=1.49.0,<2
 tenacity==8.2.2
 opencv-python
 redis~=4.6.0
-# 2.5.x 的 pydantic-core 在 Py3.13 上可能无 wheel 且从源码构建失败
+# pydantic 2.12+ has pydantic-core wheels for Py3.13
 pydantic>=2.12.0,<3
 fastapi>=0.115.0,<0.116
 uvicorn>=0.29.0,<0.35
@@ -52,9 +40,7 @@ matplotlib==3.9.0
 parsel==1.9.1
 pyexecjs==1.5.1
 
-# ===============================
-# 工具包
-# ===============================
+# Utilities
 beautifulsoup4
 lxml
 loguru

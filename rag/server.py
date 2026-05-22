@@ -27,7 +27,7 @@ RAG_HOST = os.environ.get("RAG_HOST", "0.0.0.0")
 RAG_PORT = int(os.environ.get("RAG_PORT", "5055"))
 
 _BASE = Path(__file__).resolve().parent
-_DATA = _BASE.parent / "data"
+_DATA = _BASE / "data"
 _DATA.mkdir(exist_ok=True)
 MILVUS_URI = os.environ.get("MILVUS_LITE_URI", str(_DATA / "milvus_lite.db"))
 
@@ -47,18 +47,18 @@ BATCH_LIMIT = int(os.environ.get("RAG_SYNC_BATCH", "100"))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("rag")
 
-_CRAWLER_CFG_PATH = _BASE.parent / "config.py"
+_RAG_CFG_PATH = _BASE / "config.py"
 
 
-def _load_crawler_config() -> Any:
-    """当未设置 CRAWLER_DB_* 环境变量时，从 crawler/config.py 读库配置（与爬虫一致）。"""
-    if not _CRAWLER_CFG_PATH.is_file():
+def _load_rag_config() -> Any:
+    """When RAG_DB_* / MYSQL_* env vars are unset, read rag/config.py."""
+    if not _RAG_CFG_PATH.is_file():
         return None
     try:
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
-            "_opinion_crawler_config", _CRAWLER_CFG_PATH
+            "_opinion_rag_config", _RAG_CFG_PATH
         )
         if spec is None or spec.loader is None:
             return None
@@ -66,11 +66,11 @@ def _load_crawler_config() -> Any:
         spec.loader.exec_module(mod)
         return mod
     except Exception as e:
-        log.warning("optional load %s failed: %s", _CRAWLER_CFG_PATH, e)
+        log.warning("optional load %s failed: %s", _RAG_CFG_PATH, e)
         return None
 
 
-_CRAWLER = _load_crawler_config()
+_RAG_CFG = _load_rag_config()
 
 
 def _env_first(
@@ -79,8 +79,8 @@ def _env_first(
     for k in keys:
         if k in os.environ:
             return os.environ[k]
-    if _CRAWLER is not None and hasattr(_CRAWLER, attr):
-        return str(getattr(_CRAWLER, attr))
+    if _RAG_CFG is not None and hasattr(_RAG_CFG, attr):
+        return str(getattr(_RAG_CFG, attr))
     return fallback
 
 
@@ -88,25 +88,32 @@ def _env_first_int(keys: Tuple[str, ...], attr: str, fallback: int) -> int:
     for k in keys:
         if k in os.environ:
             return int(os.environ[k])
-    if _CRAWLER is not None and hasattr(_CRAWLER, attr):
-        return int(getattr(_CRAWLER, attr))
+    if _RAG_CFG is not None and hasattr(_RAG_CFG, attr):
+        return int(getattr(_RAG_CFG, attr))
     return fallback
 
 
-# 优先级：环境变量 > crawler/config.py > 内置默认。直接 python server.py 时也能读到 config 里的密码。
-DB_HOST = _env_first(("CRAWLER_DB_HOST", "MYSQL_HOST"), "DB_HOST", "127.0.0.1")
-DB_PORT = _env_first_int(("CRAWLER_DB_PORT", "MYSQL_PORT"), "DB_PORT", 3306)
-DB_USER = _env_first(("CRAWLER_DB_USER", "MYSQL_USER"), "DB_USER", "root")
-DB_PASSWORD = _env_first(("CRAWLER_DB_PASSWORD", "MYSQL_PASSWORD"), "DB_PASSWORD", "")
-DB_NAME = _env_first(("CRAWLER_DB_NAME", "MYSQL_DATABASE"), "DB_NAME", "opinion_analysis")
+# env > rag/config.py > defaults
+DB_HOST = _env_first(("RAG_DB_HOST", "MYSQL_HOST"), "DB_HOST", "127.0.0.1")
+DB_PORT = _env_first_int(("RAG_DB_PORT", "MYSQL_PORT"), "DB_PORT", 3306)
+DB_USER = _env_first(("RAG_DB_USER", "MYSQL_USER"), "DB_USER", "root")
+DB_PASSWORD = _env_first(
+    ("RAG_DB_PASSWORD", "MYSQL_PASSWORD"), "DB_PASSWORD", ""
+)
+DB_NAME = _env_first(
+    ("RAG_DB_NAME", "MYSQL_DATABASE"), "DB_NAME", "opinion_analysis"
+)
 
 _pw_src = (
     "from env"
-    if "CRAWLER_DB_PASSWORD" in os.environ or "MYSQL_PASSWORD" in os.environ
+    if any(
+        k in os.environ
+        for k in ("RAG_DB_PASSWORD", "MYSQL_PASSWORD")
+    )
     else (
-        "from crawler/config.py"
-        if _CRAWLER is not None and hasattr(_CRAWLER, "DB_PASSWORD")
-        else "empty — set CRAWLER_DB_PASSWORD or crawler/config.py"
+        "from rag/config.py"
+        if _RAG_CFG is not None and hasattr(_RAG_CFG, "DB_PASSWORD")
+        else "empty — set RAG_DB_PASSWORD or rag/config.py"
     )
 )
 log.info(

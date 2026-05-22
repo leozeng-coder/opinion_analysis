@@ -25,9 +25,9 @@ type RAGConfig struct {
 	Managed bool `mapstructure:"managed"`
 	// AutoStart 在 Go 启动且 health 不可达时自动拉起 RAG（需 managed: true）。
 	AutoStart bool `mapstructure:"auto_start"`
-	Root      string `mapstructure:"root"`          // 相对 backend 工作目录，默认 ../crawler
+	Root      string `mapstructure:"root"`          // 相对 backend 工作目录，默认 ../rag
 	Python    string `mapstructure:"python"`        // 空则使用 root/.venv
-	ServerScript string `mapstructure:"server_script"` // 相对 root，默认 rag_service/server.py
+	ServerScript string `mapstructure:"server_script"` // 相对 root，默认 server.py
 }
 
 // CrawlerConfig controls on-demand runs from the API (local subprocess).
@@ -92,8 +92,8 @@ func Load(path string) {
 	viper.SetDefault("rag.embedding_service_url", "http://127.0.0.1:5055")
 	viper.SetDefault("rag.managed", false)
 	viper.SetDefault("rag.auto_start", true)
-	viper.SetDefault("rag.root", "../crawler")
-	viper.SetDefault("rag.server_script", "rag_service/server.py")
+	viper.SetDefault("rag.root", "../rag")
+	viper.SetDefault("rag.server_script", "server.py")
 	viper.SetConfigFile(path)
 	viper.AutomaticEnv()
 	if err := viper.ReadInConfig(); err != nil {

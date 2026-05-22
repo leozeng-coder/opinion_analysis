@@ -199,15 +199,17 @@ opinion_analysis/
 │       ├── datasource/         # 数据源 CRUD
 │       └── audit/              # 审计日志
 │
-├── crawler/                    # Python 爬虫 + RAG 服务
+├── crawler/                    # Python 爬虫（独立 venv）
 │   ├── scheduler.py            # 长期运行调度守护进程（从 DB 读配置定时触发）
 │   ├── run_once.py             # 单次运行入口（Go 后端子进程调用）
 │   ├── BroadTopicExtraction/   # Stage 1：从 NewsNow 拉热榜 + LLM 提取关键词
 │   ├── DeepSentimentCrawling/  # Stage 2：Playwright 多平台爬虫（MediaCrawler）
-│   ├── bridge/                 # 数据桥接：爬虫原始数据 → articles 表 + 情感分析
-│   └── rag_service/            # RAG 向量检索服务
-│       ├── server.py           # FastAPI 主服务（向量同步 / 检索 / 配置热更新）
-│       └── embedder.py         # Embedder 抽象（本地模型 / OpenAI 兼容 API）
+│   └── bridge/                 # 数据桥接：爬虫原始数据 → articles 表 + 情感分析
+│
+├── rag/                        # RAG 向量检索服务（独立 venv，与爬虫解耦）
+│   ├── server.py               # FastAPI（向量同步 / 检索 / 配置热更新）
+│   ├── embedder.py             # 本地模型 / OpenAI 兼容 Embedding
+│   └── data/                   # Milvus Lite 本地库（milvus_lite.db）
 │
 ├── scripts/                    # Windows 启动脚本
 │   ├── run-backend.cmd         # 建库 + 启动 Go 服务
@@ -278,7 +280,7 @@ start.bat
 首次运行会自动：
 1. 创建数据库（`go run ./cmd/createdb`）
 2. 安装前端依赖（`npm install`）
-3. 创建 Python 虚拟环境并安装依赖（`crawler\.venv`）
+3. 分别创建 Python 虚拟环境（`crawler\.venv` 与 `rag\.venv`）
 4. 分别在独立窗口中启动后端、RAG 服务、用户前端、管理后台、爬虫调度
 
 > 跳过 RAG 服务：执行 `set SKIP_RAG=1 && start.bat`
@@ -321,12 +323,15 @@ npm run dev
 **5. 启动 RAG 服务**（终端 4，可选）
 
 ```bat
-cd crawler
-python -m venv .venv
+cd rag
+copy config.py.example config.py
+py -3.11 -m venv .venv
 .venv\Scripts\activate
-pip install -r rag_service/requirements-rag.txt
-python rag_service/server.py
+pip install -r requirements.txt
+python server.py
 ```
+
+或：`scripts\run-rag-service.cmd`
 
 > 本地 Sentence-Transformers 模型首次启动会自动下载（~400MB），请确保网络畅通或提前手动下载至 HuggingFace 缓存目录。
 
@@ -380,9 +385,9 @@ rag:
   embedding_service_url: "http://127.0.0.1:5055"
   managed: false          # true = Go 自动拉起/重启本机 RAG 子进程
   auto_start: true
-  root: "../crawler"
+  root: "../rag"
   python: ""
-  server_script: "rag_service/server.py"
+  server_script: "server.py"
 ```
 
 > **LLM 配置**（API Key、Base URL、Model）通过管理后台 → **系统配置 → 大模型配置** 维护，持久化在数据库 `system_settings` 表，无需写入 YAML。紧急情况可用环境变量 `DEEPSEEK_API_KEY` 覆盖。
@@ -396,6 +401,14 @@ cp crawler/config.py.example crawler/config.py
 编辑 `crawler/config.py`，填入：
 - `DB_HOST / DB_USER / DB_PASSWORD / DB_NAME`
 - `DEEPSEEK_API_KEY`（用于关键词提取）
+
+### RAG 配置（`rag/config.py`）
+
+```bash
+cp rag/config.py.example rag/config.py
+```
+
+与爬虫共用同一 MySQL 库（`opinion_analysis`），`DB_*` 字段需与 `crawler/config.py` 或后端 `database.dsn` 保持一致。也可通过环境变量 `RAG_DB_*` 注入（`scripts\run-rag-service.cmd` 已预设）。
 
 ---
 
@@ -460,7 +473,8 @@ Docker Compose 服务说明：
 | `start.bat` | Windows 一键启动入口 |
 | `backend/config/config.yaml` | 后端核心配置（端口、DB、JWT） |
 | `crawler/config.py` | 爬虫数据库与 API Key 配置 |
-| `crawler/rag_service/server.py` | RAG FastAPI 服务主文件 |
+| `rag/server.py` | RAG FastAPI 服务主文件 |
+| `rag/config.py` | RAG 数据库连接配置 |
 | `backend/src/service/tagger/` | AI 打标后台任务实现 |
 | `backend/src/service/ragprocess/` | RAG 子进程管理 |
 | `docker-compose.yml` | Docker 全套编排配置 |

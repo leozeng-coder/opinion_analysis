@@ -38,6 +38,6 @@ rag:
   # managed: true 时 Go 可拉起/重启本机 RAG；生产 Docker 请 false 并单独部署 RAG
   managed: false
   auto_start: true
-  root: "../crawler"
+  root: "../rag"
   python: ""
-  server_script: "rag_service/server.py"
+  server_script: "server.py"

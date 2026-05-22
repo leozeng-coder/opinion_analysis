@@ -4,11 +4,11 @@ REM ASCII-only: avoid UTF-8 in .cmd on Chinese Windows CMD (mangles lines).
 
 title RAG service :5055
 
-for %%I in ("%~dp0..\crawler") do set "CRAWLER_ROOT=%%~fI"
-cd /d "%CRAWLER_ROOT%"
-if errorlevel 1 goto ERR_CRAWLER_CD
+for %%I in ("%~dp0..\rag") do set "RAG_ROOT=%%~fI"
+cd /d "%RAG_ROOT%"
+if errorlevel 1 goto ERR_RAG_CD
 
-if not exist "rag_service\server.py" goto ERR_NO_SERVER
+if not exist "server.py" goto ERR_NO_SERVER
 
 set "PYRUN="
 py -3.11 -c "import sys" >nul 2>&1 && set "PYRUN=py -3.11"
@@ -20,48 +20,85 @@ if errorlevel 1 goto ERR_PYTHON
 set "PYRUN=python"
 :HAVE_PYRUN
 
-echo [rag] crawler dir=%CD%
+echo [rag] dir=%CD%
 echo [rag] Python: %PYRUN%
 %PYRUN% --version
 
-if exist "%CRAWLER_ROOT%\.venv\Scripts\python.exe" goto HAVE_VENV
-echo [rag] creating crawler\.venv ...
-%PYRUN% -m venv "%CRAWLER_ROOT%\.venv"
+if exist "%RAG_ROOT%\.venv\Scripts\python.exe" goto HAVE_VENV
+echo [rag] creating rag\.venv ...
+%PYRUN% -m venv "%RAG_ROOT%\.venv"
 if errorlevel 1 goto END
 :HAVE_VENV
 
-set "VPY=%CRAWLER_ROOT%\.venv\Scripts\python.exe"
+set "VPY=%RAG_ROOT%\.venv\Scripts\python.exe"
 if not exist "%VPY%" goto ERR_NO_VENV
 
-for %%I in ("%~dp0..\crawler\rag_service") do set "RAG_DIR=%%~fI"
-cd /d "%RAG_DIR%"
-if errorlevel 1 goto ERR_RAG_CD
+"%VPY%" -m pip --version >nul 2>&1
+if errorlevel 1 goto RECREATE_VENV
 
+set "PYTHONUTF8=1"
 "%VPY%" -c "import pymilvus, milvus_lite" >nul 2>&1
 if not errorlevel 1 goto DEPS_OK
+
 echo [rag] pip installing rag deps (slow first time) ...
+echo [rag] upgrading pip first ...
+"%VPY%" -m pip install --upgrade pip
+if errorlevel 1 goto RECREATE_VENV
+
+if "%PIP_USE_OFFICIAL%"=="1" goto PIP_OFFICIAL
 if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
 if not defined PIP_TRUSTED_HOST set "PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn"
-"%VPY%" -m pip install -q --no-cache-dir --default-timeout=120 -i "%PIP_INDEX_URL%" --trusted-host "%PIP_TRUSTED_HOST%" -r requirements-rag.txt
-if errorlevel 1 goto ERR_PIP
-:DEPS_OK
+"%VPY%" -m pip install --no-cache-dir --default-timeout=300 -i "%PIP_INDEX_URL%" --trusted-host "%PIP_TRUSTED_HOST%" -r requirements.txt
+if not errorlevel 1 goto VERIFY_DEPS
+echo [rag] mirror install failed, retrying official PyPI ...
+:PIP_OFFICIAL
+"%VPY%" -m pip install --no-cache-dir --default-timeout=300 -r requirements.txt
+if errorlevel 1 goto PIP_FAILED
+:VERIFY_DEPS
+"%VPY%" -c "import pymilvus, milvus_lite" >nul 2>&1
+if errorlevel 1 goto PIP_FAILED
+goto DEPS_OK
 
-if not defined CRAWLER_DB_HOST set "CRAWLER_DB_HOST=127.0.0.1"
-if not defined CRAWLER_DB_PORT set "CRAWLER_DB_PORT=3306"
-if not defined CRAWLER_DB_USER set "CRAWLER_DB_USER=root"
-if not defined CRAWLER_DB_PASSWORD set "CRAWLER_DB_PASSWORD=123456"
-if not defined CRAWLER_DB_NAME set "CRAWLER_DB_NAME=opinion_analysis"
-
-echo [rag] http://127.0.0.1:5055 - see backend config rag.embedding_service_url
-"%VPY%" "%RAG_DIR%\server.py"
+:PIP_FAILED
+echo [ERROR] pip install failed and RAG deps are not importable.
+echo [HINT] Close this window, delete folder: %RAG_ROOT%\.venv
+echo [HINT] Then re-run start.bat or: scripts\fix-rag-venv.cmd
 goto END
 
-:ERR_CRAWLER_CD
-echo [ERROR] Cannot cd to crawler: %CRAWLER_ROOT%
+:RECREATE_VENV
+echo [rag] venv or pip is broken; recreating rag\.venv ...
+if exist "%RAG_ROOT%\.venv" rd /s /q "%RAG_ROOT%\.venv"
+%PYRUN% -m venv "%RAG_ROOT%\.venv"
+if errorlevel 1 goto END
+set "VPY=%RAG_ROOT%\.venv\Scripts\python.exe"
+"%VPY%" -m pip install --upgrade pip
+if "%PIP_USE_OFFICIAL%"=="1" goto PIP_OFFICIAL
+if not defined PIP_INDEX_URL set "PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
+if not defined PIP_TRUSTED_HOST set "PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn"
+"%VPY%" -m pip install --no-cache-dir --default-timeout=300 -i "%PIP_INDEX_URL%" --trusted-host "%PIP_TRUSTED_HOST%" -r requirements.txt
+if errorlevel 1 goto PIP_OFFICIAL
+"%VPY%" -c "import pymilvus, milvus_lite" >nul 2>&1
+if errorlevel 1 goto PIP_FAILED
+goto DEPS_OK
+
+:DEPS_OK
+
+if not defined RAG_DB_HOST set "RAG_DB_HOST=127.0.0.1"
+if not defined RAG_DB_PORT set "RAG_DB_PORT=3306"
+if not defined RAG_DB_USER set "RAG_DB_USER=root"
+if not defined RAG_DB_PASSWORD set "RAG_DB_PASSWORD=123456"
+if not defined RAG_DB_NAME set "RAG_DB_NAME=opinion_analysis"
+
+echo [rag] http://127.0.0.1:5055 - see backend config rag.embedding_service_url
+"%VPY%" "%RAG_ROOT%\server.py"
+goto END
+
+:ERR_RAG_CD
+echo [ERROR] Cannot cd to rag: %RAG_ROOT%
 goto END
 
 :ERR_NO_SERVER
-echo [ERROR] Missing crawler\rag_service\server.py
+echo [ERROR] Missing rag\server.py
 goto END
 
 :ERR_PYTHON
@@ -70,14 +107,6 @@ goto END
 
 :ERR_NO_VENV
 echo [ERROR] venv python missing: %VPY%
-goto END
-
-:ERR_RAG_CD
-echo [ERROR] Cannot cd to rag_service: %RAG_DIR%
-goto END
-
-:ERR_PIP
-echo [ERROR] pip install failed. Try official PyPI or set PIP_INDEX_URL.
 goto END
 
 :END

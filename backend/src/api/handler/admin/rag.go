@@ -388,7 +388,7 @@ func reloadRagService(c *gin.Context) (bool, string, []string) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return false, "RAG 服务暂不可达，配置已写入数据库，请重启 rag_service 后生效", nil
+		return false, "RAG 服务暂不可达，配置已写入数据库，请重启 RAG 服务后生效", nil
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
