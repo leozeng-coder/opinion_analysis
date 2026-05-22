@@ -128,10 +128,12 @@ const PlatformDataPage: React.FC = () => {
     setCommentsLoading(true)
     try {
       const res = await platformCommentApi.list({ platform, itemId, page, pageSize })
-      setComments(res.data)
-      setCommentsPagination({ current: page, pageSize, total: res.total })
+      setComments(res.data || [])
+      setCommentsPagination({ current: page, pageSize, total: res.total || 0 })
     } catch (error) {
       void message.error('加载评论失败')
+      setComments([])
+      setCommentsPagination({ current: 1, pageSize: 10, total: 0 })
     } finally {
       setCommentsLoading(false)
     }
