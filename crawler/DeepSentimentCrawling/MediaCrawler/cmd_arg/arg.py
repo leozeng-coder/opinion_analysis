@@ -37,7 +37,7 @@ async def parse_cmd():
                         help=''''Whether to crawl level two comment / 是否爬取二级评论, supported values case insensitive / 支持的值(不区分大小写) ('yes', 'true', 't', 'y', '1', 'no', 'false', 'f', 'n', '0')''', default=config.ENABLE_GET_SUB_COMMENTS)
     parser.add_argument('--save_data_option', type=str,
                         help='Where to save the data / 数据保存方式 (csv=CSV文件 | db=MySQL数据库 | json=JSON文件 | sqlite=SQLite数据库)',
-                        choices=['csv', 'db', 'json', 'sqlite'], default='db')
+                        choices=['csv', 'db', 'json', 'sqlite'], default=config.SAVE_DATA_OPTION)
     parser.add_argument('--cookies', type=str,
                         help='Cookies used for cookie login type / Cookie登录方式使用的Cookie值', default=config.COOKIES)
 

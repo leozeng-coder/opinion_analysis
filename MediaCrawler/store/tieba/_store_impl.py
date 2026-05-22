@@ -113,6 +113,7 @@ class TieBaDbStoreImplement(AbstractStore):
                 for key, value in content_item.items():
                     setattr(db_note, key, value)
             else:
+                content_item["add_ts"] = utils.get_current_timestamp()
                 db_note = TiebaNote(**content_item)
                 session.add(db_note)
             await session.commit()
@@ -132,6 +133,7 @@ class TieBaDbStoreImplement(AbstractStore):
                 for key, value in comment_item.items():
                     setattr(db_comment, key, value)
             else:
+                comment_item["add_ts"] = utils.get_current_timestamp()
                 db_comment = TiebaComment(**comment_item)
                 session.add(db_comment)
             await session.commit()
@@ -151,6 +153,7 @@ class TieBaDbStoreImplement(AbstractStore):
                 for key, value in creator.items():
                     setattr(db_creator, key, value)
             else:
+                creator["add_ts"] = utils.get_current_timestamp()
                 db_creator = TiebaCreator(**creator)
                 session.add(db_creator)
             await session.commit()
