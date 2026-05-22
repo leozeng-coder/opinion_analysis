@@ -6,7 +6,7 @@ import {
 import {
   DashboardOutlined, FileTextOutlined, FireOutlined,
   BellOutlined, UserOutlined, LogoutOutlined, BarChartOutlined, CloudSyncOutlined,
-  CommentOutlined, RadarChartOutlined,
+  CommentOutlined, RadarChartOutlined, AppstoreOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store/auth'
 import DraggableAssistantLauncher from '@/components/layout/DraggableAssistantLauncher'
@@ -22,6 +22,7 @@ const menuItems = [
   { key: '/alerts', icon: <BellOutlined />, label: '预警中心' },
   { key: '/stats', icon: <BarChartOutlined />, label: '统计分析' },
   { key: '/crawler', icon: <CloudSyncOutlined />, label: '爬虫调度' },
+  { key: '/platform', icon: <AppstoreOutlined />, label: '平台数据' },
   { key: '/assistant', icon: <CommentOutlined />, label: '智能助手' },
 ]
 

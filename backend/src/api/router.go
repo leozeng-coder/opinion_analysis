@@ -66,6 +66,18 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 
 			authorized.GET("/dashboard", dashboardH.Overview)
 
+			platform := authorized.Group("/platform")
+			{
+				platform.GET("/data", func(c *gin.Context) {
+					c.Set("db", db)
+					userhandler.GetPlatformData(c)
+				})
+				platform.GET("/comments", func(c *gin.Context) {
+					c.Set("db", db)
+					userhandler.GetPlatformComments(c)
+				})
+			}
+
 			articles := authorized.Group("/articles")
 			{
 				articles.GET("", articleH.List)
