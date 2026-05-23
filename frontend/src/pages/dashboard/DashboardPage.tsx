@@ -104,6 +104,14 @@ const DashboardPage: React.FC = () => {
     setLoading(true)
     try {
       const res = await dashboardApi.overview()
+      // Ensure arrays are never null
+      if (res) {
+        res.sentimentTrend = res.sentimentTrend || []
+        res.hotTags = res.hotTags || []
+        res.recentAlerts = res.recentAlerts || []
+        res.recentNegative = res.recentNegative || []
+        res.platform = res.platform || []
+      }
       setData(res)
     } catch {
       setData(null)

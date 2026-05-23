@@ -79,7 +79,7 @@ const OpinionPage: React.FC = () => {
       startAt: query.startAt,
       endAt: query.endAt,
       limit: 80,
-    }).then(setTagCounts).catch(() => setTagCounts([]))
+    }).then(res => setTagCounts(res || [])).catch(() => setTagCounts([]))
   }, [query.platform, query.startAt, query.endAt])
 
   useEffect(() => { refreshTagCounts() }, [refreshTagCounts])

@@ -76,6 +76,28 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					c.Set("db", db)
 					userhandler.GetPlatformComments(c)
 				})
+
+				// 平台数据同步接口（重构版）
+				platform.POST("/sync", func(c *gin.Context) {
+					c.Set("db", db)
+					userhandler.SyncPlatformData(c)
+				})
+				platform.POST("/sync/all", func(c *gin.Context) {
+					c.Set("db", db)
+					userhandler.SyncAllPlatforms(c)
+				})
+				platform.GET("/sync/progress", func(c *gin.Context) {
+					c.Set("db", db)
+					userhandler.GetSyncProgress(c)
+				})
+				platform.GET("/sync/status", func(c *gin.Context) {
+					c.Set("db", db)
+					userhandler.GetSyncStatus(c)
+				})
+				platform.GET("/list", func(c *gin.Context) {
+					c.Set("db", db)
+					userhandler.GetPlatformList(c)
+				})
 			}
 
 			articles := authorized.Group("/articles")

@@ -347,8 +347,14 @@ class XiaoHongShuCrawler(AbstractCrawler):
         """Get note comments with keyword filtering and quantity limitation"""
         async with semaphore:
             utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Begin get note id comments {note_id}")
-            # Use fixed crawling interval
+            # Use fixed crawling interval - handle tuple or single value
             crawl_interval = config.CRAWLER_MAX_SLEEP_SEC
+            if isinstance(crawl_interval, tuple):
+                import random
+                sleep_time = random.uniform(crawl_interval[0], crawl_interval[1])
+            else:
+                sleep_time = crawl_interval
+
             await self.xhs_client.get_note_all_comments(
                 note_id=note_id,
                 xsec_token=xsec_token,
@@ -358,8 +364,8 @@ class XiaoHongShuCrawler(AbstractCrawler):
             )
 
             # Sleep after fetching comments
-            await asyncio.sleep(crawl_interval)
-            utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Sleeping for {crawl_interval} seconds after fetching comments for note {note_id}")
+            await asyncio.sleep(sleep_time)
+            utils.logger.info(f"[XiaoHongShuCrawler.get_comments] Sleeping for {sleep_time} seconds after fetching comments for note {note_id}")
 
     async def create_xhs_client(self, httpx_proxy: Optional[str]) -> XiaoHongShuClient:
         """Create Xiaohongshu client"""

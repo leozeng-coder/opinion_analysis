@@ -18,12 +18,12 @@ const TopicsPage: React.FC = () => {
 
   useEffect(() => {
     articleApi.tags({ limit: 100 })
-      .then(res => setTags(res))
+      .then(res => setTags(res || []))
       .finally(() => setLoading(false))
   }, [])
 
   const filtered = keyword ? tags.filter(t => t.tag.includes(keyword)) : tags
-  const maxCount = Math.max(...filtered.map(t => t.count), 1)
+  const maxCount = filtered.length > 0 ? Math.max(...filtered.map(t => t.count), 1) : 1
 
   if (loading) {
     return (
