@@ -18,7 +18,7 @@
 
 """
 MediaCrawler WebUI API Server
-Start command: uvicorn api.main:app --port 8080 --reload
+Start command: uvicorn api.main:app --port 8085 --reload
 Or: python -m api.main
 """
 import asyncio
@@ -181,4 +181,4 @@ if os.path.exists(WEBUI_DIR):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    uvicorn.run(app, host="0.0.0.0", port=8085)

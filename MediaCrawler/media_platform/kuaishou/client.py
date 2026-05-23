@@ -250,7 +250,9 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
             if callback:  # If there is a callback function, execute the callback function
                 await callback(photo_id, comments)
             result.extend(comments)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
             sub_comments = await self.get_comments_all_sub_comments(
                 comments, photo_id, crawl_interval, callback
             )
@@ -304,7 +306,9 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
 
                 if callback and sub_comments:
                     await callback(photo_id, sub_comments)
-                await asyncio.sleep(crawl_interval)
+                sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+                await asyncio.sleep(sleep_time)
                 result.extend(sub_comments)
         return result
 
@@ -353,6 +357,8 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
 
             if callback:
                 await callback(videos)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
             result.extend(videos)
         return result

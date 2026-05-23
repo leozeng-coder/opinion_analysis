@@ -231,3 +231,19 @@ def extract_url_params_to_dict(url: str) -> Dict:
     parsed_url = urllib.parse.urlparse(url)
     url_params_dict = dict(urllib.parse.parse_qsl(parsed_url.query))
     return url_params_dict
+
+
+def get_random_sleep_time(sleep_config) -> float:
+    """
+    获取随机睡眠时间
+    Args:
+        sleep_config: 可以是固定数字或 (min, max) 元组
+    Returns:
+        随机睡眠时间（秒）
+    """
+    if isinstance(sleep_config, tuple) and len(sleep_config) == 2:
+        min_sleep, max_sleep = sleep_config
+        return random.uniform(min_sleep, max_sleep)
+    else:
+        return float(sleep_config)
+

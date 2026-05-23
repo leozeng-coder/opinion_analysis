@@ -99,19 +99,19 @@ echo ========================================
 echo   Starting Web UI...
 echo ========================================
 echo.
-echo [INFO] Web UI URL: http://localhost:8080
-echo [INFO] API Docs URL: http://localhost:8080/docs
+echo [INFO] Web UI URL: http://localhost:8085
+echo [INFO] API Docs URL: http://localhost:8085/docs
 echo [INFO] Press Ctrl+C to stop the service
 echo.
 
 REM Wait 2 seconds and automatically open browser
-start "" cmd /c "timeout /t 2 /nobreak >nul && start http://localhost:8080"
+start "" cmd /c "timeout /t 2 /nobreak >nul && start http://localhost:8085"
 
 REM Start uvicorn server
 if "%USE_UV%"=="1" (
-    uv run uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+    uv run uvicorn api.main:app --host 0.0.0.0 --port 8085 --reload
 ) else (
-    python -m uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+    python -m uvicorn api.main:app --host 0.0.0.0 --port 8085 --reload
 )
 
 REM Check execution result

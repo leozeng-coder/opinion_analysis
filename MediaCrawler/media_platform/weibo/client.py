@@ -221,7 +221,9 @@ class WeiboClient(ProxyRefreshMixin):
                 comment_list = comment_list[:max_count - len(result)]
             if callback:  # If callback function exists, execute it
                 await callback(note_id, comment_list)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
             result.extend(comment_list)
             sub_comment_result = await self.get_comments_all_sub_comments(note_id, comment_list, callback)
             result.extend(sub_comment_result)
@@ -406,7 +408,9 @@ class WeiboClient(ProxyRefreshMixin):
             notes = [note for note in notes if note.get("card_type") == 9]
             if callback:
                 await callback(notes)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
             result.extend(notes)
             crawler_total_count += 10
             notes_has_more = notes_res.get("cardlistInfo", {}).get("total", 0) > crawler_total_count

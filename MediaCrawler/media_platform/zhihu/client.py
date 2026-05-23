@@ -327,7 +327,9 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
 
             result.extend(comments)
             await self.get_comments_all_sub_comments(content, comments, crawl_interval=crawl_interval, callback=callback)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
         return result
 
     async def get_comments_all_sub_comments(
@@ -380,7 +382,9 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                     await callback(sub_comments)
 
                 all_sub_comments.extend(sub_comments)
-                await asyncio.sleep(crawl_interval)
+                sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+                await asyncio.sleep(sleep_time)
         return all_sub_comments
 
     async def get_creator_info(self, url_token: str) -> Optional[ZhihuCreator]:
@@ -486,7 +490,9 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(contents)
             all_contents.extend(contents)
             offset += limit
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
         return all_contents
 
     async def get_all_articles_by_creator(
@@ -520,7 +526,9 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(contents)
             all_contents.extend(contents)
             offset += limit
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
         return all_contents
 
     async def get_all_videos_by_creator(
@@ -554,7 +562,9 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(contents)
             all_contents.extend(contents)
             offset += limit
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
         return all_contents
 
     async def get_answer_info(

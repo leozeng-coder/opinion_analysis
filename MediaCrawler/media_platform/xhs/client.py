@@ -442,7 +442,9 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                 comments = comments[: max_count - len(result)]
             if callback:
                 await callback(note_id, comments)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
             result.extend(comments)
             sub_comments = await self.get_comments_all_sub_comments(
                 comments=comments,
@@ -517,7 +519,9 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                         comments = comments_res["comments"]
                         if callback:
                             await callback(note_id, comments)
-                        await asyncio.sleep(crawl_interval)
+                        sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+                        await asyncio.sleep(sleep_time)
                         result.extend(comments)
                     except DataFetchError as e:
                         utils.logger.warning(
@@ -647,7 +651,9 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(notes_to_add)
 
             result.extend(notes_to_add)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
 
         utils.logger.info(
             f"[XiaoHongShuClient.get_all_notes_by_creator] Finished getting notes for user {user_id}, total: {len(result)}"

@@ -503,7 +503,10 @@ class BaiduTieBaClient(AbstractApiClient):
                     comments, crawl_interval=crawl_interval, callback=callback
                 )
 
-                await asyncio.sleep(crawl_interval)
+                sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+
+                await asyncio.sleep(sleep_time)
                 current_page += 1
 
             except Exception as e:
@@ -582,7 +585,9 @@ class BaiduTieBaClient(AbstractApiClient):
                         await callback(parment_comment.note_id, sub_comments)
 
                     all_sub_comments.extend(sub_comments)
-                    await asyncio.sleep(crawl_interval)
+                    sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+                    await asyncio.sleep(sleep_time)
                     current_page += 1
 
                 except Exception as e:
@@ -802,7 +807,9 @@ class BaiduTieBaClient(AbstractApiClient):
             notes = await asyncio.gather(*note_detail_task)
             if callback:
                 await callback(notes)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+            await asyncio.sleep(sleep_time)
             result.extend(notes)
             page_number += 1
             total_get_count += page_per_count
@@ -859,7 +866,10 @@ class BaiduTieBaClient(AbstractApiClient):
             if not has_more:
                 break
 
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+
+
+            await asyncio.sleep(sleep_time)
             page_number += 1
 
         return result

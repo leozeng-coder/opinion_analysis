@@ -130,7 +130,8 @@ STOP_WORDS_FILE = "./docs/hit_stopwords.txt"
 FONT_PATH = "./docs/STZHONGS.TTF"
 
 # Crawl interval (increased to reduce CAPTCHA triggers)
-CRAWLER_MAX_SLEEP_SEC = 5
+# 设置为元组 (min, max) 表示随机睡眠时间范围（秒）
+CRAWLER_MAX_SLEEP_SEC = (2, 5)  # 随机 2-5 秒
 
 # 是否禁用 SSL 证书验证。仅在使用企业代理、Burp Suite、mitmproxy 等会注入自签名证书的中间人代理时设为 True。
 # 警告：禁用 SSL 验证将使所有流量暴露于中间人攻击风险，请勿在生产环境中开启。

@@ -417,7 +417,7 @@ func (r *PlatformDataRepository) queryTiebaData(ctx context.Context, query model
 
 	for rows.Next() {
 		var item model.PlatformDataItem
-		var publishTimeStr string
+		var publishTimeStr *string // 改为指针类型以支持 NULL
 		var commentCount int
 
 		if err := rows.Scan(
@@ -429,8 +429,10 @@ func (r *PlatformDataRepository) queryTiebaData(ctx context.Context, query model
 			return nil, 0, err
 		}
 
-		if t, err := time.Parse("2006-01-02 15:04:05", publishTimeStr); err == nil {
-			item.PublishTime = &t
+		if publishTimeStr != nil && *publishTimeStr != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05", *publishTimeStr); err == nil {
+				item.PublishTime = &t
+			}
 		}
 
 		item.CommentCount = &commentCount
@@ -483,7 +485,7 @@ func (r *PlatformDataRepository) queryZhihuData(ctx context.Context, query model
 
 	for rows.Next() {
 		var item model.PlatformDataItem
-		var publishTimeStr string
+		var publishTimeStr *string // 改为指针类型以支持 NULL
 		var likeCount, commentCount int
 
 		if err := rows.Scan(
@@ -496,8 +498,10 @@ func (r *PlatformDataRepository) queryZhihuData(ctx context.Context, query model
 		}
 
 		// 解析时间字符串
-		if t, err := time.Parse("2006-01-02 15:04:05", publishTimeStr); err == nil {
-			item.PublishTime = &t
+		if publishTimeStr != nil && *publishTimeStr != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05", *publishTimeStr); err == nil {
+				item.PublishTime = &t
+			}
 		}
 
 		item.LikeCount = &likeCount

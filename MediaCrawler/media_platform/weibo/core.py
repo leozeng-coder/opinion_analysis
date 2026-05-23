@@ -184,8 +184,10 @@ class WeiboCrawler(AbstractCrawler):
                 page += 1
 
                 # Sleep after page navigation
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[WeiboCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                sleep_time = utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC)
+
+                await asyncio.sleep(sleep_time)
+                utils.logger.info(f"[WeiboCrawler.search] Sleeping for {sleep_time:.2f} seconds after page {page-1}")
 
                 await self.batch_get_notes_comments(note_id_list)
 
@@ -214,8 +216,10 @@ class WeiboCrawler(AbstractCrawler):
                 result = await self.wb_client.get_note_info_by_id(note_id)
 
                 # Sleep after fetching note details
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[WeiboCrawler.get_note_info_task] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching note details {note_id}")
+                sleep_time = utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC)
+
+                await asyncio.sleep(sleep_time)
+                utils.logger.info(f"[WeiboCrawler.get_note_info_task] Sleeping for {sleep_time:.2f} seconds after fetching note details {note_id}")
 
                 return result
             except DataFetchError as ex:
@@ -255,8 +259,10 @@ class WeiboCrawler(AbstractCrawler):
                 utils.logger.info(f"[WeiboCrawler.get_note_comments] begin get note_id: {note_id} comments ...")
 
                 # Sleep before fetching comments
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[WeiboCrawler.get_note_comments] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds before fetching comments for note {note_id}")
+                sleep_time = utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC)
+
+                await asyncio.sleep(sleep_time)
+                utils.logger.info(f"[WeiboCrawler.get_note_comments] Sleeping for {sleep_time:.2f} seconds before fetching comments for note {note_id}")
 
                 await self.wb_client.get_note_all_comments(
                     note_id=note_id,
@@ -294,8 +300,10 @@ class WeiboCrawler(AbstractCrawler):
             if not url:
                 continue
             content = await self.wb_client.get_note_image(url)
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-            utils.logger.info(f"[WeiboCrawler.get_note_images] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching image")
+            sleep_time = utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC)
+
+            await asyncio.sleep(sleep_time)
+            utils.logger.info(f"[WeiboCrawler.get_note_images] Sleeping for {sleep_time:.2f} seconds after fetching image")
             if content != None:
                 extension_file_name = url.split(".")[-1]
                 await weibo_store.update_weibo_note_image(pid, content, extension_file_name)
@@ -450,7 +458,9 @@ class WeiboCrawler(AbstractCrawler):
                 utils.logger.info(f"[WeiboCrawler.get_note_full_text] Successfully fetched full text for note: {note_id}")
 
             # Sleep after request to avoid rate limiting
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            sleep_time = utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC)
+
+            await asyncio.sleep(sleep_time)
         except DataFetchError as ex:
             utils.logger.error(f"[WeiboCrawler.get_note_full_text] Failed to fetch full text for note {note_id}: {ex}")
         except Exception as ex:

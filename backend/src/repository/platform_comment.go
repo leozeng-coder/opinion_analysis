@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -85,13 +86,18 @@ func (r *PlatformCommentRepository) queryXhsComments(ctx context.Context, query 
 		var item model.PlatformCommentItem
 		var likeCountStr string
 		var subCommentCount int
+		var createTime sql.NullTime
 
 		if err := rows.Scan(
 			&item.ID, &item.CommentID, &item.ParentCommentID, &item.Content,
 			&item.UserID, &item.Nickname, &item.Avatar, &item.IPLocation,
-			&item.CreateTime, &likeCountStr, &subCommentCount,
+			&createTime, &likeCountStr, &subCommentCount,
 		); err != nil {
 			return nil, 0, err
+		}
+
+		if createTime.Valid {
+			item.CreateTime = &createTime.Time
 		}
 
 		item.LikeCount = parseIntPtr(likeCountStr)
@@ -146,13 +152,18 @@ func (r *PlatformCommentRepository) queryDouyinComments(ctx context.Context, que
 	for rows.Next() {
 		var item model.PlatformCommentItem
 		var likeCountStr, subCommentCountStr string
+		var createTime sql.NullTime
 
 		if err := rows.Scan(
 			&item.ID, &item.CommentID, &item.ParentCommentID, &item.Content,
 			&item.UserID, &item.Nickname, &item.Avatar, &item.IPLocation,
-			&item.CreateTime, &likeCountStr, &subCommentCountStr,
+			&createTime, &likeCountStr, &subCommentCountStr,
 		); err != nil {
 			return nil, 0, err
+		}
+
+		if createTime.Valid {
+			item.CreateTime = &createTime.Time
 		}
 
 		item.LikeCount = parseIntPtr(likeCountStr)
@@ -207,13 +218,18 @@ func (r *PlatformCommentRepository) queryBilibiliComments(ctx context.Context, q
 	for rows.Next() {
 		var item model.PlatformCommentItem
 		var likeCountStr, subCommentCountStr string
+		var createTime sql.NullTime
 
 		if err := rows.Scan(
 			&item.ID, &item.CommentID, &item.ParentCommentID, &item.Content,
 			&item.UserID, &item.Nickname, &item.Avatar, &item.IPLocation,
-			&item.CreateTime, &likeCountStr, &subCommentCountStr,
+			&createTime, &likeCountStr, &subCommentCountStr,
 		); err != nil {
 			return nil, 0, err
+		}
+
+		if createTime.Valid {
+			item.CreateTime = &createTime.Time
 		}
 
 		item.LikeCount = parseIntPtr(likeCountStr)
@@ -268,13 +284,18 @@ func (r *PlatformCommentRepository) queryWeiboComments(ctx context.Context, quer
 	for rows.Next() {
 		var item model.PlatformCommentItem
 		var likeCountStr, subCommentCountStr string
+		var createTime sql.NullTime
 
 		if err := rows.Scan(
 			&item.ID, &item.CommentID, &item.ParentCommentID, &item.Content,
 			&item.UserID, &item.Nickname, &item.Avatar, &item.IPLocation,
-			&item.CreateTime, &likeCountStr, &subCommentCountStr,
+			&createTime, &likeCountStr, &subCommentCountStr,
 		); err != nil {
 			return nil, 0, err
+		}
+
+		if createTime.Valid {
+			item.CreateTime = &createTime.Time
 		}
 
 		item.LikeCount = parseIntPtr(likeCountStr)
@@ -330,13 +351,18 @@ func (r *PlatformCommentRepository) queryKuaishouComments(ctx context.Context, q
 		var item model.PlatformCommentItem
 		var likeCount int
 		var subCommentCountStr string
+		var createTime sql.NullTime
 
 		if err := rows.Scan(
 			&item.ID, &item.CommentID, &item.ParentCommentID, &item.Content,
 			&item.UserID, &item.Nickname, &item.Avatar, &item.IPLocation,
-			&item.CreateTime, &likeCount, &subCommentCountStr,
+			&createTime, &likeCount, &subCommentCountStr,
 		); err != nil {
 			return nil, 0, err
+		}
+
+		if createTime.Valid {
+			item.CreateTime = &createTime.Time
 		}
 
 		item.LikeCount = &likeCount
@@ -391,13 +417,18 @@ func (r *PlatformCommentRepository) queryTiebaComments(ctx context.Context, quer
 	for rows.Next() {
 		var item model.PlatformCommentItem
 		var likeCount, subCommentCount int
+		var createTime sql.NullTime
 
 		if err := rows.Scan(
 			&item.ID, &item.CommentID, &item.ParentCommentID, &item.Content,
 			&item.UserID, &item.Nickname, &item.Avatar, &item.IPLocation,
-			&item.CreateTime, &likeCount, &subCommentCount,
+			&createTime, &likeCount, &subCommentCount,
 		); err != nil {
 			return nil, 0, err
+		}
+
+		if createTime.Valid {
+			item.CreateTime = &createTime.Time
 		}
 
 		item.LikeCount = &likeCount
@@ -451,7 +482,7 @@ func (r *PlatformCommentRepository) queryZhihuComments(ctx context.Context, quer
 
 	for rows.Next() {
 		var item model.PlatformCommentItem
-		var publishTimeStr string
+		var publishTimeStr *string // 改为指针类型以支持 NULL
 		var likeCount, subCommentCount int
 
 		if err := rows.Scan(
@@ -462,8 +493,10 @@ func (r *PlatformCommentRepository) queryZhihuComments(ctx context.Context, quer
 			return nil, 0, err
 		}
 
-		if t, err := time.Parse("2006-01-02 15:04:05", publishTimeStr); err == nil {
-			item.CreateTime = &t
+		if publishTimeStr != nil && *publishTimeStr != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05", *publishTimeStr); err == nil {
+				item.CreateTime = &t
+			}
 		}
 
 		item.LikeCount = &likeCount

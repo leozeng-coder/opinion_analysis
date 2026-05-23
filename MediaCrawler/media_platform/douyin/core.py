@@ -176,8 +176,10 @@ class DouYinCrawler(AbstractCrawler):
                 await self.batch_get_note_comments(page_aweme_list)
 
                 # Sleep after each page navigation
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[DouYinCrawler.search] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after page {page-1}")
+                sleep_time = utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC)
+
+                await asyncio.sleep(sleep_time)
+                utils.logger.info(f"[DouYinCrawler.search] Sleeping for {sleep_time:.2f} seconds after page {page-1}")
             utils.logger.info(f"[DouYinCrawler.search] keyword:{keyword}, aweme_list:{aweme_list}")
 
     async def get_specified_awemes(self):
@@ -221,8 +223,10 @@ class DouYinCrawler(AbstractCrawler):
             try:
                 result = await self.dy_client.get_video_by_id(aweme_id)
                 # Sleep after fetching aweme detail
-                await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
-                utils.logger.info(f"[DouYinCrawler.get_aweme_detail] Sleeping for {config.CRAWLER_MAX_SLEEP_SEC} seconds after fetching aweme {aweme_id}")
+                sleep_time = utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC)
+
+                await asyncio.sleep(sleep_time)
+                utils.logger.info(f"[DouYinCrawler.get_aweme_detail] Sleeping for {sleep_time:.2f} seconds after fetching aweme {aweme_id}")
                 return result
             except DataFetchError as ex:
                 utils.logger.error(f"[DouYinCrawler.get_aweme_detail] Get aweme detail error: {ex}")

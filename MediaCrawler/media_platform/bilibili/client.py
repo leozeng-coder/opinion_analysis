@@ -324,7 +324,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 comment_list = comment_list[:max_count - len(result)]
             if callback:  # If there is a callback function, execute it
                 await callback(video_id, comment_list)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+            await asyncio.sleep(sleep_time)
             if not is_fetch_sub_comments:
                 result.extend(comment_list)
                 continue
@@ -356,7 +357,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
             comment_list: List[Dict] = result.get("replies", [])
             if callback:  # If there is a callback function, execute it
                 await callback(video_id, comment_list)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+            await asyncio.sleep(sleep_time)
             if (int(result["page"]["count"]) <= pn * ps):
                 break
 
@@ -506,7 +508,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 fans_list = fans_list[:max_count - len(result)]
             if callback:  # If there is a callback function, execute it
                 await callback(creator_info, fans_list)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+            await asyncio.sleep(sleep_time)
             if not fans_list:
                 break
             result.extend(fans_list)
@@ -540,7 +543,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 followings_list = followings_list[:max_count - len(result)]
             if callback:  # If there is a callback function, execute it
                 await callback(creator_info, followings_list)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+            await asyncio.sleep(sleep_time)
             if not followings_list:
                 break
             result.extend(followings_list)
@@ -575,6 +579,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 dynamics_list = dynamics_list[:max_count - len(result)]
             if callback:
                 await callback(creator_info, dynamics_list)
-            await asyncio.sleep(crawl_interval)
+            sleep_time = utils.get_random_sleep_time(crawl_interval)
+            await asyncio.sleep(sleep_time)
             result.extend(dynamics_list)
         return result
