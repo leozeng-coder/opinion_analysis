@@ -5,10 +5,26 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 	"opinion-analysis/src/model"
 )
+
+// removeEmoji 移除字符串中的 emoji 和 4 字节 UTF-8 字符
+func removeEmoji(text string) string {
+	// 移除所有 4 字节 UTF-8 字符（包括 emoji、特殊符号、全角标点等）
+	// 只保留 1-3 字节的 UTF-8 字符（基本中文、英文、数字、常用标点）
+	result := make([]byte, 0, len(text))
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if r != utf8.RuneError && size <= 3 {
+			result = append(result, text[i:i+size]...)
+		}
+		i += size
+	}
+	return string(result)
+}
 
 // PlatformSyncer 平台同步器接口
 type PlatformSyncer interface {
@@ -34,6 +50,11 @@ func (b *BaseSyncer) checkDuplicate(url string) (bool, error) {
 
 // saveArticle 保存文章到 articles 表
 func (b *BaseSyncer) saveArticle(article *model.Article) error {
+	// 清理 emoji 和特殊字符
+	article.Title = removeEmoji(article.Title)
+	article.Content = removeEmoji(article.Content)
+	article.Author = removeEmoji(article.Author)
+
 	return b.db.Create(article).Error
 }
 

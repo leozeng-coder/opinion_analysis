@@ -202,6 +202,11 @@ func main() {
 	sqlDB.SetMaxOpenConns(config.Cfg.Database.MaxOpenConn)
 	sqlDB.SetMaxIdleConns(config.Cfg.Database.MaxIdleConn)
 
+	// 显式设置连接字符集为 utf8mb4
+	db.Exec("SET NAMES utf8mb4")
+	db.Exec("SET CHARACTER SET utf8mb4")
+	db.Exec("SET character_set_connection=utf8mb4")
+
 	// 自动迁移
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		log.Fatalf("failed to migrate: %v", err)
