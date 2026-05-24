@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 	}
 
 	progress.TotalCount = len(notes)
+	fmt.Printf("[XhsSyncer] 查询到 %d 条小红书数据\n", len(notes))
 
 	for i, note := range notes {
 		exists, err := s.checkDuplicate(note.NoteURL)
@@ -44,6 +46,12 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 			continue
 		}
 
+		// 处理时间戳：如果是毫秒级（13位），转换为秒级
+		timestamp := note.Time
+		if timestamp > 9999999999 { // 大于10位数字，说明是毫秒级
+			timestamp = timestamp / 1000
+		}
+
 		article := model.Article{
 			SourceID:    config.SourceID,
 			Title:       note.Title,
@@ -51,7 +59,7 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 			Author:      note.Nickname,
 			OriginURL:   note.NoteURL,
 			Platform:    "xhs",
-			PublishedAt: time.Unix(note.Time, 0),
+			PublishedAt: time.Unix(timestamp, 0),
 			Keywords:    extractKeywords(note.TagList),
 			Sentiment:   "neutral",
 			SentScore:   0.5,
@@ -94,6 +102,7 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 	}
 
 	progress.TotalCount = len(awemes)
+	fmt.Printf("[DouyinSyncer] 查询到 %d 条抖音数据\n", len(awemes))
 
 	for i, aweme := range awemes {
 		exists, err := s.checkDuplicate(aweme.AwemeURL)
@@ -157,6 +166,7 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	}
 
 	progress.TotalCount = len(videos)
+	fmt.Printf("[BilibiliSyncer] 查询到 %d 条B站数据\n", len(videos))
 
 	for i, video := range videos {
 		exists, err := s.checkDuplicate(video.VideoURL)
@@ -220,6 +230,7 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	}
 
 	progress.TotalCount = len(notes)
+	fmt.Printf("[WeiboSyncer] 查询到 %d 条微博数据\n", len(notes))
 
 	for i, note := range notes {
 		exists, err := s.checkDuplicate(note.NoteURL)
@@ -288,6 +299,7 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	}
 
 	progress.TotalCount = len(videos)
+	fmt.Printf("[KuaishouSyncer] 查询到 %d 条快手数据\n", len(videos))
 
 	for i, video := range videos {
 		exists, err := s.checkDuplicate(video.VideoURL)
@@ -351,6 +363,7 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	}
 
 	progress.TotalCount = len(notes)
+	fmt.Printf("[TiebaSyncer] 查询到 %d 条贴吧数据\n", len(notes))
 
 	for i, note := range notes {
 		exists, err := s.checkDuplicate(note.NoteURL)
@@ -366,6 +379,9 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 
 		publishTime, err := time.Parse("2006-01-02 15:04:05", note.PublishTime)
 		if err != nil {
+			// 记录详细的时间解析错误
+			fmt.Printf("[TiebaSyncer] 时间解析失败 - NoteID: %s, PublishTime: '%s', Error: %v\n",
+				note.NoteID, note.PublishTime, err)
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
 			continue
 		}
@@ -420,6 +436,7 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	}
 
 	progress.TotalCount = len(contents)
+	fmt.Printf("[ZhihuSyncer] 查询到 %d 条知乎数据\n", len(contents))
 
 	for i, content := range contents {
 		exists, err := s.checkDuplicate(content.ContentURL)
@@ -433,10 +450,22 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			continue
 		}
 
-		createdTime, err := time.Parse("2006-01-02 15:04:05", content.CreatedTime)
-		if err != nil {
-			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
-			continue
+		// 知乎的 CreatedTime 实际存储的是 Unix 时间戳（字符串格式）
+		var createdTime time.Time
+		// 先尝试解析为 Unix 时间戳
+		if timestamp, err := strconv.ParseInt(content.CreatedTime, 10, 64); err == nil {
+			createdTime = time.Unix(timestamp, 0)
+		} else {
+			// 如果不是时间戳，尝试解析为日期时间字符串
+			if t, err := time.Parse("2006-01-02 15:04:05", content.CreatedTime); err == nil {
+				createdTime = t
+			} else {
+				// 两种格式都解析失败
+				fmt.Printf("[ZhihuSyncer] 时间解析失败 - ContentID: %s, CreatedTime: '%s', Error: %v\n",
+					content.ContentID, content.CreatedTime, err)
+				progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
+				continue
+			}
 		}
 
 		article := model.Article{
