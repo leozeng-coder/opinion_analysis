@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 	"opinion-analysis/src/model"
+	"opinion-analysis/src/service/sentiment"
 )
 
 // removeEmoji 移除字符串中的 emoji 和 4 字节 UTF-8 字符
@@ -36,7 +37,8 @@ type PlatformSyncer interface {
 
 // BaseSyncer 基础同步器（提供通用方法）
 type BaseSyncer struct {
-	db *gorm.DB
+	db                *gorm.DB
+	sentimentAnalyzer *sentiment.Analyzer
 }
 
 // checkDuplicate 检查是否已存在（根据 origin_url 去重）
@@ -58,16 +60,23 @@ func (b *BaseSyncer) saveArticle(article *model.Article) error {
 	return b.db.Create(article).Error
 }
 
-// analyzeSentiment 情感分析（简化版）
+// analyzeSentiment 情感分析（基于 LLM）
 func (b *BaseSyncer) analyzeSentiment(endpoint, content string) (string, float64) {
-	if endpoint == "" {
-		return "neutral", 0.5
+	// endpoint 参数保留用于向后兼容，但现在使用统一的 LLM 配置
+	if b.sentimentAnalyzer == nil {
+		return "neutral", 0.500
 	}
-	// TODO: 实现实际的情感分析 API 调用
-	if len(content) > 100 {
-		return "positive", 0.7
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := b.sentimentAnalyzer.Analyze(ctx, content)
+	if err != nil {
+		// 分析失败时返回中性
+		return "neutral", 0.500
 	}
-	return "neutral", 0.5
+
+	return result.Sentiment, result.Score
 }
 
 // SyncerFactory 同步器工厂
@@ -92,7 +101,10 @@ func NewSyncerFactory(db *gorm.DB) *SyncerFactory {
 
 // registerSyncers 注册所有平台同步器
 func (f *SyncerFactory) registerSyncers() {
-	base := &BaseSyncer{db: f.db}
+	base := &BaseSyncer{
+		db:                f.db,
+		sentimentAnalyzer: sentiment.New(f.db),
+	}
 
 	f.syncers["xhs"] = &XhsSyncer{BaseSyncer: base}
 	f.syncers["dy"] = &DouyinSyncer{BaseSyncer: base}

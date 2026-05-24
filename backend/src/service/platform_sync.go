@@ -104,10 +104,11 @@ func (s *PlatformSyncService) SyncSinglePlatform(ctx context.Context, platform s
 
 	// 创建同步配置
 	config := SyncConfig{
-		Platform:     platform,
-		SyncMode:     "incremental",
-		LastSyncTime: lastSyncTime,
-		SourceID:     sourceID,
+		Platform:        platform,
+		SyncMode:        "incremental",
+		LastSyncTime:    lastSyncTime,
+		SourceID:        sourceID,
+		EnableSentiment: true, // 启用情感分析
 	}
 
 	// 创建进度跟踪
