@@ -144,7 +144,19 @@ const DashboardPage: React.FC = () => {
 
   const trendOption = {
     color: [CHART.positive, CHART.neutral, CHART.negative],
-    tooltip: { trigger: 'axis', ...chartTooltip },
+    tooltip: {
+      trigger: 'axis',
+      ...chartTooltip,
+      formatter: (params: any[]) => {
+        const date = params[0].axisValue
+        let html = `${date}<br/>`
+        params.forEach(p => {
+          html += `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`
+          html += `${p.seriesName}: <strong>${p.value}</strong> 条<br/>`
+        })
+        return html
+      },
+    },
     legend: {
       data: ['正面', '中性', '负面'],
       bottom: 0,
@@ -168,25 +180,61 @@ const DashboardPage: React.FC = () => {
     },
     series: [
       {
-        name: '正面', type: 'line', smooth: true, stack: 'total',
+        name: '正面',
+        type: 'line',
+        smooth: true,
         data: sentimentTrend.map(t => t.positive),
-        lineStyle: { width: 2 },
-        areaStyle: { color: CHART.positiveArea },
-        symbol: 'circle', symbolSize: 5,
+        lineStyle: { width: 3 },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(16, 185, 129, 0.25)' },
+            { offset: 1, color: 'rgba(16, 185, 129, 0.02)' },
+          ]),
+        },
+        symbol: 'circle',
+        symbolSize: 6,
+        emphasis: {
+          focus: 'series',
+          symbolSize: 10,
+        },
       },
       {
-        name: '中性', type: 'line', smooth: true, stack: 'total',
+        name: '中性',
+        type: 'line',
+        smooth: true,
         data: sentimentTrend.map(t => t.neutral),
-        lineStyle: { width: 2 },
-        areaStyle: { color: CHART.neutralArea },
-        symbol: 'circle', symbolSize: 5,
+        lineStyle: { width: 3 },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(59, 130, 246, 0.25)' },
+            { offset: 1, color: 'rgba(59, 130, 246, 0.02)' },
+          ]),
+        },
+        symbol: 'circle',
+        symbolSize: 6,
+        emphasis: {
+          focus: 'series',
+          symbolSize: 10,
+        },
       },
       {
-        name: '负面', type: 'line', smooth: true, stack: 'total',
+        name: '负面',
+        type: 'line',
+        smooth: true,
         data: sentimentTrend.map(t => t.negative),
-        lineStyle: { width: 2 },
-        areaStyle: { color: CHART.negativeArea },
-        symbol: 'circle', symbolSize: 5,
+        lineStyle: { width: 3 },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(239, 68, 68, 0.25)' },
+            { offset: 1, color: 'rgba(239, 68, 68, 0.02)' },
+          ]),
+        },
+        symbol: 'circle',
+        symbolSize: 6,
+        emphasis: {
+          focus: 'series',
+          symbolSize: 10,
+        },
       },
     ],
   }
@@ -422,7 +470,7 @@ const DashboardPage: React.FC = () => {
               ) : (
                 recentNegative.map(article => (
                   <div key={article.id} className={styles.listItem}
-                    onClick={() => navigate('/opinion?sentiment=negative')}>
+                    onClick={() => navigate(`/opinion?id=${article.id}&sentiment=negative`)}>
                     <span className={`${styles.listItemDot} ${styles.dotNegative}`} />
                     <div className={styles.listItemMain}>
                       <div className={styles.listItemTitle}>{article.title}</div>

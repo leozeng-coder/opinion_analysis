@@ -101,7 +101,28 @@ const OpinionPage: React.FC = () => {
   // URL ?platform= 跳转（如仪表盘柱状图点击）
   useEffect(() => {
     const plat = searchParams.get('platform')
-    setQuery((q) => ({ ...q, page: 1, platform: plat || undefined }))
+    const sentiment = searchParams.get('sentiment')
+    setQuery((q) => ({
+      ...q,
+      page: 1,
+      platform: plat || undefined,
+      sentiment: sentiment || undefined,
+    }))
+  }, [searchParams])
+
+  // URL ?id= 自动打开文章详情
+  useEffect(() => {
+    const articleId = searchParams.get('id')
+    if (articleId) {
+      const id = parseInt(articleId, 10)
+      if (!isNaN(id)) {
+        articleApi.detail(id).then(article => {
+          setDetail(article)
+        }).catch(() => {
+          // 文章不存在或加载失败，忽略
+        })
+      }
+    }
   }, [searchParams])
 
   // 选中标签 → 同步到 query
@@ -223,7 +244,7 @@ const OpinionPage: React.FC = () => {
               { value: 'neutral', label: '中性' },
               { value: 'negative', label: '负面' },
             ]}
-            defaultValue=""
+            value={query.sentiment || ''}
             onChange={(v) => setQuery(q => ({ ...q, page: 1, sentiment: v || undefined }))}
           />
           <Select
