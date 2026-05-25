@@ -2,10 +2,14 @@ package user
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"opinion-analysis/pkg/response"
+	"opinion-analysis/src/repository"
 	"opinion-analysis/src/service"
+	"opinion-analysis/src/service/digest"
+	"opinion-analysis/src/service/tagger"
 )
 
 // SyncPlatformDataRequest 同步平台数据请求（支持多平台）
@@ -36,6 +40,15 @@ func SyncPlatformData(c *gin.Context) {
 
 	syncService := service.NewPlatformSyncService(db.(*gorm.DB))
 
+	// 设置摘要生成器（如果Redis可用）
+	if rdb, ok := c.Get("redis"); ok && rdb != nil {
+		if taggerSvc, ok := c.Get("tagger"); ok && taggerSvc != nil {
+			digestRepo := repository.NewDigestRepository(rdb.(*redis.Client))
+			digestGen := digest.NewGenerator(db.(*gorm.DB), digestRepo, taggerSvc.(*tagger.Service))
+			syncService.SetDigestGenerator(digestGen)
+		}
+	}
+
 	// 执行多平台同步
 	results, err := syncService.SyncPlatforms(c.Request.Context(), req.Platforms)
 	if err != nil {
@@ -61,6 +74,16 @@ func SyncAllPlatforms(c *gin.Context) {
 	}
 
 	syncService := service.NewPlatformSyncService(db.(*gorm.DB))
+
+	// 设置摘要生成器（如果Redis可用）
+	if rdb, ok := c.Get("redis"); ok && rdb != nil {
+		if taggerSvc, ok := c.Get("tagger"); ok && taggerSvc != nil {
+			digestRepo := repository.NewDigestRepository(rdb.(*redis.Client))
+			digestGen := digest.NewGenerator(db.(*gorm.DB), digestRepo, taggerSvc.(*tagger.Service))
+			syncService.SetDigestGenerator(digestGen)
+		}
+	}
+
 	results, err := syncService.SyncAllPlatforms(c.Request.Context())
 	if err != nil {
 		response.Fail(c, 500, "同步失败: "+err.Error())

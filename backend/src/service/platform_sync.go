@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"gorm.io/gorm"
 	"opinion-analysis/src/model"
+	"opinion-analysis/src/service/digest"
 )
 
 // PlatformSyncService 平台数据同步服务（重构版）
@@ -15,6 +17,7 @@ type PlatformSyncService struct {
 	db              *gorm.DB
 	factory         *SyncerFactory
 	progressTracker *ProgressTracker
+	digestGen       *digest.Generator
 }
 
 func NewPlatformSyncService(db *gorm.DB) *PlatformSyncService {
@@ -22,7 +25,13 @@ func NewPlatformSyncService(db *gorm.DB) *PlatformSyncService {
 		db:              db,
 		factory:         NewSyncerFactory(db),
 		progressTracker: NewProgressTracker(),
+		digestGen:       nil, // 延迟初始化
 	}
+}
+
+// SetDigestGenerator 设置摘要生成器（可选）
+func (s *PlatformSyncService) SetDigestGenerator(gen *digest.Generator) {
+	s.digestGen = gen
 }
 
 // SyncConfig 同步配置
@@ -85,6 +94,10 @@ func (s *PlatformSyncService) SyncPlatforms(ctx context.Context, platforms []str
 	}
 
 	wg.Wait()
+
+	// 同步完成后，触发摘要生成
+	s.triggerDigestGeneration(ctx, results)
+
 	return results, nil
 }
 
@@ -124,6 +137,40 @@ func (s *PlatformSyncService) SyncSinglePlatform(ctx context.Context, platform s
 
 	progress.SetStatus("completed")
 	return s.progressToResult(progress), nil
+}
+
+// triggerDigestGeneration 触发摘要生成（异步）
+func (s *PlatformSyncService) triggerDigestGeneration(ctx context.Context, results map[string]*SyncResult) {
+	if s.digestGen == nil {
+		return
+	}
+
+	// 检查是否有成功的同步
+	hasSuccess := false
+	totalNew := 0
+	for _, result := range results {
+		if result.Status == "completed" && result.NewCount > 0 {
+			hasSuccess = true
+			totalNew += result.NewCount
+		}
+	}
+
+	if !hasSuccess || totalNew == 0 {
+		log.Printf("[digest] 本次同步无新数据，跳过摘要生成")
+		return
+	}
+
+	log.Printf("[digest] 检测到新数据（%d条），触发摘要生成...", totalNew)
+
+	// 异步生成摘要
+	go func() {
+		genCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+
+		if err := s.digestGen.GenerateRecentDigest(genCtx); err != nil {
+			log.Printf("[digest] 生成摘要失败: %v", err)
+		}
+	}()
 }
 
 // getOrCreateDefaultSource 获取或创建默认数据源

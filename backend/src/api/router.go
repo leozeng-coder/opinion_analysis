@@ -80,10 +80,14 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				// 平台数据同步接口（重构版）
 				platform.POST("/sync", func(c *gin.Context) {
 					c.Set("db", db)
+					c.Set("redis", rdb)
+					c.Set("tagger", taggerSvc)
 					userhandler.SyncPlatformData(c)
 				})
 				platform.POST("/sync/all", func(c *gin.Context) {
 					c.Set("db", db)
+					c.Set("redis", rdb)
+					c.Set("tagger", taggerSvc)
 					userhandler.SyncAllPlatforms(c)
 				})
 				platform.GET("/sync/progress", func(c *gin.Context) {

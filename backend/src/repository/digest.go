@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -67,4 +68,33 @@ func (r *DigestRepository) getByKey(ctx context.Context, key string) (*DailyDige
 		return nil, nil
 	}
 	return &d, nil
+}
+
+// Set 保存每日摘要到 Redis
+func (r *DigestRepository) Set(digest *DailyDigest) error {
+	if r == nil || r.client == nil {
+		return fmt.Errorf("redis client not available")
+	}
+	if digest == nil || digest.Date == "" || digest.Text == "" {
+		return fmt.Errorf("invalid digest: date and text are required")
+	}
+
+	ctx := context.Background()
+	data, err := json.Marshal(digest)
+	if err != nil {
+		return fmt.Errorf("marshal digest: %w", err)
+	}
+
+	// 保存到日期特定的 key
+	dateKey := digestKey(digest.Date)
+	if err := r.client.Set(ctx, dateKey, data, 7*24*time.Hour).Err(); err != nil {
+		return fmt.Errorf("redis set %s: %w", dateKey, err)
+	}
+
+	// 同时更新 latest key
+	if err := r.client.Set(ctx, digestLatestKey, data, 7*24*time.Hour).Err(); err != nil {
+		return fmt.Errorf("redis set latest: %w", err)
+	}
+
+	return nil
 }
