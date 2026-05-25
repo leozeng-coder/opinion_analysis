@@ -27,9 +27,6 @@ start "opinion-front-5173" cmd.exe /k call "%~dp0scripts\run-frontend.cmd"
 echo Starting admin :5174 ...
 start "opinion-admin-5174" cmd.exe /k call "%~dp0scripts\run-admin.cmd"
 
-echo Starting crawler ...
-start "opinion-crawler" cmd.exe /k call "%~dp0scripts\run-crawler.cmd"
-
 timeout /t 6 /nobreak >nul
 start "" "http://localhost:5173"
 start "" "http://localhost:5174"
