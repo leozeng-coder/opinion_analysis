@@ -110,56 +110,52 @@ export interface AlertRecord {
   createdAt: string
 }
 
-// 爬虫调度（与后端 /api/crawler 对齐）
-export interface CrawlerSpiderConfig {
-  id: number
-  spiderKey: string
-  displayName: string
-  intervalMinutes: number
-  enabled: number
-  createdAt: string
-  updatedAt: string
+// MediaCrawler 爬虫管理（新版）
+export interface MediaCrawlerStartRequest {
+  platform: 'xhs' | 'dy' | 'ks' | 'bili' | 'wb' | 'tieba' | 'zhihu'
+  login_type: 'qrcode' | 'cookie'
+  crawler_type: 'search' | 'detail' | 'creator'
+  keywords?: string
+  specified_ids?: string
+  creator_ids?: string
+  save_option: 'db' | 'json' | 'jsonl' | 'csv' | 'sqlite' | 'mongodb' | 'excel'
+  enable_comments: boolean
+  enable_sub_comments: boolean
+  headless: boolean
+  start_page: number
+  cookies?: string
 }
 
-export interface CrawlerRunFilter {
-  keywords?: string[]
-  topics?: string[]
-  startAt?: string
-  endAt?: string
+export interface CrawlerStatus {
+  status: 'idle' | 'running' | 'stopping' | 'error'
+  platform?: string
+  crawler_type?: string
+  started_at?: string
+  error_message?: string
 }
 
-export interface CrawlerRunLog {
+export interface CrawlerLog {
   id: number
-  spiders: string
-  mode: 'basic' | 'advanced'
-  params: string
-  status: 'running' | 'success' | 'failed'
+  timestamp: string
+  level: 'info' | 'warning' | 'error' | 'success' | 'debug'
   message: string
-  progress: number
-  progressDetail: string
-  triggeredBy: number
-  startedAt: string
-  finishedAt?: string
 }
 
-/** GET /crawler/progress/:id 返回的 data */
-export interface CrawlerRunProgress {
-  id: number
-  status: 'running' | 'success' | 'failed'
-  progress: number
-  detail: {
-    phase?: string
-    currentSpider?: string | null
-    completedSpiders?: string[]
-    totalSpiders?: number
-    itemsInSpider?: number
-  } | null
-  /** 原始 JSON 字符串，detail 解析失败时用于前端兜底 */
-  progressDetail?: string
+export interface Platform {
+  value: string
+  label: string
+  icon: string
 }
 
-export interface CrawlerRunRequest extends CrawlerRunFilter {
-  spiders?: string[]
+export interface ConfigOption {
+  value: string
+  label: string
+}
+
+export interface ConfigOptions {
+  login_types: ConfigOption[]
+  crawler_types: ConfigOption[]
+  save_options: ConfigOption[]
 }
 
 // 统计数据

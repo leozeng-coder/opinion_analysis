@@ -61,3 +61,44 @@ async def get_logs(limit: int = 100):
     """Get recent logs"""
     logs = crawler_manager.logs[-limit:] if limit > 0 else crawler_manager.logs
     return {"logs": [log.model_dump() for log in logs]}
+
+
+@router.get("/platforms")
+async def get_platforms():
+    """获取支持的平台列表"""
+    return {
+        "platforms": [
+            {"value": "xhs", "label": "小红书", "icon": "book-open"},
+            {"value": "dy", "label": "抖音", "icon": "music"},
+            {"value": "ks", "label": "快手", "icon": "video"},
+            {"value": "bili", "label": "B站", "icon": "tv"},
+            {"value": "wb", "label": "微博", "icon": "message-circle"},
+            {"value": "tieba", "label": "百度贴吧", "icon": "messages-square"},
+            {"value": "zhihu", "label": "知乎", "icon": "help-circle"},
+        ]
+    }
+
+
+@router.get("/options")
+async def get_config_options():
+    """获取所有配置选项"""
+    return {
+        "login_types": [
+            {"value": "qrcode", "label": "二维码登录"},
+            {"value": "cookie", "label": "Cookie登录"},
+        ],
+        "crawler_types": [
+            {"value": "search", "label": "关键词搜索"},
+            {"value": "detail", "label": "指定ID"},
+            {"value": "creator", "label": "创作者主页"},
+        ],
+        "save_options": [
+            {"value": "db", "label": "MySQL数据库"},
+            {"value": "json", "label": "JSON文件"},
+            {"value": "jsonl", "label": "JSONL文件"},
+            {"value": "csv", "label": "CSV文件"},
+            {"value": "sqlite", "label": "SQLite数据库"},
+            {"value": "mongodb", "label": "MongoDB数据库"},
+            {"value": "excel", "label": "Excel文件"},
+        ],
+    }

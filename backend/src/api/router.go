@@ -40,10 +40,16 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	articleH := userhandler.NewArticleHandler(store)
 	topicH := userhandler.NewTopicHandler(store)
 	alertH := userhandler.NewAlertHandler(store, alertEngine)
-	crawlerH := userhandler.NewCrawlerHandler(store, alertEngine)
+	// crawlerH := userhandler.NewCrawlerHandler(store, alertEngine) // 已废弃，改用 MediaCrawler
 	aiChatH := userhandler.NewAIChatHandler(taggerSvc)
 	chatSessionH := userhandler.NewChatSessionHandler(store, taggerSvc)
 	dashboardH := userhandler.NewDashboardHandler(store)
+
+	// MediaCrawler 代理处理器
+	mediaCrawlerProxy := userhandler.NewMediaCrawlerProxyHandler(
+		"http://localhost:8085",
+		"your-secret-key-change-in-production", // 与 FastAPI 共享的密钥
+	)
 
 	adminUserH := adminhandler.NewUserHandler(store)
 	adminSettingH := adminhandler.NewSettingHandler(store)
@@ -142,27 +148,23 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					middleware.Audit(db, "alert", "evaluate"),
 					alertH.Evaluate)
 			}
+		}
 
-			crawler := authorized.Group("/crawler")
-			{
-				crawler.GET("/spiders", crawlerH.ListSpiders)
-				crawler.PUT("/spiders",
-					middleware.Audit(db, "crawler", "update_spiders"),
-					crawlerH.PutSpiders)
-				crawler.POST("/run",
-					middleware.Audit(db, "crawler", "run"),
-					crawlerH.RunNow)
-				crawler.GET("/runs", crawlerH.ListRuns)
-				crawler.GET("/progress/:id", crawlerH.GetRunProgress)
-				crawler.GET("/runs/:id", crawlerH.GetRun)
-			}
+		// MediaCrawler 爬虫路由（不需要 JWT 认证，因为 FastAPI 层已有签名认证）
+		crawler := apiGroup.Group("/crawler")
+		{
+			// 所有 crawler 请求代理到 FastAPI (MediaCrawler)
+			crawler.Any("/*proxyPath", mediaCrawlerProxy.ProxyRequest)
+		}
 
-			authorized.POST("/ai/chat", aiChatH.Chat)
+		authorized2 := apiGroup.Group("", middleware.Auth())
+		{
+			authorized2.POST("/ai/chat", aiChatH.Chat)
 
 			// 测试 SSE 流式输出
-			authorized.GET("/ai/test-stream", userhandler.TestStreamHandler)
+			authorized2.GET("/ai/test-stream", userhandler.TestStreamHandler)
 
-			aiSessions := authorized.Group("/ai/sessions")
+			aiSessions := authorized2.Group("/ai/sessions")
 			{
 				aiSessions.GET("", chatSessionH.ListSessions)
 				aiSessions.POST("", chatSessionH.CreateSession)
@@ -172,7 +174,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				aiSessions.PATCH("/:id", chatSessionH.RenameSession)
 			}
 
-			taggerGroup := authorized.Group("/tagger")
+			taggerGroup := authorized2.Group("/tagger")
 			{
 				taggerGroup.POST("/run",
 					middleware.RequireRole("admin", "analyst"),
@@ -198,7 +200,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				})
 			}
 
-			admin := authorized.Group("/admin", middleware.RequireAdmin())
+			admin := authorized2.Group("/admin", middleware.RequireAdmin())
 			{
 				admin.GET("/users", adminUserH.List)
 				admin.PUT("/users/:id",

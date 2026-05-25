@@ -17,7 +17,7 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 """
-MediaCrawler WebUI API Server
+MediaCrawler API Server
 Start command: uvicorn api.main:app --port 8085 --reload
 Or: python -m api.main
 """
@@ -31,29 +31,23 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from .routers import crawler_router, data_router, websocket_router
+from .middleware import ProxyAuthMiddleware
 
 app = FastAPI(
-    title="MediaCrawler WebUI API",
-    description="API for controlling MediaCrawler from WebUI",
+    title="MediaCrawler API",
+    description="多平台爬虫管理 API (通过 Go 后端代理访问)",
     version="1.0.0"
 )
+
+# 添加代理认证中间件（验证请求来自 Go 后端）
+SECRET_KEY = os.getenv("PROXY_SECRET_KEY", "your-secret-key-change-in-production")
+app.add_middleware(ProxyAuthMiddleware, secret_key=SECRET_KEY, time_tolerance=300)
 
 # Get webui static files directory
 WEBUI_DIR = os.path.join(os.path.dirname(__file__), "webui")
 
-# CORS configuration - allow frontend dev server access
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:3000",  # Backup port
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# 注意：不需要 CORS 中间件，因为所有请求都通过 Go 后端代理
+# Go 后端已经处理了 CORS
 
 # Register routers
 app.include_router(crawler_router, prefix="/api")
@@ -77,7 +71,7 @@ async def serve_frontend():
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "MediaCrawler"}
 
 
 @app.get("/api/env/check")
@@ -124,47 +118,6 @@ async def check_environment():
             "message": "Environment check error",
             "error": str(e) or "Unknown error occurred"
         }
-
-
-@app.get("/api/config/platforms")
-async def get_platforms():
-    """Get list of supported platforms"""
-    return {
-        "platforms": [
-            {"value": "xhs", "label": "Xiaohongshu", "icon": "book-open"},
-            {"value": "dy", "label": "Douyin", "icon": "music"},
-            {"value": "ks", "label": "Kuaishou", "icon": "video"},
-            {"value": "bili", "label": "Bilibili", "icon": "tv"},
-            {"value": "wb", "label": "Weibo", "icon": "message-circle"},
-            {"value": "tieba", "label": "Baidu Tieba", "icon": "messages-square"},
-            {"value": "zhihu", "label": "Zhihu", "icon": "help-circle"},
-        ]
-    }
-
-
-@app.get("/api/config/options")
-async def get_config_options():
-    """Get all configuration options"""
-    return {
-        "login_types": [
-            {"value": "qrcode", "label": "QR Code Login"},
-            {"value": "cookie", "label": "Cookie Login"},
-        ],
-        "crawler_types": [
-            {"value": "search", "label": "Search Mode"},
-            {"value": "detail", "label": "Detail Mode"},
-            {"value": "creator", "label": "Creator Mode"},
-        ],
-        "save_options": [
-            {"value": "jsonl", "label": "JSONL File"},
-            {"value": "json", "label": "JSON File"},
-            {"value": "csv", "label": "CSV File"},
-            {"value": "excel", "label": "Excel File"},
-            {"value": "sqlite", "label": "SQLite Database"},
-            {"value": "db", "label": "MySQL Database"},
-            {"value": "mongodb", "label": "MongoDB Database"},
-        ],
-    }
 
 
 # Mount static resources - must be placed after all routes
