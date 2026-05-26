@@ -66,7 +66,7 @@ const AppLayout: React.FC = () => {
         />
       </Sider>
 
-      <Layout>
+      <Layout className={collapsed ? styles.layoutMainCollapsed : styles.layoutMain}>
         <Header className={styles.header}>
           <Space size={12}>
             <Badge count={0} size="small" showZero={false}>
