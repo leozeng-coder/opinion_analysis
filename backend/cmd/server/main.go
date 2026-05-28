@@ -23,7 +23,8 @@ import (
 	"opinion-analysis/src/service/tagger"
 )
 
-// runCrawlerSQL 执行 crawler/schema/crawler_tables.sql，幂等：已存在/重复键等错误静默跳过。
+// runCrawlerSQL 已废弃：MediaCrawler 通过 API 调用，不需要本地 SQL
+/*
 func runCrawlerSQL(db *gorm.DB) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -65,6 +66,51 @@ func runCrawlerSQL(db *gorm.DB) {
 		}
 	}
 	log.Printf("[crawler-sql] done: ok=%d skipped=%d failed=%d", ok, skipped, failed)
+}
+*/
+
+// runWorkflowSQL 执行 schema/workflow_tables.sql，幂等：已存在/重复键等错误静默跳过。
+func runWorkflowSQL(db *gorm.DB) {
+	wd, err := os.Getwd()
+	if err != nil {
+		log.Printf("[workflow-sql] getwd: %v", err)
+		return
+	}
+	sqlPath := filepath.Join(wd, "schema", "workflow_tables.sql")
+	data, err := os.ReadFile(sqlPath)
+	if err != nil {
+		log.Printf("[workflow-sql] read %s: %v (skipped)", sqlPath, err)
+		return
+	}
+
+	sqlDB, _ := db.DB()
+	stmts := strings.Split(string(data), ";")
+	ok, skipped, failed := 0, 0, 0
+	for _, raw := range stmts {
+		stmt := strings.TrimSpace(raw)
+		if stmt == "" || strings.HasPrefix(stmt, "--") {
+			continue
+		}
+		if _, err := sqlDB.Exec(stmt); err != nil {
+			msg := err.Error()
+			// 幂等：表已存在、列已存在、索引已存在、外键缺失等均跳过
+			if strings.Contains(msg, "already exists") ||
+				strings.Contains(msg, "Duplicate") ||
+				strings.Contains(msg, "1060") || // duplicate column
+				strings.Contains(msg, "1061") || // duplicate key name
+				strings.Contains(msg, "1050") || // table already exists
+				strings.Contains(msg, "6125") || // FK missing unique key
+				strings.Contains(msg, "1146") { // table doesn't exist (ALTER on missing table)
+				skipped++
+			} else {
+				log.Printf("[workflow-sql] warn: %v", err)
+				failed++
+			}
+		} else {
+			ok++
+		}
+	}
+	log.Printf("[workflow-sql] done: ok=%d skipped=%d failed=%d", ok, skipped, failed)
 }
 
 func seedSystemSettings(db *gorm.DB) {
@@ -216,7 +262,8 @@ func main() {
 	seedSystemSettings(db)
 	seedDefaultAdmin(db)
 
-	runCrawlerSQL(db)
+	// runCrawlerSQL(db) // 已废弃：MediaCrawler 通过 API 调用，不需要本地 SQL
+	runWorkflowSQL(db)
 
 	rdb := redisclient.New(config.Cfg.Redis)
 	if rdb != nil {

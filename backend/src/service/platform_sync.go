@@ -101,6 +101,32 @@ func (s *PlatformSyncService) SyncPlatforms(ctx context.Context, platforms []str
 	return results, nil
 }
 
+// SyncPlatformSince 从指定时间点起增量同步单个平台
+func (s *PlatformSyncService) SyncPlatformSince(ctx context.Context, platform string, since time.Time, enableSentiment bool) (*SyncResult, error) {
+	syncer, err := s.factory.GetSyncer(platform)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceID := s.getOrCreateDefaultSource()
+	config := SyncConfig{
+		Platform:        platform,
+		SyncMode:        "incremental",
+		LastSyncTime:    since,
+		SourceID:        sourceID,
+		EnableSentiment: enableSentiment,
+	}
+
+	progress := s.progressTracker.StartProgress(platform, 0)
+	if err := syncer.Sync(ctx, config, progress); err != nil {
+		progress.SetError(err)
+		return s.progressToResult(progress), err
+	}
+
+	progress.SetStatus("completed")
+	return s.progressToResult(progress), nil
+}
+
 // SyncSinglePlatform 同步单个平台
 func (s *PlatformSyncService) SyncSinglePlatform(ctx context.Context, platform string) (*SyncResult, error) {
 	// 获取同步器

@@ -9,6 +9,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"opinion-analysis/config"
+	"opinion-analysis/pkg/response"
+	"opinion-analysis/src/api/handler"
 	adminhandler "opinion-analysis/src/api/handler/admin"
 	userhandler "opinion-analysis/src/api/handler/user"
 	"opinion-analysis/src/middleware"
@@ -16,7 +19,7 @@ import (
 	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
-	"opinion-analysis/pkg/response"
+	"opinion-analysis/src/service/workflow"
 )
 
 func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager, alertEngine *alertengine.Engine) *gin.Engine {
@@ -46,10 +49,15 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	dashboardH := userhandler.NewDashboardHandler(store)
 
 	// MediaCrawler 代理处理器
-	mediaCrawlerProxy := userhandler.NewMediaCrawlerProxyHandler(
-		"http://localhost:8085",
-		"your-secret-key-change-in-production", // 与 FastAPI 共享的密钥
-	)
+	mediaCrawlerURL := config.Cfg.Crawler.ApiURL
+	if mediaCrawlerURL == "" {
+		mediaCrawlerURL = "http://127.0.0.1:8085"
+	}
+	mediaCrawlerSecret := config.Cfg.Crawler.ProxySecretKey
+	if mediaCrawlerSecret == "" {
+		mediaCrawlerSecret = "your-secret-key-change-in-production"
+	}
+	mediaCrawlerProxy := userhandler.NewMediaCrawlerProxyHandler(mediaCrawlerURL, mediaCrawlerSecret)
 
 	adminUserH := adminhandler.NewUserHandler(store)
 	adminSettingH := adminhandler.NewSettingHandler(store)
@@ -57,6 +65,12 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	adminRagH := adminhandler.NewRAGHandler(store, ragProc)
 	adminDSH := adminhandler.NewDataSourceHandler(store)
 	adminAuditH := adminhandler.NewAuditHandler(store)
+
+	// 工作流引擎和调度器
+	workflowEngine := workflow.NewEngine(db, store, logger, taggerSvc, ragProc, alertEngine)
+	workflowScheduler := workflow.NewScheduler(store, workflowEngine, logger)
+	workflowScheduler.Start()
+	workflowH := handler.NewWorkflowHandler(store, workflowEngine)
 
 	apiGroup := r.Group("/api")
 	{
@@ -270,6 +284,19 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					adminDSH.Delete)
 
 				admin.GET("/audit-logs", adminAuditH.List)
+			}
+
+			// 工作流路由（需要认证）
+			workflows := authorized2.Group("/workflows")
+			{
+				workflows.GET("", workflowH.List)
+				workflows.POST("", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "create"), workflowH.Create)
+				workflows.GET("/:id", workflowH.Detail)
+				workflows.PUT("/:id", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "update"), workflowH.Update)
+				workflows.DELETE("/:id", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "delete"), workflowH.Delete)
+				workflows.POST("/:id/execute", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "execute"), workflowH.Execute)
+				workflows.GET("/:id/executions", workflowH.Executions)
+				workflows.GET("/executions/:execId/logs", workflowH.ExecutionLogs)
 			}
 		}
 	}

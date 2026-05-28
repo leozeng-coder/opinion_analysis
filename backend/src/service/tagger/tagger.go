@@ -182,6 +182,63 @@ func (s *Service) RunOnce(ctx context.Context) (int, error) {
 	return totalDone, nil
 }
 
+// TagArticlesByIDs 只对指定的文章ID进行打标
+func (s *Service) TagArticlesByIDs(ctx context.Context, articleIDs []int64) (int, error) {
+	if len(articleIDs) == 0 {
+		return 0, nil
+	}
+
+	cfg, apiKey := s.snapshot()
+	if apiKey == "" {
+		return 0, fmt.Errorf("deepseek api key not configured")
+	}
+
+	batchSize := cfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = 20
+	}
+
+	// 查询指定ID的文章（只查询未打标的）
+	var pending []model.Article
+	if err := s.db.WithContext(ctx).
+		Where("id IN ? AND ai_tags IS NULL", articleIDs).
+		Order("id ASC").
+		Find(&pending).Error; err != nil {
+		return 0, fmt.Errorf("query articles by IDs: %w", err)
+	}
+
+	if len(pending) == 0 {
+		log.Printf("[tagger] no pending articles found in provided IDs")
+		return 0, nil
+	}
+
+	log.Printf("[tagger] processing %d articles from provided IDs", len(pending))
+
+	totalDone := 0
+	for start := 0; start < len(pending); start += batchSize {
+		end := start + batchSize
+		if end > len(pending) {
+			end = len(pending)
+		}
+		chunk := pending[start:end]
+		tagsByIndex, err := s.callDeepSeek(ctx, chunk, cfg, apiKey)
+		if err != nil {
+			log.Printf("[tagger] batch %d-%d LLM failed: %v", start, end, err)
+			continue
+		}
+		for i, art := range chunk {
+			tags := tagsByIndex[i]
+			payload, _ := json.Marshal(tags)
+			s.db.WithContext(ctx).
+				Model(&model.Article{}).
+				Where("id = ?", art.ID).
+				Update("ai_tags", string(payload))
+			totalDone++
+		}
+	}
+	return totalDone, nil
+}
+
 // callDeepSeek 让模型对一批文章打标，返回 [][]string，外层下标 = chunk 的下标。
 func (s *Service) callDeepSeek(ctx context.Context, chunk []model.Article, cfg config.TaggerConfig, apiKey string) ([][]string, error) {
 	if len(chunk) == 0 {

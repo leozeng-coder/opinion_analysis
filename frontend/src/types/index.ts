@@ -220,3 +220,171 @@ export interface DashboardOverview {
   platform: { platform: string; count: number }[]
   status: DashboardStatus
 }
+
+// 工作流相关类型
+export interface WorkflowNode {
+  id: string
+  type: string
+  subType?: string
+  label: string
+  position: { x: number; y: number }
+  config: Record<string, any>
+}
+
+export interface WorkflowEdge {
+  id: string
+  source: string
+  target: string
+  label?: string
+}
+
+export interface Workflow {
+  id?: number
+  name: string
+  description?: string
+  status: number
+  triggerType: string
+  triggerConfig: Record<string, any>
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  createdAt?: string
+  updatedAt?: string
+  createdBy?: number
+}
+
+export interface WorkflowExecution {
+  id: number
+  workflowId: number
+  status: 'running' | 'success' | 'failed'
+  startedAt: string
+  finishedAt?: string
+  errorMsg?: string
+}
+
+export interface WorkflowNodeExecution {
+  id: number
+  executionId: number
+  nodeId: string
+  status: 'running' | 'success' | 'failed'
+  startedAt: string
+  finishedAt?: string
+  input?: Record<string, any>
+  output?: Record<string, any>
+  errorMsg?: string
+}
+
+export interface NodeTypeDefinition {
+  type: 'trigger' | 'action' | 'condition'
+  subType: string
+  label: string
+  icon: string
+  description: string
+  configSchema: {
+    name: string
+    label: string
+    type: 'text' | 'number' | 'select' | 'textarea' | 'cron'
+    required?: boolean
+    options?: { label: string; value: string }[]
+    placeholder?: string
+  }[]
+}
+
+// 节点类型注册表
+export const NODE_TYPES: NodeTypeDefinition[] = [
+  // Trigger 节点
+  {
+    type: 'trigger',
+    subType: 'schedule',
+    label: '定时触发',
+    icon: 'ClockCircleOutlined',
+    description: '按照 Cron 表达式定时执行',
+    configSchema: [
+      { name: 'cron', label: 'Cron 表达式', type: 'text', required: true, placeholder: '0 2 * * *' },
+    ],
+  },
+  {
+    type: 'trigger',
+    subType: 'manual',
+    label: '手动触发',
+    icon: 'PlayCircleOutlined',
+    description: '手动点击执行',
+    configSchema: [],
+  },
+  {
+    type: 'trigger',
+    subType: 'webhook',
+    label: 'Webhook',
+    icon: 'ApiOutlined',
+    description: '通过 HTTP 请求触发',
+    configSchema: [
+      { name: 'path', label: 'Webhook 路径', type: 'text', required: true, placeholder: '/webhook/my-workflow' },
+    ],
+  },
+
+  // Action 节点
+  {
+    type: 'action',
+    subType: 'ai_tagger',
+    label: 'AI 打标',
+    icon: 'TagsOutlined',
+    description: '对未打标的文章进行 AI 标签生成',
+    configSchema: [
+      { name: 'batchSize', label: '批次大小', type: 'number', required: true, placeholder: '50' },
+    ],
+  },
+  {
+    type: 'action',
+    subType: 'rag_vectorize',
+    label: 'RAG 向量化',
+    icon: 'DatabaseOutlined',
+    description: '将文章向量化并存入 Milvus',
+    configSchema: [],
+  },
+  {
+    type: 'action',
+    subType: 'alert_evaluate',
+    label: '告警评估',
+    icon: 'BellOutlined',
+    description: '评估所有告警规则',
+    configSchema: [],
+  },
+  {
+    type: 'action',
+    subType: 'digest_generate',
+    label: '生成摘要',
+    icon: 'FileTextOutlined',
+    description: '生成每日舆情摘要',
+    configSchema: [
+      { name: 'days', label: '天数', type: 'number', required: true, placeholder: '1' },
+    ],
+  },
+  {
+    type: 'action',
+    subType: 'http_request',
+    label: 'HTTP 请求',
+    icon: 'ApiOutlined',
+    description: '发送 HTTP 请求',
+    configSchema: [
+      { name: 'url', label: 'URL', type: 'text', required: true, placeholder: 'https://api.example.com' },
+      { name: 'method', label: '请求方法', type: 'select', required: true, options: [
+        { label: 'GET', value: 'GET' },
+        { label: 'POST', value: 'POST' },
+        { label: 'PUT', value: 'PUT' },
+        { label: 'DELETE', value: 'DELETE' },
+      ]},
+      { name: 'body', label: '请求体', type: 'textarea', placeholder: 'JSON 格式' },
+    ],
+  },
+
+  // Condition 节点
+  {
+    type: 'condition',
+    subType: 'condition_if',
+    label: '条件判断',
+    icon: 'BranchesOutlined',
+    description: '根据条件分支执行',
+    configSchema: [
+      { name: 'condition', label: '条件表达式', type: 'textarea', required: true, placeholder: 'taggedCount > 10' },
+    ],
+  },
+]

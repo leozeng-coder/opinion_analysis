@@ -42,5 +42,9 @@ func AllModels() []any {
 		&ZhihuContent{},
 		&ZhihuComment{},
 		&ZhihuCreator{},
+		// 工作流表
+		&Workflow{},
+		&WorkflowExecution{},
+		&WorkflowNodeExecution{},
 	}
 }

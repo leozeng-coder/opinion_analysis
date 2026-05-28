@@ -33,9 +33,9 @@ type RAGConfig struct {
 // CrawlerConfig controls on-demand runs from the API (local subprocess).
 // In Docker, the backend image has no Python: set enabled: false unless you mount crawler + venv.
 type CrawlerConfig struct {
-	Enabled bool   `mapstructure:"enabled"`
-	Root    string `mapstructure:"root"`    // relative to process working directory (run backend from backend/)
-	Python  string `mapstructure:"python"`  // optional absolute path; empty = .venv in Root
+	Enabled        bool   `mapstructure:"enabled"`
+	ApiURL         string `mapstructure:"api_url"`          // MediaCrawler FastAPI 服务地址
+	ProxySecretKey string `mapstructure:"proxy_secret_key"` // 与 MediaCrawler FastAPI 共享的代理签名密钥
 }
 
 // TaggerConfig 控制后台 AI 自动打标任务。
@@ -81,6 +81,8 @@ var Cfg *Config
 
 func Load(path string) {
 	viper.SetDefault("crawler.enabled", true)
+	viper.SetDefault("crawler.api_url", "http://127.0.0.1:8085")
+	viper.SetDefault("crawler.proxy_secret_key", "your-secret-key-change-in-production")
 	viper.SetDefault("crawler.root", "../crawler")
 	viper.SetDefault("tagger.enabled", true)
 	viper.SetDefault("tagger.llmBaseUrl", "https://api.deepseek.com")

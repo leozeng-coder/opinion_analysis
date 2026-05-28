@@ -14,6 +14,9 @@ const StatsPage = lazy(() => import('@/pages/stats/StatsPage'))
 const CrawlerPage = lazy(() => import('@/pages/crawler/CrawlerPage'))
 const AiAssistantPage = lazy(() => import('@/pages/assistant/AiAssistantPage'))
 const PlatformDataPage = lazy(() => import('@/pages/platform/PlatformDataPage'))
+const WorkflowListPage = lazy(() => import('@/pages/workflow/WorkflowListPage'))
+const WorkflowEditorPage = lazy(() => import('@/pages/workflow/WorkflowEditorPage'))
+const WorkflowExecutionPage = lazy(() => import('@/pages/workflow/WorkflowExecutionPage'))
 
 const fallback = <Spin size="large" style={{ display: 'block', marginTop: 100, textAlign: 'center' }} />
 
@@ -33,6 +36,10 @@ const App: React.FC = () => (
             <Route path="/crawler" element={<CrawlerPage />} />
             <Route path="/platform" element={<PlatformDataPage />} />
             <Route path="/assistant" element={<AiAssistantPage />} />
+            <Route path="/workflows" element={<WorkflowListPage />} />
+            <Route path="/workflows/:id/edit" element={<WorkflowEditorPage />} />
+            <Route path="/workflows/new" element={<WorkflowEditorPage />} />
+            <Route path="/workflows/:id/executions" element={<WorkflowExecutionPage />} />
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Route>
