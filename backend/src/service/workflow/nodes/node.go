@@ -18,4 +18,13 @@ type NodeExecutor interface {
 
 	// Validate 验证节点配置是否合法
 	Validate(config map[string]interface{}) error
+
+	// OnCancel 取消回调：当工作流被用户取消时，engine 会调此方法通知当前节点。
+	//
+	// 实现策略（两选一，节点自行选择）：
+	//   - 立即终止：向外部服务发停止信号（如 crawler stop），需要自行处理 ctx 的最终状态。
+	//   - 完成当前再退出：不做任何操作，依赖 ctx.Done() 在下一个检查点自然退出（BaseNode 默认行为）。
+	//
+	// 本方法应快速返回，不应阻塞；需要的异步操作请用 goroutine。
+	OnCancel(ctx context.Context)
 }

@@ -33,4 +33,8 @@ export const workflowApi = {
   // 执行日志
   executionLogs: (execId: number) =>
     request.get<WorkflowNodeExecution[]>(`/workflows/executions/${execId}/logs`),
+
+  // 取消执行
+  cancelExecution: (execId: number) =>
+    request.post<{ message: string }>(`/workflows/executions/${execId}/cancel`),
 }

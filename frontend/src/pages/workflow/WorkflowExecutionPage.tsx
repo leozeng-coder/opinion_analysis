@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Table, Button, Tag, Space, message, Card, Modal, Timeline, Spin } from 'antd'
-import { ArrowLeftOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined } from '@ant-design/icons'
+import { Table, Button, Tag, Space, message, Card, Modal, Timeline, Spin, Popconfirm } from 'antd'
+import { ArrowLeftOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, ExclamationCircleOutlined, StopOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import PageHeader from '@/components/common/PageHeader'
 import { workflowApi } from '@/api/workflow'
@@ -83,9 +83,21 @@ const WorkflowExecutionPage: React.FC = () => {
     const configs: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
       running: { color: 'processing', icon: <SyncOutlined spin />, label: '运行中' },
       success: { color: 'success', icon: <CheckCircleOutlined />, label: '成功' },
+      partial_success: { color: 'warning', icon: <ExclamationCircleOutlined />, label: '部分成功' },
       failed: { color: 'error', icon: <CloseCircleOutlined />, label: '失败' },
+      cancelled: { color: 'default', icon: <StopOutlined />, label: '已取消' },
     }
     return configs[status] || { color: 'default', icon: null, label: status }
+  }
+
+  const handleCancel = async (execId: number) => {
+    try {
+      await workflowApi.cancelExecution(execId)
+      message.success('取消信号已发送')
+      fetchExecutions()
+    } catch (error) {
+      // 错误提示已由 axios 拦截器处理
+    }
   }
 
   const columns: ColumnsType<WorkflowExecution> = [
@@ -140,17 +152,32 @@ const WorkflowExecutionPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 180,
       fixed: 'right',
       render: (_, record) => (
-        <Button
-          type="link"
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => handleViewDetail(record)}
-        >
-          查看详情
-        </Button>
+        <Space size={4}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => handleViewDetail(record)}
+          >
+            详情
+          </Button>
+          {record.status === 'running' && (
+            <Popconfirm
+              title="确定取消该执行？"
+              description="正在执行的节点会在下一个检查点退出"
+              onConfirm={() => handleCancel(record.id!)}
+              okText="取消执行"
+              cancelText="返回"
+            >
+              <Button type="link" size="small" danger icon={<StopOutlined />}>
+                取消
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
       ),
     },
   ]

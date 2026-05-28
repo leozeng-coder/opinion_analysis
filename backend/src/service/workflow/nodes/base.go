@@ -1,6 +1,7 @@
 package nodes
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -78,6 +79,10 @@ func (n *BaseNode) SetArticleIDs(output map[string]interface{}, articleIds []int
 func (n *BaseNode) MergeOutput(input, output map[string]interface{}) map[string]interface{} {
 	return CarryForward(input, output)
 }
+
+// OnCancel 默认实现：空操作，依赖 ctx.Done() 在阻塞点自然退出。
+// 节点如需主动停止外部资源（如爬虫进程），应覆盖此方法。
+func (n *BaseNode) OnCancel(_ context.Context) {}
 
 // WrapError 包装错误信息
 func (n *BaseNode) WrapError(message string, err error) error {

@@ -37,6 +37,9 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 	fmt.Printf("[XhsSyncer] 查询到 %d 条小红书数据\n", len(notes))
 
 	for i, note := range notes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		exists, err := s.checkDuplicate(note.NoteURL)
 		if err != nil {
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
@@ -109,6 +112,9 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 	fmt.Printf("[DouyinSyncer] 查询到 %d 条抖音数据\n", len(awemes))
 
 	for i, aweme := range awemes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		exists, err := s.checkDuplicate(aweme.AwemeURL)
 		if err != nil {
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
@@ -175,6 +181,9 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	fmt.Printf("[BilibiliSyncer] 查询到 %d 条B站数据\n", len(videos))
 
 	for i, video := range videos {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		exists, err := s.checkDuplicate(video.VideoURL)
 		if err != nil {
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
@@ -241,6 +250,9 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	fmt.Printf("[WeiboSyncer] 查询到 %d 条微博数据\n", len(notes))
 
 	for i, note := range notes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		exists, err := s.checkDuplicate(note.NoteURL)
 		if err != nil {
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
@@ -312,6 +324,9 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	fmt.Printf("[KuaishouSyncer] 查询到 %d 条快手数据\n", len(videos))
 
 	for i, video := range videos {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		exists, err := s.checkDuplicate(video.VideoURL)
 		if err != nil {
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
@@ -378,6 +393,9 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	fmt.Printf("[TiebaSyncer] 查询到 %d 条贴吧数据\n", len(notes))
 
 	for i, note := range notes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		exists, err := s.checkDuplicate(note.NoteURL)
 		if err != nil {
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
@@ -453,6 +471,9 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	fmt.Printf("[ZhihuSyncer] 查询到 %d 条知乎数据\n", len(contents))
 
 	for i, content := range contents {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		exists, err := s.checkDuplicate(content.ContentURL)
 		if err != nil {
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)

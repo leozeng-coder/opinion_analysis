@@ -134,6 +134,42 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	response.OK(c, gin.H{"message": "workflow deleted"})
 }
 
+// CancelExecution 取消运行中的工作流执行
+func (h *WorkflowHandler) CancelExecution(c *gin.Context) {
+	execID, err := strconv.ParseInt(c.Param("execId"), 10, 64)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid execution id")
+		return
+	}
+
+	exec, err := h.store.WorkflowExecution.FindByID(execID)
+	if err != nil {
+		response.Fail(c, http.StatusNotFound, "execution not found")
+		return
+	}
+
+	if exec.Status != "running" {
+		response.Fail(c, http.StatusConflict,
+			"execution is not running (status="+exec.Status+")")
+		return
+	}
+
+	if ok := h.engine.CancelExecution(execID); !ok {
+		// 内存里没有该 cancel（重启后丢失），直接把记录标为 cancelled
+		now := time.Now()
+		_ = h.store.WorkflowExecution.Update(&model.WorkflowExecution{
+			ID:         execID,
+			Status:     "cancelled",
+			FinishedAt: &now,
+			ErrorMsg:   "服务重启或任务已结束，已标记为取消",
+		})
+		response.OK(c, gin.H{"message": "execution marked as cancelled (no live runner)"})
+		return
+	}
+
+	response.OK(c, gin.H{"message": "cancel signal sent"})
+}
+
 // Execute 手动执行工作流
 func (h *WorkflowHandler) Execute(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

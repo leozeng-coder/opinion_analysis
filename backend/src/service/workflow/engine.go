@@ -3,8 +3,10 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -19,6 +21,9 @@ import (
 	processorNodes "opinion-analysis/src/service/workflow/nodes/processor"
 )
 
+// ErrCancelled 表示工作流被用户主动取消
+var ErrCancelled = errors.New("workflow cancelled")
+
 // Engine 工作流执行引擎
 type Engine struct {
 	db     *gorm.DB
@@ -29,6 +34,14 @@ type Engine struct {
 	taggerSvc   *tagger.Service
 	ragProc     *ragprocess.Manager
 	alertEngine *alertengine.Engine
+
+	// 运行中执行的取消注册表：executionID → cancel func
+	cancelMu    sync.Mutex
+	cancelFuncs map[int64]context.CancelFunc
+
+	// 当前正在执行的节点：executionID → NodeExecutor（用于转发 OnCancel）
+	activeNodeMu sync.Mutex
+	activeNodes  map[int64]NodeExecutor
 }
 
 // NewEngine 创建工作流引擎
@@ -47,6 +60,8 @@ func NewEngine(
 		taggerSvc:   taggerSvc,
 		ragProc:     ragProc,
 		alertEngine: alertEngine,
+		cancelFuncs: make(map[int64]context.CancelFunc),
+		activeNodes: make(map[int64]NodeExecutor),
 	}
 
 	// 注册所有节点
@@ -69,6 +84,59 @@ func (e *Engine) registerNodes() {
 	// 注册控制流节点
 	MustRegisterNode(controlNodes.NewDelayNode())
 	MustRegisterNode(controlNodes.NewConditionNode())
+}
+
+// CancelExecution 请求取消指定执行。若执行不存在或已结束返回 false。
+// 取消分两步：
+//  1. 调用注册的 cancel func 取消 context（所有依赖 ctx.Done 的阻塞点会退出）
+//  2. 通知当前正在执行的节点调用其 OnCancel（用于需要主动停止外部资源的节点，如爬虫）
+func (e *Engine) CancelExecution(executionID int64) bool {
+	// 先拿到当前节点，再 cancel（避免节点在 cancel 后还未读到 activeNodes）
+	e.activeNodeMu.Lock()
+	node, hasNode := e.activeNodes[executionID]
+	e.activeNodeMu.Unlock()
+
+	e.cancelMu.Lock()
+	cancel, ok := e.cancelFuncs[executionID]
+	e.cancelMu.Unlock()
+
+	if !ok {
+		return false
+	}
+
+	// 先通知节点做清理（此时 ctx 还未 Done，节点内部可以做最后的操作）
+	if hasNode {
+		bgCtx := context.Background()
+		node.OnCancel(bgCtx)
+	}
+
+	// 再 cancel context，让阻塞的 WaitForCompletion / 轮询 退出
+	cancel()
+	return true
+}
+
+func (e *Engine) registerCancel(executionID int64, cancel context.CancelFunc) {
+	e.cancelMu.Lock()
+	defer e.cancelMu.Unlock()
+	e.cancelFuncs[executionID] = cancel
+}
+
+func (e *Engine) unregisterCancel(executionID int64) {
+	e.cancelMu.Lock()
+	defer e.cancelMu.Unlock()
+	delete(e.cancelFuncs, executionID)
+}
+
+func (e *Engine) setActiveNode(executionID int64, node NodeExecutor) {
+	e.activeNodeMu.Lock()
+	defer e.activeNodeMu.Unlock()
+	e.activeNodes[executionID] = node
+}
+
+func (e *Engine) clearActiveNode(executionID int64) {
+	e.activeNodeMu.Lock()
+	defer e.activeNodeMu.Unlock()
+	delete(e.activeNodes, executionID)
 }
 
 // Execute 执行工作流
@@ -97,6 +165,12 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 		}
 	}
 
+	// 包装可取消 context，注册到 engine.cancelFuncs，结束后清理
+	execCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e.registerCancel(execution.ID, cancel)
+	defer e.unregisterCancel(execution.ID)
+
 	// 3. 解析节点和边
 	var nodeList []map[string]interface{}
 	var edgeList []map[string]interface{}
@@ -120,6 +194,7 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 
 	// 5. 按顺序执行节点
 	nodeOutputs := make(map[string]map[string]interface{})
+	partialNodes := 0 // 节点 success 但内部有错误（partial_success）的计数
 	e.logger.Info("starting node execution",
 		zap.Int("totalNodes", len(sortedNodes)))
 
@@ -130,6 +205,13 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 		e.logger.Info("processing node",
 			zap.String("nodeId", nodeID),
 			zap.String("nodeType", nodeType))
+
+		// 在每个节点开始前检查取消
+		if err := execCtx.Err(); err != nil {
+			e.logger.Warn("workflow cancelled before node", zap.String("nodeId", nodeID))
+			e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
+			return execution, ErrCancelled
+		}
 
 		// 跳过 trigger 节点（trigger 只是起点标记）
 		if nodeType == "trigger" {
@@ -148,13 +230,26 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 			zap.Int("inputKeys", len(input)))
 
 		// 执行节点
-		output, err := e.executeNode(ctx, execution.ID, node, input)
+		output, err := e.executeNode(execCtx, execution.ID, node, input)
 		if err != nil {
+			// 区分「取消」与「失败」
+			if errors.Is(err, context.Canceled) || errors.Is(execCtx.Err(), context.Canceled) {
+				e.logger.Warn("node cancelled", zap.String("nodeId", nodeID))
+				e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
+				return execution, ErrCancelled
+			}
 			e.logger.Error("node execution failed",
 				zap.String("nodeId", nodeID),
 				zap.Error(err))
 			e.updateExecutionStatus(execution.ID, "failed", err.Error())
 			return execution, err
+		}
+
+		// 节点产出里若包含 status=partial_success/skipped，记录到聚合状态
+		if output != nil {
+			if s, ok := output["status"].(string); ok && (s == "partial_success" || s == "partial") {
+				partialNodes++
+			}
 		}
 
 		nodeOutputs[nodeID] = output
@@ -165,11 +260,18 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 	}
 
 	// 6. 更新执行状态
-	e.updateExecutionStatus(execution.ID, "success", "")
+	finalStatus := "success"
+	finalMsg := ""
+	if partialNodes > 0 {
+		finalStatus = "partial_success"
+		finalMsg = fmt.Sprintf("%d 个节点存在部分失败，详见节点日志", partialNodes)
+	}
+	e.updateExecutionStatus(execution.ID, finalStatus, finalMsg)
 
 	e.logger.Info("workflow execution completed",
 		zap.Int64("workflowId", workflowID),
-		zap.Int64("executionId", execution.ID))
+		zap.Int64("executionId", execution.ID),
+		zap.String("status", finalStatus))
 
 	return execution, nil
 }
@@ -215,18 +317,35 @@ func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[st
 		return nil, fmt.Errorf("[Node: %s, Type: %s] %s", nodeID, nodeType, errorMsg)
 	}
 
+	// 注册为当前活跃节点，用于转发 OnCancel
+	e.setActiveNode(executionID, executor)
+	defer e.clearActiveNode(executionID)
+
 	// 执行节点
 	output, err := executor.Execute(ctx, config, input)
 	if err != nil {
 		errorMsg := err.Error()
+		// 取消被识别为 cancelled 状态而非 failed
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			e.updateNodeExecutionStatus(nodeExec.ID, "cancelled", "用户取消", nil)
+			return nil, ctx.Err()
+		}
 		e.updateNodeExecutionStatus(nodeExec.ID, "failed", errorMsg, nil)
 		return nil, fmt.Errorf("[Node: %s, Type: %s] Execution failed: %w", nodeID, nodeType, err)
+	}
+
+	// 节点完成态：partial_success 时也作为「完成」入库，但状态明确标记出来
+	nodeStatus := "success"
+	if output != nil {
+		if s, ok := output["status"].(string); ok && (s == "partial_success" || s == "partial") {
+			nodeStatus = "partial_success"
+		}
 	}
 
 	// 持久化时只记录相对 input 的增量，避免重复字段把日志撑大；
 	// 下游节点拿到的仍然是完整 output。
 	outputDelta := diffPayload(input, output)
-	e.updateNodeExecutionStatus(nodeExec.ID, "success", "", outputDelta)
+	e.updateNodeExecutionStatus(nodeExec.ID, nodeStatus, "", outputDelta)
 
 	e.logger.Info("node execution completed",
 		zap.String("nodeId", nodeID),

@@ -137,14 +137,16 @@ func (s *Service) Trigger(ctx context.Context, params TriggerParams) (*TriggerRe
 	log.Printf("[CrawlerService] Triggered crawler task: runId=%d, spiders=%s, mode=%s",
 		logRow.ID, spiderArg, mode)
 
-	// 调用 MediaCrawler API
+	// 调用 MediaCrawler API（后台执行，用独立 background context，避免 HTTP 请求 ctx 结束就断掉）
+	// 注意：工作流取消走 WaitForCompletion 的 ctx，会显式调 StopCrawler 来停 MediaCrawler
 	if config.Cfg.Crawler.Enabled {
 		log.Printf("[CrawlerService] Calling MediaCrawler API for runId=%d", logRow.ID)
 		timeoutMinutes := params.TimeoutMinutes
 		if timeoutMinutes <= 0 {
 			timeoutMinutes = 30
 		}
-		go s.callMediaCrawlerAPI(logRow.ID, params, time.Duration(timeoutMinutes)*time.Minute)
+		bgCtx := context.Background()
+		go s.callMediaCrawlerAPI(bgCtx, logRow.ID, params, time.Duration(timeoutMinutes)*time.Minute)
 	} else {
 		log.Printf("[CrawlerService] Crawler is disabled in config")
 		s.finishRunLog(logRow.ID, "failed", "Crawler is disabled in configuration")
@@ -159,7 +161,7 @@ func (s *Service) Trigger(ctx context.Context, params TriggerParams) (*TriggerRe
 }
 
 // callMediaCrawlerAPI 调用 MediaCrawler FastAPI 并等待爬虫进程结束（数据同步由 platform_sync 节点负责）
-func (s *Service) callMediaCrawlerAPI(logID uint, params TriggerParams, timeout time.Duration) {
+func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params TriggerParams, timeout time.Duration) {
 	t0 := time.Now()
 
 	// 只取第一个平台（MediaCrawler API 一次只能爬一个平台）
@@ -278,6 +280,31 @@ func mediaCrawlerErrorMessage(status *mediaCrawlerStatusResponse) string {
 		return *status.ErrorMessage
 	}
 	return "unknown error"
+}
+
+// StopCrawler 向 MediaCrawler 发送停止信号并标记 run log 为 cancelled。
+// 设计为幂等：若 MediaCrawler 已 idle，stop 请求会被 400 拒绝，直接忽略。
+func (s *Service) StopCrawler(runID uint) {
+	log.Printf("[CrawlerService] Stopping MediaCrawler for runId=%d", runID)
+
+	req, err := http.NewRequest("POST", s.apiBaseURL+"/api/crawler/stop", nil)
+	if err != nil {
+		log.Printf("[CrawlerService] Failed to build stop request: %v", err)
+	} else {
+		s.setProxyAuthHeaders(req)
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			log.Printf("[CrawlerService] Stop request failed: %v", err)
+		} else {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			log.Printf("[CrawlerService] Stop response: status=%d body=%s", resp.StatusCode, string(body))
+		}
+	}
+
+	if runID > 0 {
+		s.finishRunLog(runID, "failed", "workflow cancelled by user")
+	}
 }
 
 func (s *Service) fetchMediaCrawlerStatus() (*mediaCrawlerStatusResponse, error) {

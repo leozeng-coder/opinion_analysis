@@ -297,6 +297,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				workflows.POST("/:id/execute", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "execute"), workflowH.Execute)
 				workflows.GET("/:id/executions", workflowH.Executions)
 				workflows.GET("/executions/:execId/logs", workflowH.ExecutionLogs)
+				workflows.POST("/executions/:execId/cancel", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "cancel"), workflowH.CancelExecution)
 			}
 		}
 	}

@@ -17,6 +17,15 @@ type NodeExecutor interface {
 	// input: 上游节点的输出数据
 	// output: 本节点的输出数据（传递给下游节点）
 	Execute(ctx context.Context, config map[string]interface{}, input map[string]interface{}) (output map[string]interface{}, err error)
+
+	// OnCancel 取消回调：engine 在 CancelExecution 时调用，用于通知当前节点做资源清理。
+	//
+	// 两种策略（节点自行选择）：
+	//   - 立即停止：主动终止外部资源（如爬虫），goroutine 内完成。
+	//   - 自然退出：空实现，依赖 ctx.Done() 在下一个检查点退出（BaseNode 默认）。
+	//
+	// 必须快速返回，异步操作须在 goroutine 内完成。
+	OnCancel(ctx context.Context)
 }
 
 // ExecutionContext 节点执行上下文
