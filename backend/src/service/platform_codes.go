@@ -76,3 +76,21 @@ func ResolveArticlePlatforms(syncCodes []string) []string {
 	}
 	return platforms
 }
+
+// SyncCodeToSourceTable 同步器平台代码 → MediaCrawler 源表名
+// 用于按源表主键做增量同步（避免依赖源帖子发帖时间）
+func SyncCodeToSourceTable(code string) string {
+	mapping := map[string]string{
+		"xhs":   "xhs_note",
+		"dy":    "douyin_aweme",
+		"ks":    "kuaishou_video",
+		"bili":  "bilibili_video",
+		"wb":    "weibo_note",
+		"tieba": "tieba_note",
+		"zhihu": "zhihu_content",
+	}
+	if t, ok := mapping[code]; ok {
+		return t
+	}
+	return ""
+}

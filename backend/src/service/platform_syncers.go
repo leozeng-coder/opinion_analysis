@@ -23,11 +23,13 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 	var notes []model.XhsNote
 
 	query := s.db.WithContext(ctx).Table("xhs_note")
-	if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
+	if config.MinSourceID > 0 {
+		query = query.Where("id > ?", config.MinSourceID)
+	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
 		query = query.Where("time > ?", config.LastSyncTime.Unix())
 	}
 
-	if err := query.Order("time ASC").Find(&notes).Error; err != nil {
+	if err := query.Order("id ASC").Find(&notes).Error; err != nil {
 		return fmt.Errorf("query xhs_note failed: %w", err)
 	}
 
@@ -93,11 +95,13 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 	var awemes []model.DouyinAweme
 
 	query := s.db.WithContext(ctx).Table("douyin_aweme")
-	if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
+	if config.MinSourceID > 0 {
+		query = query.Where("id > ?", config.MinSourceID)
+	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
 		query = query.Where("create_time > ?", config.LastSyncTime.Unix())
 	}
 
-	if err := query.Order("create_time ASC").Find(&awemes).Error; err != nil {
+	if err := query.Order("id ASC").Find(&awemes).Error; err != nil {
 		return fmt.Errorf("query douyin_aweme failed: %w", err)
 	}
 
@@ -157,11 +161,13 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	var videos []model.BilibiliVideo
 
 	query := s.db.WithContext(ctx).Table("bilibili_video")
-	if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
+	if config.MinSourceID > 0 {
+		query = query.Where("id > ?", config.MinSourceID)
+	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
 		query = query.Where("create_time > ?", config.LastSyncTime.Unix())
 	}
 
-	if err := query.Order("create_time ASC").Find(&videos).Error; err != nil {
+	if err := query.Order("id ASC").Find(&videos).Error; err != nil {
 		return fmt.Errorf("query bilibili_video failed: %w", err)
 	}
 
@@ -221,11 +227,13 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	var notes []model.WeiboNote
 
 	query := s.db.WithContext(ctx).Table("weibo_note")
-	if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
+	if config.MinSourceID > 0 {
+		query = query.Where("id > ?", config.MinSourceID)
+	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
 		query = query.Where("create_time > ?", config.LastSyncTime.Unix())
 	}
 
-	if err := query.Order("create_time ASC").Find(&notes).Error; err != nil {
+	if err := query.Order("id ASC").Find(&notes).Error; err != nil {
 		return fmt.Errorf("query weibo_note failed: %w", err)
 	}
 
@@ -290,11 +298,13 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	var videos []model.KuaishouVideo
 
 	query := s.db.WithContext(ctx).Table("kuaishou_video")
-	if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
+	if config.MinSourceID > 0 {
+		query = query.Where("id > ?", config.MinSourceID)
+	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
 		query = query.Where("create_time > ?", config.LastSyncTime.Unix())
 	}
 
-	if err := query.Order("create_time ASC").Find(&videos).Error; err != nil {
+	if err := query.Order("id ASC").Find(&videos).Error; err != nil {
 		return fmt.Errorf("query kuaishou_video failed: %w", err)
 	}
 
@@ -354,11 +364,13 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	var notes []model.TiebaNote
 
 	query := s.db.WithContext(ctx).Table("tieba_note")
-	if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
+	if config.MinSourceID > 0 {
+		query = query.Where("id > ?", config.MinSourceID)
+	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
 		query = query.Where("publish_time > ?", config.LastSyncTime.Format("2006-01-02 15:04:05"))
 	}
 
-	if err := query.Order("publish_time ASC").Find(&notes).Error; err != nil {
+	if err := query.Order("id ASC").Find(&notes).Error; err != nil {
 		return fmt.Errorf("query tieba_note failed: %w", err)
 	}
 
@@ -427,11 +439,13 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	var contents []model.ZhihuContent
 
 	query := s.db.WithContext(ctx).Table("zhihu_content")
-	if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
+	if config.MinSourceID > 0 {
+		query = query.Where("id > ?", config.MinSourceID)
+	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
 		query = query.Where("created_time > ?", config.LastSyncTime.Format("2006-01-02 15:04:05"))
 	}
 
-	if err := query.Order("created_time ASC").Find(&contents).Error; err != nil {
+	if err := query.Order("id ASC").Find(&contents).Error; err != nil {
 		return fmt.Errorf("query zhihu_content failed: %w", err)
 	}
 

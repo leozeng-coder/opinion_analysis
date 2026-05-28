@@ -43,10 +43,14 @@ export const NODE_REGISTRY = {
   },
   rag_vectorize: {
     label: 'RAG 向量化',
-    description: '确保 RAG 服务运行',
+    description: '触发 RAG 服务对新文章进行向量化',
     color: '#52c41a',
     icon: '📊',
-    configSchema: [],
+    configSchema: [
+      { name: 'onlyProvidedIds', label: '仅处理上游 articleIds', type: 'boolean', required: false, default: true },
+      { name: 'waitForCompletion', label: '等待向量化完成', type: 'boolean', required: false, default: true },
+      { name: 'timeoutMinutes', label: '超时时间(分钟)', type: 'number', required: false, default: 5, min: 1, max: 60 },
+    ],
   },
   condition: {
     label: '条件判断',

@@ -58,12 +58,12 @@ func NewEngine(
 // registerNodes 注册所有节点执行器
 func (e *Engine) registerNodes() {
 	// 注册爬虫类节点
-	MustRegisterNode(crawlerNodes.NewRunNode(e.store.Crawler))
+	MustRegisterNode(crawlerNodes.NewRunNode(e.db, e.store.Crawler))
 
 	// 注册处理类节点
 	MustRegisterNode(processorNodes.NewPlatformSyncNode(e.db))
 	MustRegisterNode(processorNodes.NewAITaggerNode(e.taggerSvc))
-	MustRegisterNode(processorNodes.NewRAGVectorizeNode(e.ragProc))
+	MustRegisterNode(processorNodes.NewRAGVectorizeNode(e.store.RAG, e.ragProc))
 	MustRegisterNode(processorNodes.NewAlertEvaluateNode(e.alertEngine))
 
 	// 注册控制流节点

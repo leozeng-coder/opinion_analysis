@@ -44,6 +44,11 @@ type SyncConfig struct {
 	SourceID          uint      `json:"sourceId"`
 	EnableSentiment   bool      `json:"enableSentiment"`
 	SentimentEndpoint string    `json:"sentimentEndpoint"`
+
+	// MinSourceID > 0 时表示按源表主键 PK 做增量同步：
+	// 只处理源表中 id > MinSourceID 的行，忽略 LastSyncTime。
+	// 工作流场景下由 crawler_run 节点提前记录每个源表的 max(id) 作为 baseline。
+	MinSourceID uint `json:"minSourceId"`
 }
 
 // SyncResult 同步结果
@@ -101,7 +106,7 @@ func (s *PlatformSyncService) SyncPlatforms(ctx context.Context, platforms []str
 	return results, nil
 }
 
-// SyncPlatformSince 从指定时间点起增量同步单个平台
+// SyncPlatformSince 从指定时间点起增量同步单个平台（按源帖子发帖时间过滤，旧逻辑保留）
 func (s *PlatformSyncService) SyncPlatformSince(ctx context.Context, platform string, since time.Time, enableSentiment bool) (*SyncResult, error) {
 	syncer, err := s.factory.GetSyncer(platform)
 	if err != nil {
@@ -125,6 +130,44 @@ func (s *PlatformSyncService) SyncPlatformSince(ctx context.Context, platform st
 
 	progress.SetStatus("completed")
 	return s.progressToResult(progress), nil
+}
+
+// SyncPlatformFromSourceID 按源表主键增量同步（推荐用于爬虫后续节点）
+// 只处理源表中 id > sinceSourceID 的新行，与源帖子发帖时间无关。
+func (s *PlatformSyncService) SyncPlatformFromSourceID(ctx context.Context, platform string, sinceSourceID uint, enableSentiment bool) (*SyncResult, error) {
+	syncer, err := s.factory.GetSyncer(platform)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceID := s.getOrCreateDefaultSource()
+	config := SyncConfig{
+		Platform:        platform,
+		SyncMode:        "incremental",
+		SourceID:        sourceID,
+		EnableSentiment: enableSentiment,
+		MinSourceID:     sinceSourceID,
+	}
+
+	progress := s.progressTracker.StartProgress(platform, 0)
+	if err := syncer.Sync(ctx, config, progress); err != nil {
+		progress.SetError(err)
+		return s.progressToResult(progress), err
+	}
+
+	progress.SetStatus("completed")
+	return s.progressToResult(progress), nil
+}
+
+// MaxSourceTableID 查询指定源表当前的 max(id)，作为爬虫前的 baseline
+func (s *PlatformSyncService) MaxSourceTableID(ctx context.Context, sourceTable string) (uint, error) {
+	if sourceTable == "" {
+		return 0, fmt.Errorf("empty source table")
+	}
+	var maxID uint
+	err := s.db.WithContext(ctx).Table(sourceTable).
+		Select("COALESCE(MAX(id), 0)").Scan(&maxID).Error
+	return maxID, err
 }
 
 // SyncSinglePlatform 同步单个平台
