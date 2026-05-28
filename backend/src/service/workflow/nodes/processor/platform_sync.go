@@ -8,24 +8,20 @@ import (
 
 	"gorm.io/gorm"
 	"opinion-analysis/src/model"
-	"opinion-analysis/src/repository"
 	platformSync "opinion-analysis/src/service"
 	"opinion-analysis/src/service/workflow/nodes"
 )
 
-// PlatformSyncNode 将 MediaCrawler 平台表同步到 articles 中心表
+// PlatformSyncNode 将 MediaCrawler 平台表同步到 articles 中心表（与爬虫节点解耦，仅消费标准 input）
 type PlatformSyncNode struct {
 	*nodes.BaseNode
-	db          *gorm.DB
-	crawlerRepo *repository.CrawlerRepository
+	db *gorm.DB
 }
 
-// NewPlatformSyncNode 创建平台数据同步节点
-func NewPlatformSyncNode(db *gorm.DB, crawlerRepo *repository.CrawlerRepository) *PlatformSyncNode {
+func NewPlatformSyncNode(db *gorm.DB) *PlatformSyncNode {
 	return &PlatformSyncNode{
-		BaseNode:    nodes.NewBaseNode("platform_sync"),
-		db:          db,
-		crawlerRepo: crawlerRepo,
+		BaseNode: nodes.NewBaseNode("platform_sync"),
+		db:       db,
 	}
 }
 
@@ -37,10 +33,12 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 	syncMode := n.GetString(config, "syncMode", "incremental")
 	enableSentiment := n.GetBool(config, "enableSentiment", false)
 
-	// 平台：优先节点配置，其次上游 crawler_run 输出
 	platformKeys := n.GetStringSlice(config, "platforms")
 	if len(platformKeys) == 0 {
-		platformKeys = n.getUpstreamPlatforms(input)
+		platformKeys = nodes.GetStringSliceFromInput(input, "platforms")
+	}
+	if len(platformKeys) == 0 {
+		platformKeys = nodes.GetStringSliceFromInput(input, "syncPlatformCodes")
 	}
 	syncCodes := platformSync.ResolveSyncCodes(platformKeys)
 	if len(syncCodes) == 0 {
@@ -52,8 +50,14 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		return nil, n.WrapError("resolve sync time range failed", err)
 	}
 
-	log.Printf("[PlatformSyncNode] Syncing platforms=%v mode=%s since=%v (%s)",
-		syncCodes, syncMode, since, sinceSource)
+	articlePlatforms := platformSync.ResolveArticlePlatforms(syncCodes)
+	maxIDBefore, err := n.maxArticleID(ctx, articlePlatforms)
+	if err != nil {
+		return nil, n.WrapError("query max article id failed", err)
+	}
+
+	log.Printf("[PlatformSyncNode] Syncing platforms=%v mode=%s since=%v (%s) maxArticleIdBefore=%d",
+		syncCodes, syncMode, since, sinceSource, maxIDBefore)
 
 	syncSvc := platformSync.NewPlatformSyncService(n.db)
 	results := make(map[string]interface{})
@@ -83,42 +87,34 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 			code, result.NewCount, result.SkippedCount, result.ErrorCount)
 	}
 
-	articleIDs, err := n.listArticleIDs(ctx, syncCodes, since, syncMode)
+	articleIDs, err := n.listNewArticleIDs(ctx, articlePlatforms, maxIDBefore)
 	if err != nil {
 		return nil, n.WrapError("query synced article ids failed", err)
 	}
 
-	output := n.MergeOutput(input, map[string]interface{}{
-		"articleIds":    int64SliceToIface(articleIDs),
-		"articlesCount": len(articleIDs),
-		"syncMode":      syncMode,
-		"syncPlatforms": syncCodes,
-		"syncResults":   results,
-		"syncNewCount":  totalNew,
-		"syncSince":     since.Format(time.RFC3339),
-		"status":        "synced",
-	})
-
-	log.Printf("[PlatformSyncNode] Sync completed: %d new records, %d article ids for downstream",
+	log.Printf("[PlatformSyncNode] Sync completed: syncNew=%d articleIds=%d for downstream",
 		totalNew, len(articleIDs))
 
-	return output, nil
-}
+	produced := map[string]interface{}{
+		"articleIds":        nodes.PackArticleIDs(articleIDs),
+		"articlesCount":     len(articleIDs),
+		"syncMode":          syncMode,
+		"syncPlatforms":     syncCodes,
+		"syncPlatformCodes": syncCodes,
+		"syncResults":       results,
+		"syncNewCount":      totalNew,
+		"status":            "synced",
+	}
+	if !since.IsZero() {
+		produced["syncSince"] = since.Format(time.RFC3339)
+	}
 
-func (n *PlatformSyncNode) getUpstreamPlatforms(input map[string]interface{}) []string {
-	if val, ok := input["platforms"].([]interface{}); ok {
-		out := make([]string, 0, len(val))
-		for _, v := range val {
-			if s, ok := v.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	if val, ok := input["platforms"].([]string); ok {
-		return val
-	}
-	return nil
+	output := nodes.CarryForward(input, produced)
+
+	log.Printf("[PlatformSyncNode] Output payload: articleIds=%v (type=%T), articlesCount=%d",
+		output["articleIds"], output["articleIds"], output["articlesCount"])
+
+	return output, nil
 }
 
 func (n *PlatformSyncNode) resolveSince(config, input map[string]interface{}, syncMode string) (time.Time, string, error) {
@@ -126,56 +122,31 @@ func (n *PlatformSyncNode) resolveSince(config, input map[string]interface{}, sy
 		return time.Time{}, "full", nil
 	}
 
-	// 上游 crawler_run 提供了 runId → 从运行日志取开始时间
-	if runID := n.getCrawlerRunID(input); runID > 0 {
-		runLog, err := n.crawlerRepo.FindRunLogByID(runID)
-		if err != nil {
-			return time.Time{}, "", fmt.Errorf("crawler run %d not found: %w", runID, err)
-		}
-		return runLog.StartedAt.Add(-1 * time.Minute), "crawlerRunId", nil
+	if t := nodes.GetTime(input, "crawlerStartedAt"); !t.IsZero() {
+		return t.Add(-1 * time.Minute), "crawlerStartedAt", nil
 	}
 
-	// 配置指定回溯分钟数
 	if minutes := n.GetInt(config, "syncSinceMinutes", 0); minutes > 0 {
 		return time.Now().Add(-time.Duration(minutes) * time.Minute), "syncSinceMinutes", nil
 	}
 
-	// 默认：各平台使用系统记录的最后同步时间（SyncSinglePlatform 行为）
 	return time.Time{}, "lastSyncTime", nil
 }
 
-func (n *PlatformSyncNode) getCrawlerRunID(input map[string]interface{}) uint {
-	switch v := input["crawlerRunId"].(type) {
-	case float64:
-		return uint(v)
-	case int:
-		return uint(v)
-	case int64:
-		return uint(v)
-	case uint:
-		return v
-	}
-	return 0
+func (n *PlatformSyncNode) maxArticleID(ctx context.Context, articlePlatforms []string) (uint, error) {
+	var maxID uint
+	err := n.db.WithContext(ctx).Model(&model.Article{}).
+		Where("platform IN ?", articlePlatforms).
+		Select("COALESCE(MAX(id), 0)").
+		Scan(&maxID).Error
+	return maxID, err
 }
 
-func (n *PlatformSyncNode) listArticleIDs(ctx context.Context, syncCodes []string, since time.Time, syncMode string) ([]int64, error) {
-	articlePlatforms := platformSync.ResolveArticlePlatforms(syncCodes)
-	query := n.db.WithContext(ctx).Model(&model.Article{}).Where("platform IN ?", articlePlatforms)
-	if syncMode != "full" && !since.IsZero() {
-		query = query.Where("created_at >= ?", since)
-	}
-
+func (n *PlatformSyncNode) listNewArticleIDs(ctx context.Context, articlePlatforms []string, afterID uint) ([]int64, error) {
 	var ids []int64
-	if err := query.Order("id ASC").Pluck("id", &ids).Error; err != nil {
-		return nil, err
-	}
-	return ids, nil
-}
-
-func int64SliceToIface(ids []int64) []interface{} {
-	out := make([]interface{}, len(ids))
-	for i, id := range ids {
-		out[i] = id
-	}
-	return out
+	err := n.db.WithContext(ctx).Model(&model.Article{}).
+		Where("platform IN ? AND id > ?", articlePlatforms, afterID).
+		Order("id ASC").
+		Pluck("id", &ids).Error
+	return ids, err
 }

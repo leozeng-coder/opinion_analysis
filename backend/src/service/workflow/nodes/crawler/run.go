@@ -6,19 +6,18 @@ import (
 	"time"
 
 	"opinion-analysis/src/repository"
+	platformSync "opinion-analysis/src/service"
 	crawlerSvc "opinion-analysis/src/service/crawler"
 	"opinion-analysis/src/service/workflow/nodes"
 )
 
-// RunNode 执行爬虫任务节点
-// 作为工作流的起点，输出本次爬取的文章ID列表
+// RunNode 执行爬虫任务，仅负责触发 MediaCrawler，不做数据同步
 type RunNode struct {
 	*nodes.BaseNode
 	crawlerRepo *repository.CrawlerRepository
 	crawlerSvc  *crawlerSvc.Service
 }
 
-// NewRunNode 创建爬虫执行节点
 func NewRunNode(crawlerRepo *repository.CrawlerRepository) *RunNode {
 	return &RunNode{
 		BaseNode:    nodes.NewBaseNode("crawler_run"),
@@ -27,30 +26,26 @@ func NewRunNode(crawlerRepo *repository.CrawlerRepository) *RunNode {
 	}
 }
 
-// Validate 验证配置
 func (n *RunNode) Validate(config map[string]interface{}) error {
-	// 所有参数都是可选的
 	return nil
 }
 
-// Execute 执行爬虫任务
 func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, input map[string]interface{}) (map[string]interface{}, error) {
-	// 解析配置
 	platforms := n.GetStringSlice(config, "platforms")
 	keywords := n.GetStringSlice(config, "keywords")
 	topics := n.GetStringSlice(config, "topics")
 	waitForCompletion := n.GetBool(config, "waitForCompletion", true)
 	timeoutMinutes := n.GetInt(config, "timeoutMinutes", 10)
 
-	// 默认使用小红书
 	if len(platforms) == 0 {
-		platforms = []string{"broad-topic"}
+		platforms = []string{"zhihu"}
 	}
 
-	log.Printf("[CrawlerRunNode] Starting crawler task: platforms=%v, keywords=%v, topics=%v",
-		platforms, keywords, topics)
+	syncCodes := platformSync.ResolveSyncCodes(platforms)
 
-	// 触发爬虫任务
+	log.Printf("[CrawlerRunNode] Starting crawler: platforms=%v syncCodes=%v keywords=%v",
+		platforms, syncCodes, keywords)
+
 	result, err := n.crawlerSvc.Trigger(ctx, crawlerSvc.TriggerParams{
 		Spiders:        platforms,
 		Keywords:       keywords,
@@ -61,34 +56,31 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 		return nil, n.WrapError("failed to trigger crawler", err)
 	}
 
-	log.Printf("[CrawlerRunNode] Crawler task triggered: runId=%d", result.RunID)
+	log.Printf("[CrawlerRunNode] Crawler triggered: runId=%d", result.RunID)
 
-	// 等待爬虫完成；平台表 → articles 同步由下游 platform_sync 节点负责
 	if waitForCompletion {
-		log.Printf("[CrawlerRunNode] Waiting for crawler completion (timeout: %d minutes)", timeoutMinutes)
-
 		timeout := time.Duration(timeoutMinutes) * time.Minute
-		err := n.crawlerSvc.WaitForCompletion(ctx, result.RunID, timeout)
-		if err != nil {
+		if err := n.crawlerSvc.WaitForCompletion(ctx, result.RunID, timeout); err != nil {
 			return nil, n.WrapError("crawler execution failed", err)
 		}
-		log.Printf("[CrawlerRunNode] Crawler completed: runId=%d", result.RunID)
-	} else {
-		log.Printf("[CrawlerRunNode] Crawler task started asynchronously (not waiting for completion)")
+		log.Printf("[CrawlerRunNode] Crawler finished: runId=%d", result.RunID)
 	}
 
 	status := "triggered"
 	if waitForCompletion {
 		status = "completed"
 	}
-	output := map[string]interface{}{
-		"crawlerRunId":     result.RunID,
-		"platforms":        platforms,
-		"keywords":         keywords,
-		"topics":           topics,
-		"status":           status,
-		"waitedCompletion": waitForCompletion,
+
+	produced := map[string]interface{}{
+		"crawlerRunId":      result.RunID,
+		"crawlerStartedAt":  result.StartedAt.Format(time.RFC3339),
+		"platforms":         platforms,
+		"syncPlatformCodes": syncCodes,
+		"keywords":          keywords,
+		"topics":            topics,
+		"status":            status,
+		"waitedCompletion":  waitForCompletion,
 	}
 
-	return output, nil
+	return nodes.CarryForward(input, produced), nil
 }

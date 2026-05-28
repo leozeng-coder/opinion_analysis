@@ -13,17 +13,24 @@ import (
 type JSON json.RawMessage
 
 // Scan 实现 sql.Scanner 接口
+// 注意：必须复制底层 []byte，否则 MySQL driver 会复用同一段缓冲区，
+// 导致后续 Scan/查询把已经赋值的字节覆盖成乱码。
 func (j *JSON) Scan(value interface{}) error {
 	if value == nil {
 		*j = JSON("null")
 		return nil
 	}
-	bytes, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("failed to unmarshal JSON value: %v", value)
+	switch v := value.(type) {
+	case []byte:
+		cp := make([]byte, len(v))
+		copy(cp, v)
+		*j = JSON(cp)
+		return nil
+	case string:
+		*j = JSON([]byte(v))
+		return nil
 	}
-	*j = JSON(bytes)
-	return nil
+	return fmt.Errorf("failed to unmarshal JSON value: %T", value)
 }
 
 // Value 实现 driver.Valuer 接口
@@ -31,12 +38,20 @@ func (j JSON) Value() (driver.Value, error) {
 	if len(j) == 0 {
 		return nil, nil
 	}
-	return []byte(j), nil
+	// 创建副本，避免底层字节数组被修改导致数据损坏
+	result := make([]byte, len(j))
+	copy(result, j)
+	return result, nil
 }
 
 // MarshalJSON 实现 json.Marshaler 接口
+// 如果底层字节不是合法 JSON（历史脏数据），降级为 null，
+// 避免一行坏数据让整个 handler 序列化失败。
 func (j JSON) MarshalJSON() ([]byte, error) {
 	if len(j) == 0 {
+		return []byte("{}"), nil
+	}
+	if !json.Valid([]byte(j)) {
 		return []byte("null"), nil
 	}
 	return []byte(j), nil

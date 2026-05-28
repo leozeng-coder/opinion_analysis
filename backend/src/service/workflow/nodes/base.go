@@ -55,38 +55,18 @@ func (n *BaseNode) GetBool(config map[string]interface{}, key string, defaultVal
 
 // GetStringSlice 从配置中获取字符串数组
 func (n *BaseNode) GetStringSlice(config map[string]interface{}, key string) []string {
-	if val, ok := config[key].([]interface{}); ok {
-		result := make([]string, 0, len(val))
-		for _, v := range val {
-			if str, ok := v.(string); ok {
-				result = append(result, str)
-			}
-		}
-		return result
-	}
-	return []string{}
-}
-
-// GetArticleIDs 从输入中获取文章ID列表
-func (n *BaseNode) GetArticleIDs(input map[string]interface{}) []int64 {
-	if val, ok := input["articleIds"].([]int64); ok {
+	if val, ok := config[key].([]string); ok {
 		return val
 	}
-	if val, ok := input["articleIds"].([]interface{}); ok {
-		result := make([]int64, 0, len(val))
-		for _, v := range val {
-			switch id := v.(type) {
-			case float64:
-				result = append(result, int64(id))
-			case int64:
-				result = append(result, id)
-			case int:
-				result = append(result, int64(id))
-			}
-		}
-		return result
+	return GetStringSliceFromInput(config, key)
+}
+
+// GetArticleIDs 从输入中获取文章ID列表（使用统一的解包函数）
+func (n *BaseNode) GetArticleIDs(input map[string]interface{}) []int64 {
+	if input == nil {
+		return []int64{}
 	}
-	return []int64{}
+	return UnpackArticleIDs(input["articleIds"])
 }
 
 // SetArticleIDs 设置文章ID列表到输出
@@ -94,21 +74,9 @@ func (n *BaseNode) SetArticleIDs(output map[string]interface{}, articleIds []int
 	output["articleIds"] = articleIds
 }
 
-// MergeOutput 合并输入和输出（责任链模式）
+// MergeOutput 合并输入和输出（责任链模式，同 CarryForward）
 func (n *BaseNode) MergeOutput(input, output map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
-
-	// 先复制输入
-	for k, v := range input {
-		result[k] = v
-	}
-
-	// 再覆盖输出
-	for k, v := range output {
-		result[k] = v
-	}
-
-	return result
+	return CarryForward(input, output)
 }
 
 // WrapError 包装错误信息

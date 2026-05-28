@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"go.uber.org/zap"
@@ -60,7 +61,7 @@ func (e *Engine) registerNodes() {
 	MustRegisterNode(crawlerNodes.NewRunNode(e.store.Crawler))
 
 	// 注册处理类节点
-	MustRegisterNode(processorNodes.NewPlatformSyncNode(e.db, e.store.Crawler))
+	MustRegisterNode(processorNodes.NewPlatformSyncNode(e.db))
 	MustRegisterNode(processorNodes.NewAITaggerNode(e.taggerSvc))
 	MustRegisterNode(processorNodes.NewRAGVectorizeNode(e.ragProc))
 	MustRegisterNode(processorNodes.NewAlertEvaluateNode(e.alertEngine))
@@ -124,7 +125,7 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 
 	for _, node := range sortedNodes {
 		nodeID := node["id"].(string)
-		nodeType := node["type"].(string)
+		nodeType := e.resolveNodeType(node)
 
 		e.logger.Info("processing node",
 			zap.String("nodeId", nodeID),
@@ -143,7 +144,8 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 		e.logger.Info("executing node",
 			zap.String("nodeId", nodeID),
 			zap.String("nodeType", nodeType),
-			zap.Any("input", input))
+			zap.Any("input", input),
+			zap.Int("inputKeys", len(input)))
 
 		// 执行节点
 		output, err := e.executeNode(ctx, execution.ID, node, input)
@@ -158,7 +160,8 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 		nodeOutputs[nodeID] = output
 		e.logger.Info("node execution succeeded",
 			zap.String("nodeId", nodeID),
-			zap.Any("output", output))
+			zap.Any("output", output),
+			zap.Int("outputKeys", len(output)))
 	}
 
 	// 6. 更新执行状态
@@ -174,15 +177,7 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 // executeNode 执行单个节点
 func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[string]interface{}, input map[string]interface{}) (map[string]interface{}, error) {
 	nodeID := node["id"].(string)
-
-	// 兼容 type 和 subType 字段
-	nodeType := ""
-	if t, ok := node["type"].(string); ok {
-		nodeType = t
-	} else if st, ok := node["subType"].(string); ok {
-		nodeType = st
-	}
-
+	nodeType := e.resolveNodeType(node)
 	config, _ := node["config"].(map[string]interface{})
 
 	e.logger.Info("executing node",
@@ -190,7 +185,10 @@ func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[st
 		zap.String("nodeType", nodeType))
 
 	// 创建节点执行记录
-	inputJSON, _ := json.Marshal(input)
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal input: %w", err)
+	}
 	nodeExec := &model.WorkflowNodeExecution{
 		ExecutionID: executionID,
 		NodeID:      nodeID,
@@ -225,8 +223,10 @@ func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[st
 		return nil, fmt.Errorf("[Node: %s, Type: %s] Execution failed: %w", nodeID, nodeType, err)
 	}
 
-	// 更新节点执行状态
-	e.updateNodeExecutionStatus(nodeExec.ID, "success", "", output)
+	// 持久化时只记录相对 input 的增量，避免重复字段把日志撑大；
+	// 下游节点拿到的仍然是完整 output。
+	outputDelta := diffPayload(input, output)
+	e.updateNodeExecutionStatus(nodeExec.ID, "success", "", outputDelta)
 
 	e.logger.Info("node execution completed",
 		zap.String("nodeId", nodeID),
@@ -304,6 +304,37 @@ func (e *Engine) collectInputs(nodeID string, edgeList []map[string]interface{},
 	return input
 }
 
+// diffPayload 返回 output 相对 input 的增量字段（新增或值发生变化）。
+// 用于日志持久化，避免把上游字段重复存一遍。
+func diffPayload(input, output map[string]interface{}) map[string]interface{} {
+	if output == nil {
+		return map[string]interface{}{}
+	}
+	if input == nil {
+		return output
+	}
+	delta := make(map[string]interface{}, len(output))
+	for k, v := range output {
+		if iv, ok := input[k]; !ok || !reflect.DeepEqual(iv, v) {
+			delta[k] = v
+		}
+	}
+	return delta
+}
+
+func (e *Engine) resolveNodeType(node map[string]interface{}) string {
+	if t, ok := node["type"].(string); ok && t != "" && t != "custom" && t != "trigger" {
+		return t
+	}
+	if st, ok := node["subType"].(string); ok && st != "" {
+		return st
+	}
+	if t, ok := node["type"].(string); ok {
+		return t
+	}
+	return ""
+}
+
 // updateExecutionStatus 更新执行状态
 func (e *Engine) updateExecutionStatus(executionID int64, status, errorMsg string) {
 	now := time.Now()
@@ -327,7 +358,14 @@ func (e *Engine) updateExecutionStatus(executionID int64, status, errorMsg strin
 
 // updateNodeExecutionStatus 更新节点执行状态
 func (e *Engine) updateNodeExecutionStatus(nodeExecID int64, status, errorMsg string, output map[string]interface{}) {
-	outputJSON, _ := json.Marshal(output)
+	outputJSON, err := json.Marshal(output)
+	if err != nil {
+		e.logger.Error("failed to marshal output",
+			zap.Int64("nodeExecId", nodeExecID),
+			zap.Error(err))
+		// 使用空对象作为fallback
+		outputJSON = []byte("{}")
+	}
 	now := time.Now()
 	nodeExec := &model.WorkflowNodeExecution{
 		ID:         nodeExecID,

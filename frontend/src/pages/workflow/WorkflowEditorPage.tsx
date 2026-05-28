@@ -31,6 +31,7 @@ export const NODE_REGISTRY = {
     icon: '🤖',
     configSchema: [
       { name: 'batchSize', label: '批次大小', type: 'number', required: true, default: 20, min: 1, max: 100 },
+      { name: 'onlyProvidedIds', label: '仅处理上游 articleIds', type: 'boolean', required: false, default: true },
     ],
   },
   alert_evaluate: {
