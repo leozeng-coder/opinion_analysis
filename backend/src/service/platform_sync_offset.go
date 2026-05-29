@@ -94,3 +94,39 @@ func (s *PlatformSyncService) SyncPlatformByOffset(ctx context.Context, platform
 func (s *PlatformSyncService) SyncPlatformFull(ctx context.Context, platform string, enableSentiment bool) (*SyncResult, error) {
 	return s.syncPlatformScan(ctx, platform, 0, enableSentiment)
 }
+
+// SyncPlatformBySourceIDs 只同步指定源表 ID 列表中的数据（用于数据过滤节点场景）。
+// 这是一个独立的同步逻辑，不依赖偏移量，只处理传入的 ID 列表。
+func (s *PlatformSyncService) SyncPlatformBySourceIDs(ctx context.Context, platform string, sourceIDs []uint, enableSentiment bool) (*SyncResult, error) {
+	if len(sourceIDs) == 0 {
+		// 没有要同步的 ID，返回空结果
+		return &SyncResult{
+			Platform:   platform,
+			Status:     "completed",
+			TotalCount: 0,
+			NewCount:   0,
+		}, nil
+	}
+
+	syncer, err := s.factory.GetSyncer(platform)
+	if err != nil {
+		return nil, err
+	}
+
+	config := SyncConfig{
+		Platform:         platform,
+		SyncMode:         "filtered", // 标记为过滤模式
+		SourceID:         s.getOrCreateDefaultSource(),
+		EnableSentiment:  enableSentiment,
+		IncludeSourceIDs: sourceIDs, // 只同步这些源表 ID
+	}
+
+	progress := s.progressTracker.StartProgress(platform, len(sourceIDs))
+	if err := syncer.Sync(ctx, config, progress); err != nil {
+		progress.SetError(err)
+		return s.progressToResult(progress), err
+	}
+	progress.SetStatus("completed")
+
+	return s.progressToResult(progress), nil
+}

@@ -49,6 +49,16 @@ type SyncConfig struct {
 	// 只处理源表中 id > MinSourceID 的行，忽略 LastSyncTime。
 	// 工作流场景下由 crawler_run 节点提前记录每个源表的 max(id) 作为 baseline。
 	MinSourceID uint `json:"minSourceId"`
+
+	// IncludeSourceIDs 非空时，仅同步源表中 id 在该集合内的行（用于「数据过滤」节点筛选后只持久化保留项）。
+	IncludeSourceIDs []uint `json:"includeSourceIds,omitempty"`
+}
+
+// SourceFilterRow 源表行用于「数据过滤」的最小字段集（标题 + 正文）。
+type SourceFilterRow struct {
+	SourceID uint   `json:"sourceId"`
+	Title    string `json:"title"`
+	Content  string `json:"content"`
 }
 
 // SyncResult 同步结果

@@ -115,12 +115,34 @@ func (n *DataFilterNode) Execute(ctx context.Context, cfg map[string]interface{}
 	}
 
 	keptIDs := make([]int64, 0, len(survivors))
+	keptSet := make(map[uint]struct{}, len(survivors))
 	for _, a := range survivors {
 		keptIDs = append(keptIDs, int64(a.ID))
+		keptSet[a.ID] = struct{}{}
 	}
 
-	log.Printf("[DataFilterNode] done: input=%d output=%d (regexRemoved=%d aiRemoved=%d)",
-		inputCount, len(keptIDs), regexRemoved, aiRemoved)
+	// 被过滤掉的文章：在已加载文章中、但未通过过滤的
+	rejectedIDs := make([]int64, 0)
+	for _, a := range articles {
+		if _, ok := keptSet[a.ID]; !ok {
+			rejectedIDs = append(rejectedIDs, int64(a.ID))
+		}
+	}
+
+	// 默认把被过滤掉的文章从库里移除（软删除），保证库内/下游/统计只保留过滤后的数据。
+	// 可通过 deleteFiltered=false 关闭（仅缩小下游 articleIds，不动数据库）。
+	deleteFiltered := n.GetBool(cfg, "deleteFiltered", true)
+	deletedCount := 0
+	if deleteFiltered && len(rejectedIDs) > 0 {
+		if err := n.db.WithContext(ctx).Where("id IN ?", rejectedIDs).Delete(&model.Article{}).Error; err != nil {
+			return nil, n.WrapError("删除被过滤文章失败", err)
+		}
+		deletedCount = len(rejectedIDs)
+		log.Printf("[DataFilterNode] removed %d filtered articles from DB", deletedCount)
+	}
+
+	log.Printf("[DataFilterNode] done: input=%d output=%d (regexRemoved=%d aiRemoved=%d deleted=%d)",
+		inputCount, len(keptIDs), regexRemoved, aiRemoved, deletedCount)
 
 	return n.MergeOutput(input, map[string]interface{}{
 		"articleIds":        nodes.PackArticleIDs(keptIDs),
@@ -128,6 +150,7 @@ func (n *DataFilterNode) Execute(ctx context.Context, cfg map[string]interface{}
 		"filterOutputCount": len(keptIDs),
 		"regexRemovedCount": regexRemoved,
 		"aiRemovedCount":    aiRemoved,
+		"deletedCount":      deletedCount,
 		"success":           true,
 	}), nil
 }

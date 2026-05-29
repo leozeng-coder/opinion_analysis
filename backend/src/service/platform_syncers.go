@@ -23,6 +23,9 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 	var notes []model.XhsNote
 
 	query := s.db.WithContext(ctx).Table("xhs_note")
+	if len(config.IncludeSourceIDs) > 0 {
+		query = query.Where("id IN ?", config.IncludeSourceIDs)
+	}
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
@@ -98,6 +101,9 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 	var awemes []model.DouyinAweme
 
 	query := s.db.WithContext(ctx).Table("douyin_aweme")
+	if len(config.IncludeSourceIDs) > 0 {
+		query = query.Where("id IN ?", config.IncludeSourceIDs)
+	}
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
@@ -167,6 +173,9 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	var videos []model.BilibiliVideo
 
 	query := s.db.WithContext(ctx).Table("bilibili_video")
+	if len(config.IncludeSourceIDs) > 0 {
+		query = query.Where("id IN ?", config.IncludeSourceIDs)
+	}
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
@@ -236,6 +245,9 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	var notes []model.WeiboNote
 
 	query := s.db.WithContext(ctx).Table("weibo_note")
+	if len(config.IncludeSourceIDs) > 0 {
+		query = query.Where("id IN ?", config.IncludeSourceIDs)
+	}
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
@@ -310,6 +322,9 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 	var videos []model.KuaishouVideo
 
 	query := s.db.WithContext(ctx).Table("kuaishou_video")
+	if len(config.IncludeSourceIDs) > 0 {
+		query = query.Where("id IN ?", config.IncludeSourceIDs)
+	}
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
@@ -379,6 +394,9 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	var notes []model.TiebaNote
 
 	query := s.db.WithContext(ctx).Table("tieba_note")
+	if len(config.IncludeSourceIDs) > 0 {
+		query = query.Where("id IN ?", config.IncludeSourceIDs)
+	}
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
@@ -457,6 +475,9 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	var contents []model.ZhihuContent
 
 	query := s.db.WithContext(ctx).Table("zhihu_content")
+	if len(config.IncludeSourceIDs) > 0 {
+		query = query.Where("id IN ?", config.IncludeSourceIDs)
+	}
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {

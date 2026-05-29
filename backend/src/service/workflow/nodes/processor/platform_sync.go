@@ -53,14 +53,17 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		syncCodes = platformSync.ResolveSyncCodes([]string{"zhihu"})
 	}
 
+	// 从上游获取过滤后的源表 ID 列表（数据过滤节点传递）
+	includeSourceIDs := n.extractIncludeSourceIDs(input)
+
 	articlePlatforms := platformSync.ResolveArticlePlatforms(syncCodes)
 	maxArticleIDBefore, err := n.maxArticleID(ctx, articlePlatforms)
 	if err != nil {
 		return nil, n.WrapError("query max article id failed", err)
 	}
 
-	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v maxArticleIdBefore=%d",
-		syncMode, syncCodes, maxArticleIDBefore)
+	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v includeSourceIDs=%d maxArticleIdBefore=%d",
+		syncMode, syncCodes, len(includeSourceIDs), maxArticleIDBefore)
 
 	syncSvc := platformSync.NewPlatformSyncService(n.db)
 	results := make(map[string]interface{})
@@ -73,6 +76,10 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		var strategy string
 
 		switch {
+		case len(includeSourceIDs) > 0:
+			// 优先级最高：如果上游传递了过滤后的源表 ID 列表，只同步这些 ID
+			strategy = "filtered"
+			result, syncErr = syncSvc.SyncPlatformBySourceIDs(ctx, code, includeSourceIDs, enableSentiment)
 		case syncMode == "full":
 			// 真正的全表扫描对账（按 origin_url 去重，幂等），并对齐偏移量
 			strategy = "full"
@@ -152,4 +159,31 @@ func (n *PlatformSyncNode) listNewArticleIDs(ctx context.Context, articlePlatfor
 		Order("id ASC").
 		Pluck("id", &ids).Error
 	return ids, err
+}
+
+// extractIncludeSourceIDs 从上游输入中提取过滤后的源表 ID 列表
+func (n *PlatformSyncNode) extractIncludeSourceIDs(input map[string]interface{}) []uint {
+	// 尝试从 includeSourceIds 字段获取
+	if val, ok := input["includeSourceIds"]; ok {
+		switch v := val.(type) {
+		case []uint:
+			return v
+		case []interface{}:
+			result := make([]uint, 0, len(v))
+			for _, item := range v {
+				switch id := item.(type) {
+				case float64:
+					result = append(result, uint(id))
+				case int:
+					result = append(result, uint(id))
+				case int64:
+					result = append(result, uint(id))
+				case uint:
+					result = append(result, id)
+				}
+			}
+			return result
+		}
+	}
+	return nil
 }

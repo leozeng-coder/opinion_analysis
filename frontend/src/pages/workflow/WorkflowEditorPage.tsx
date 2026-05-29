@@ -9,7 +9,6 @@ import ReactFlow, {
   addEdge,
   Connection,
   MarkerType,
-  Panel,
   Handle,
   Position,
   useStore,
@@ -179,9 +178,10 @@ export const NODE_REGISTRY = {
         ],
         placeholder: '留空默认 search',
       },
-      { name: 'keywords', label: '关键词（搜索模式）', type: 'tags', required: false, placeholder: '按回车添加，多个关键词逐条添加' },
-      { name: 'specifiedIds', label: '指定内容ID（detail 模式）', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔' },
-      { name: 'creatorIds', label: '创作者ID（creator 模式）', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔' },
+      { name: 'topics', label: '话题', type: 'tags', required: false, placeholder: '输入话题后按回车添加' },
+      { name: 'keywords', label: '关键词', type: 'tags', required: false, placeholder: '按回车添加，多个关键词逐条添加', showIf: { field: 'crawlerType', values: ['search', '', undefined] } },
+      { name: 'specifiedIds', label: '指定内容 ID', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔', showIf: { field: 'crawlerType', value: 'detail' } },
+      { name: 'creatorIds', label: '创作者 ID', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔', showIf: { field: 'crawlerType', value: 'creator' } },
       {
         name: 'loginType',
         label: '登录方式',
@@ -208,11 +208,22 @@ export const NODE_REGISTRY = {
         placeholder: '留空默认 db',
       },
       { name: 'startPage', label: '起始页', type: 'number', required: false, default: 1, min: 1, max: 100 },
-      { name: 'enableComments', label: '爬取评论', type: 'boolean', required: false, default: true },
-      { name: 'enableSubComments', label: '爬取二级评论', type: 'boolean', required: false, default: false },
-      { name: 'headless', label: '无头模式', type: 'boolean', required: false, default: true },
-      { name: 'topics', label: '话题', type: 'tags', required: false, placeholder: '输入话题后按回车添加' },
-      { name: 'waitForCompletion', label: '等待爬取完成', type: 'boolean', required: false, default: true },
+      {
+        type: 'boolean-pair',
+        name: '_bp_crawl1',
+        items: [
+          { name: 'enableComments', label: '爬取评论', default: true },
+          { name: 'enableSubComments', label: '爬取二级评论', default: false },
+        ],
+      },
+      {
+        type: 'boolean-pair',
+        name: '_bp_crawl2',
+        items: [
+          { name: 'headless', label: '无头模式', default: true },
+          { name: 'waitForCompletion', label: '等待爬取完成', default: true },
+        ],
+      },
       { name: 'timeoutMinutes', label: '超时时间(分钟)', type: 'number', required: false, default: 10, min: 1, max: 60 },
     ],
   },
@@ -250,6 +261,7 @@ export const NODE_REGISTRY = {
       { name: 'maxLength', label: '最大字数', type: 'number', required: false, min: 0, max: 100000, placeholder: '留空 = 不限' },
       { name: 'enableAI', label: '启用 AI 过滤', type: 'boolean', required: false, default: false },
       { name: 'aiRequirement', label: 'AI 过滤需求', type: 'textarea', required: false, placeholder: '用自然语言描述保留条件，例如：只保留与「新能源汽车」行业舆情相关、且为负面情绪的内容' },
+      { name: 'deleteFiltered', label: '从数据库移除被过滤的文章', type: 'boolean', required: false, default: true },
     ],
   },
   crawler_status: {
@@ -693,6 +705,53 @@ const nodeDisplayLabel = (data: any): string => {
   return NODE_REGISTRY[data?.type as keyof typeof NODE_REGISTRY]?.label || data?.type || '节点'
 }
 
+// 根据节点类型与输出，生成「处理了多少、怎么处理」的中文结果摘要
+const summarizeNodeOutput = (type: string | undefined, output?: Record<string, any>): string => {
+  if (!output) return ''
+  const num = (v: any) => (typeof v === 'number' ? v : Number(v) || 0)
+  const arr = (v: any) => (Array.isArray(v) ? v : [])
+
+  switch (type) {
+    case 'crawler_run': {
+      const parts: string[] = []
+      if (output.platform) parts.push(`平台：${output.platform}`)
+      const kw = arr(output.keywords)
+      if (kw.length) parts.push(`关键词：${kw.join('、')}`)
+      if (output.waitedCompletion === false) parts.push('已触发(未等待)')
+      return parts.join('，')
+    }
+    case 'platform_sync':
+      return `同步新增 ${num(output.syncNewCount)} 条，本次文章 ${num(output.articlesCount)} 篇`
+    case 'data_filter': {
+      const parts = [`处理数据 ${num(output.filterInputCount)} 条`, `保留 ${num(output.filterOutputCount)} 条`]
+      if (num(output.regexRemovedCount) > 0) parts.push(`正则过滤 ${num(output.regexRemovedCount)} 条`)
+      if (num(output.aiRemovedCount) > 0) parts.push(`AI 过滤 ${num(output.aiRemovedCount)} 条`)
+      if (num(output.deletedCount) > 0) parts.push(`已移除 ${num(output.deletedCount)} 条`)
+      return parts.join('，')
+    }
+    case 'ai_tagger':
+      return `打标文章 ${num(output.taggedCount)} 篇`
+    case 'rag_vectorize':
+      if (output.ragStatus === 'skipped') return `已跳过（${output.ragMessage || '无需向量化'}）`
+      return `向量化文章 ${num(output.ragArticlesDone)} 篇，写入块 ${num(output.ragChunksUpserted)}，删除块 ${num(output.ragChunksDeleted)}`
+    case 'alert_evaluate':
+      return `评估规则 ${num(output.evaluated)} 条，触发告警 ${num(output.alertCount)} 条`
+    case 'digest_generate':
+      if (output.digestGenerated === false) return `未生成（${output.digestMessage || ''}）`
+      return `生成摘要 ${output.digestStartDate || ''}${output.digestEndDate ? ' ~ ' + output.digestEndDate : ''}`
+    case 'condition':
+      return `条件${output.conditionResult ? '成立，继续向下' : '不成立，下游跳过'}`
+    case 'crawler_schedule':
+      return `爬虫 ${output.spiderKey || ''}，间隔 ${num(output.intervalMinutes)} 分钟，${output.enabled ? '已启用' : '已停用'}`
+    case 'crawler_status':
+      return output.crawlerStatus ? `爬虫状态：${output.crawlerStatus}` : ''
+    case 'http_request':
+      return `HTTP ${num(output.httpStatusCode)}${output.httpSuccess ? ' 成功' : ' 失败'}`
+    default:
+      return ''
+  }
+}
+
 // 把工作流节点执行记录 + 爬虫实时日志合并成控制台行
 const buildConsoleLines = (params: {
   execution: WorkflowExecution | null
@@ -740,11 +799,13 @@ const buildConsoleLines = (params: {
     }
 
     if (log.status !== 'running') {
+      const summary = summarizeNodeOutput(type, log.output)
+      const withSummary = (base: string) => (summary ? `${base} — ${summary}` : base)
       const endMap: Record<string, { level: ConsoleLevel; text: string }> = {
-        success: { level: 'success', text: '执行完成' },
+        success: { level: 'success', text: withSummary('执行完成') },
         failed: { level: 'error', text: `执行失败${log.errorMsg ? '：' + log.errorMsg : ''}` },
         cancelled: { level: 'warning', text: '已取消' },
-        partial_success: { level: 'warning', text: '部分成功' },
+        partial_success: { level: 'warning', text: withSummary('部分成功') },
       }
       const end = endMap[log.status]
       if (end) {
@@ -1353,6 +1414,8 @@ const WorkflowEditorPage: React.FC = () => {
   const watchedTriggerType   = Form.useWatch('triggerType',     form)
   const watchedScheduleMode  = Form.useWatch('tc_scheduleMode', form)
   const watchedFixedFreq     = Form.useWatch('tc_fixedFreq',    form)
+  // 节点配置抽屉：监听 crawlerType，用于条件性显示关键词/ID输入框
+  const watchedNodeCrawlerType = Form.useWatch('crawlerType', nodeConfigForm)
 
   // 控制台实时日志行（工作流编排 + 爬虫实时日志合并）
   const consoleLines = buildConsoleLines({
@@ -1614,11 +1677,7 @@ const WorkflowEditorPage: React.FC = () => {
               <Controls />
               <FitOnLoad trigger={fitTrigger} />
               <HelperLines horizontal={helperLineH} vertical={helperLineV} />
-              <Panel position="top-left">
-                <div style={{ background: '#fff', padding: 8, borderRadius: 4, fontSize: 12 }}>
-                  💡 从右侧节点库拖拽到画布添加节点，拖动节点时自动对齐吸附，连线创建流程
-                </div>
-              </Panel>
+
             </ReactFlow>
           </div>
         </Card>
@@ -1932,6 +1991,7 @@ const WorkflowEditorPage: React.FC = () => {
                     const c = getExecStatusConfig(log.status)
                     const data = nodes.find((n) => n.id === log.nodeId)?.data
                     const label = data ? nodeDisplayLabel(data) : log.nodeId
+                    const summary = summarizeNodeOutput(data?.type, log.output)
                     return {
                       color: c.color === 'processing' ? 'blue' : c.color === 'success' ? 'green' : c.color === 'error' ? 'red' : 'gray',
                       dot: c.icon,
@@ -1943,6 +2003,11 @@ const WorkflowEditorPage: React.FC = () => {
                               {c.label}
                             </Tag>
                           </div>
+                          {summary && (log.status === 'success' || log.status === 'partial_success') && (
+                            <div style={{ marginTop: 4, marginBottom: 4, fontSize: 13, color: '#262626' }}>
+                              处理结果：{summary}
+                            </div>
+                          )}
                           <div style={{ fontSize: 12, color: '#666' }}>
                             开始: {log.startedAt?.replace('T', ' ').slice(0, 19)}
                             {log.finishedAt && ` ｜ 结束: ${log.finishedAt.replace('T', ' ').slice(0, 19)}`}
@@ -2010,6 +2075,39 @@ const WorkflowEditorPage: React.FC = () => {
               const isSelectMultiple = field.type === 'select-multiple'
               const isSelect = field.type === 'select'
               const isTextArea = field.type === 'textarea'
+
+              // showIf 条件渲染：支持 { field, value } 或 { field, values[] }
+              if (fieldConfig.showIf) {
+                const { field: depField, value: depValue, values: depValues } = fieldConfig.showIf
+                const watchedValues: Record<string, any> = {
+                  crawlerType: watchedNodeCrawlerType,
+                }
+                const cur = watchedValues[depField]
+                if (depValues !== undefined) {
+                  if (!depValues.includes(cur) && !depValues.includes(cur ?? '')) return null
+                } else if (depValue !== undefined) {
+                  if (cur !== depValue) return null
+                }
+              }
+
+              // 双开关一行（boolean-pair）
+              if (field.type === 'boolean-pair') {
+                return (
+                  <div key={fieldConfig.name} style={{ display: 'flex', gap: 16 }}>
+                    {(fieldConfig.items as any[]).map((item: any) => (
+                      <Form.Item
+                        key={item.name}
+                        name={item.name}
+                        label={item.label}
+                        valuePropName="checked"
+                        style={{ flex: 1, marginBottom: 16 }}
+                      >
+                        <Switch />
+                      </Form.Item>
+                    ))}
+                  </div>
+                )
+              }
 
               // 告警规则多选（选项来自现有规则，留空=全部启用规则）
               if (field.type === 'alert-rules-select') {

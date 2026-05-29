@@ -33,6 +33,8 @@ type PlatformSyncer interface {
 	GetPlatformName() string
 	GetPlatformCode() string
 	GetSourceTable() string
+	// FetchFilterRows 读取源表中 id > minSourceID 的行（标题 + 正文），供「数据过滤」节点在入库前筛选。
+	FetchFilterRows(ctx context.Context, minSourceID uint) ([]SourceFilterRow, error)
 }
 
 // BaseSyncer 基础同步器（提供通用方法）
