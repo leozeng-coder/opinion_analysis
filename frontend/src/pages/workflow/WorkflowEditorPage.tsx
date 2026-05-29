@@ -147,29 +147,72 @@ export const NODE_REGISTRY = {
   },
   crawler_run: {
     label: '执行爬虫',
-    description: '触发爬虫任务抓取数据',
+    description: '触发爬虫任务抓取数据（整合全部爬虫调度参数）',
     color: '#13c2c2',
     icon: '🕷️',
     configSchema: [
       {
-        name: 'platforms',
+        name: 'platform',
         label: '平台',
-        type: 'select-multiple',
+        type: 'select',
         required: false,
         options: [
-          { label: '小红书', value: 'xiaohongshu' },
-          { label: '微博', value: 'weibo' },
-          { label: '抖音', value: 'douyin' },
-          { label: '快手', value: 'kuaishou' },
-          { label: 'B站', value: 'bilibili' },
+          { label: '小红书', value: 'xhs' },
+          { label: '微博', value: 'wb' },
+          { label: '抖音', value: 'dy' },
+          { label: '快手', value: 'ks' },
+          { label: 'B站', value: 'bili' },
           { label: '百度贴吧', value: 'tieba' },
           { label: '知乎', value: 'zhihu' },
         ],
-        placeholder: '选择要爬取的平台'
+        placeholder: '留空默认知乎',
       },
-      { name: 'keywords', label: '关键词', type: 'tags', required: false, placeholder: '输入关键词后按回车添加' },
+      {
+        name: 'crawlerType',
+        label: '爬取类型',
+        type: 'select',
+        required: false,
+        options: [
+          { label: '关键词搜索', value: 'search' },
+          { label: '指定内容ID', value: 'detail' },
+          { label: '创作者主页', value: 'creator' },
+        ],
+        placeholder: '留空默认 search',
+      },
+      { name: 'keywords', label: '关键词（搜索模式）', type: 'tags', required: false, placeholder: '按回车添加，多个关键词逐条添加' },
+      { name: 'specifiedIds', label: '指定内容ID（detail 模式）', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔' },
+      { name: 'creatorIds', label: '创作者ID（creator 模式）', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔' },
+      {
+        name: 'loginType',
+        label: '登录方式',
+        type: 'select',
+        required: false,
+        options: [
+          { label: 'Cookie 登录', value: 'cookie' },
+          { label: '扫码登录', value: 'qrcode' },
+        ],
+        placeholder: '留空默认 cookie',
+      },
+      {
+        name: 'saveOption',
+        label: '存储方式',
+        type: 'select',
+        required: false,
+        options: [
+          { label: '数据库', value: 'db' },
+          { label: 'JSON', value: 'json' },
+          { label: 'JSONL', value: 'jsonl' },
+          { label: 'CSV', value: 'csv' },
+          { label: 'Excel', value: 'excel' },
+        ],
+        placeholder: '留空默认 db',
+      },
+      { name: 'startPage', label: '起始页', type: 'number', required: false, default: 1, min: 1, max: 100 },
+      { name: 'enableComments', label: '爬取评论', type: 'boolean', required: false, default: true },
+      { name: 'enableSubComments', label: '爬取二级评论', type: 'boolean', required: false, default: false },
+      { name: 'headless', label: '无头模式', type: 'boolean', required: false, default: true },
       { name: 'topics', label: '话题', type: 'tags', required: false, placeholder: '输入话题后按回车添加' },
-      { name: 'waitForCompletion', label: '等待完成', type: 'boolean', required: false, default: true },
+      { name: 'waitForCompletion', label: '等待爬取完成', type: 'boolean', required: false, default: true },
       { name: 'timeoutMinutes', label: '超时时间(分钟)', type: 'number', required: false, default: 10, min: 1, max: 60 },
     ],
   },
@@ -182,6 +225,31 @@ export const NODE_REGISTRY = {
       { name: 'spiderKey', label: '爬虫标识', type: 'text', required: true, placeholder: 'broad-topic 或 deep-sentiment' },
       { name: 'intervalMinutes', label: '执行间隔(分钟)', type: 'number', required: true, default: 60, min: 1, max: 10080 },
       { name: 'enabled', label: '启用', type: 'boolean', required: true },
+    ],
+  },
+  data_filter: {
+    label: '数据过滤',
+    description: '对上游文章做正则/AI 过滤（先正则后 AI），仅传递保留项',
+    color: '#fa8c16',
+    icon: '🧹',
+    configSchema: [
+      { name: 'enableRegex', label: '启用正则过滤', type: 'boolean', required: false, default: false },
+      { name: 'regexKeywords', label: '关键词（正则/包含）', type: 'tags', required: false, placeholder: '回车添加，支持正则；任一命中即匹配' },
+      {
+        name: 'regexKeywordMode',
+        label: '关键词命中处理',
+        type: 'select',
+        required: false,
+        default: 'keep',
+        options: [
+          { label: '保留命中项', value: 'keep' },
+          { label: '剔除命中项', value: 'exclude' },
+        ],
+      },
+      { name: 'minLength', label: '最小字数', type: 'number', required: false, min: 0, max: 100000, placeholder: '留空 = 不限' },
+      { name: 'maxLength', label: '最大字数', type: 'number', required: false, min: 0, max: 100000, placeholder: '留空 = 不限' },
+      { name: 'enableAI', label: '启用 AI 过滤', type: 'boolean', required: false, default: false },
+      { name: 'aiRequirement', label: 'AI 过滤需求', type: 'textarea', required: false, placeholder: '用自然语言描述保留条件，例如：只保留与「新能源汽车」行业舆情相关、且为负面情绪的内容' },
     ],
   },
   crawler_status: {
@@ -1239,8 +1307,6 @@ const WorkflowEditorPage: React.FC = () => {
           return
         }
         triggerConfig = { cron }
-      } else if (values.triggerType === 'webhook') {
-        triggerConfig = { secret: values.tc_webhookSecret || '' }
       }
 
       // 转换为后端格式
@@ -1439,25 +1505,12 @@ const WorkflowEditorPage: React.FC = () => {
               label="触发方式"
               name="triggerType"
               rules={[{ required: true, message: '请选择触发方式' }]}
-              extra="所有工作流均可在列表页点击「执行」手动触发"
             >
               <Select>
                 <Select.Option value="manual">仅手动触发</Select.Option>
                 <Select.Option value="schedule">自动触发（定时 / 周期）</Select.Option>
-                <Select.Option value="webhook">Webhook 触发</Select.Option>
               </Select>
             </Form.Item>
-
-            {/* 仅手动触发 */}
-            {watchedTriggerType === 'manual' && (
-              <Alert
-                type="info"
-                showIcon
-                message="仅手动触发"
-                description="工作流不会自动运行，只能在此页面点击「执行」或在列表页点击「执行」手动触发。"
-                style={{ marginBottom: 12 }}
-              />
-            )}
 
             {/* 自动触发：定时 vs 周期 */}
             {watchedTriggerType === 'schedule' && (
@@ -1528,24 +1581,6 @@ const WorkflowEditorPage: React.FC = () => {
               </>
             )}
 
-            {/* Webhook 触发 */}
-            {watchedTriggerType === 'webhook' && (
-              <>
-                <Alert
-                  type="info"
-                  showIcon
-                  message="Webhook 触发"
-                  description={isEdit
-                    ? `POST /api/workflows/${id}/trigger`
-                    : '保存后将生成 Webhook 地址'}
-                  style={{ marginBottom: 12 }}
-                />
-                <Form.Item label="密钥（可选）" name="tc_webhookSecret"
-                  extra="外部请求需在 Header X-Webhook-Secret 中携带">
-                  <Input.Password placeholder="留空则不校验" />
-                </Form.Item>
-              </>
-            )}
 
             <Form.Item label="状态" name="status" valuePropName="checked">
               <Switch checkedChildren="启用" unCheckedChildren="禁用" />
@@ -1974,6 +2009,7 @@ const WorkflowEditorPage: React.FC = () => {
               const isTagsField = field.type === 'tags'
               const isSelectMultiple = field.type === 'select-multiple'
               const isSelect = field.type === 'select'
+              const isTextArea = field.type === 'textarea'
 
               // 告警规则多选（选项来自现有规则，留空=全部启用规则）
               if (field.type === 'alert-rules-select') {
@@ -2083,6 +2119,8 @@ const WorkflowEditorPage: React.FC = () => {
                       placeholder={fieldConfig.placeholder}
                       options={fieldConfig.options}
                     />
+                  ) : isTextArea ? (
+                    <TextArea rows={4} placeholder={fieldConfig.placeholder} />
                   ) : (
                     <Input placeholder={fieldConfig.placeholder} />
                   )}

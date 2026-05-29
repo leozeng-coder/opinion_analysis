@@ -48,12 +48,22 @@ func NewService(repo *repository.CrawlerRepository) *Service {
 
 // TriggerParams 触发爬虫的参数
 type TriggerParams struct {
-	Spiders        []string
-	Keywords       []string
-	Topics         []string
-	StartAt        string
-	EndAt          string
-	TimeoutMinutes int
+	Spiders           []string // 兼容旧工作流；优先使用 Platform
+	Platform          string   // 单平台代码（xhs/dy/ks/bili/wb/tieba/zhihu）
+	CrawlerType       string   // search / detail / creator，留空默认 search
+	Keywords          []string
+	SpecifiedIds      string // detail 模式，逗号分隔
+	CreatorIds        string // creator 模式，逗号分隔
+	LoginType         string // cookie / qrcode，留空默认 cookie
+	SaveOption        string // db / json / csv / ..，留空默认 db
+	StartPage         int    // 起始页，0 表示使用默认值 1
+	EnableComments    bool
+	EnableSubComments bool
+	Headless          bool // 无头模式；建议工作流节点默认 true
+	Topics            []string
+	StartAt           string
+	EndAt             string
+	TimeoutMinutes    int
 }
 
 type mediaCrawlerStatusResponse struct {
@@ -71,13 +81,17 @@ type TriggerResult struct {
 
 // MediaCrawlerStartRequest MediaCrawler API 请求格式
 type MediaCrawlerStartRequest struct {
-	Platform    string `json:"platform"`
-	LoginType   string `json:"login_type"`
-	CrawlerType string `json:"crawler_type"`
-	Keywords    string `json:"keywords"`
-	StartPage   int    `json:"start_page"`
-	SaveOption  string `json:"save_option"`
-	Headless    bool   `json:"headless"`
+	Platform          string `json:"platform"`
+	LoginType         string `json:"login_type"`
+	CrawlerType       string `json:"crawler_type"`
+	Keywords          string `json:"keywords"`
+	SpecifiedIds      string `json:"specified_ids,omitempty"`
+	CreatorIds        string `json:"creator_ids,omitempty"`
+	StartPage         int    `json:"start_page"`
+	SaveOption        string `json:"save_option"`
+	Headless          bool   `json:"headless"`
+	EnableComments    bool   `json:"enable_comments"`
+	EnableSubComments bool   `json:"enable_sub_comments"`
 }
 
 // Trigger 触发爬虫任务
@@ -164,10 +178,37 @@ func (s *Service) Trigger(ctx context.Context, params TriggerParams) (*TriggerRe
 func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params TriggerParams, timeout time.Duration) {
 	t0 := time.Now()
 
-	// 只取第一个平台（MediaCrawler API 一次只能爬一个平台）
-	platform := "zhihu"
-	if len(params.Spiders) > 0 {
+	// 平台：优先使用 Platform 字段（新节点），兜底取 Spiders[0]（旧工作流兼容）
+	platform := params.Platform
+	if platform == "" && len(params.Spiders) > 0 {
 		platform = s.mapSpiderToPlatform(params.Spiders[0])
+	}
+	if platform == "" {
+		platform = "zhihu"
+	}
+
+	// 爬取类型
+	crawlerType := params.CrawlerType
+	if crawlerType == "" {
+		crawlerType = "search"
+	}
+
+	// 登录方式
+	loginType := params.LoginType
+	if loginType == "" {
+		loginType = "cookie"
+	}
+
+	// 存储方式
+	saveOption := params.SaveOption
+	if saveOption == "" {
+		saveOption = "db"
+	}
+
+	// 起始页
+	startPage := params.StartPage
+	if startPage <= 0 {
+		startPage = 1
 	}
 
 	// 合并关键词
@@ -181,13 +222,17 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 
 	// 构建请求
 	reqBody := MediaCrawlerStartRequest{
-		Platform:    platform,
-		LoginType:   "cookie",
-		CrawlerType: "search",
-		Keywords:    keywords,
-		StartPage:   1,
-		SaveOption:  "db",
-		Headless:    true,
+		Platform:          platform,
+		LoginType:         loginType,
+		CrawlerType:       crawlerType,
+		Keywords:          keywords,
+		SpecifiedIds:      params.SpecifiedIds,
+		CreatorIds:        params.CreatorIds,
+		StartPage:         startPage,
+		SaveOption:        saveOption,
+		Headless:          params.Headless,
+		EnableComments:    params.EnableComments,
+		EnableSubComments: params.EnableSubComments,
 	}
 
 	jsonData, _ := json.Marshal(reqBody)

@@ -81,6 +81,7 @@ func (e *Engine) registerNodes() {
 
 	// 处理类节点
 	MustRegisterNode(processorNodes.NewPlatformSyncNode(e.db))
+	MustRegisterNode(processorNodes.NewDataFilterNode(e.db))
 	MustRegisterNode(processorNodes.NewAITaggerNode(e.taggerSvc))
 	MustRegisterNode(processorNodes.NewRAGVectorizeNode(e.store.RAG, e.ragProc))
 	MustRegisterNode(processorNodes.NewAlertEvaluateNode(e.alertEngine))

@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   DashboardOutlined, FileTextOutlined, FireOutlined,
-  BellOutlined, UserOutlined, LogoutOutlined, BarChartOutlined, CloudSyncOutlined,
+  BellOutlined, UserOutlined, LogoutOutlined, BarChartOutlined,
   CommentOutlined, RadarChartOutlined, AppstoreOutlined, ApartmentOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store/auth'
@@ -21,7 +21,6 @@ const menuItems = [
   { key: '/topics', icon: <FireOutlined />, label: '热点话题' },
   { key: '/alerts', icon: <BellOutlined />, label: '预警中心' },
   { key: '/stats', icon: <BarChartOutlined />, label: '统计分析' },
-  { key: '/crawler', icon: <CloudSyncOutlined />, label: '爬虫调度' },
   { key: '/platform', icon: <AppstoreOutlined />, label: '平台数据' },
   { key: '/workflows', icon: <ApartmentOutlined />, label: '工作流编排' },
   { key: '/assistant', icon: <CommentOutlined />, label: '智能助手' },

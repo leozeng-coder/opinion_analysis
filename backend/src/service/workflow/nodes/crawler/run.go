@@ -39,15 +39,32 @@ func (n *RunNode) Validate(config map[string]interface{}) error {
 }
 
 func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, input map[string]interface{}) (map[string]interface{}, error) {
-	platforms := n.GetStringSlice(config, "platforms")
-	keywords := n.GetStringSlice(config, "keywords")
-	topics := n.GetStringSlice(config, "topics")
-	waitForCompletion := n.GetBool(config, "waitForCompletion", true)
-	timeoutMinutes := n.GetInt(config, "timeoutMinutes", 10)
-
-	if len(platforms) == 0 {
-		platforms = []string{"zhihu"}
+	// 平台：优先 platform（新节点单选），兼容旧字段 platforms（多选，取第一个）
+	platform := n.GetString(config, "platform", "")
+	var platforms []string
+	if platform != "" {
+		platforms = []string{platform}
+	} else {
+		platforms = n.GetStringSlice(config, "platforms")
+		if len(platforms) == 0 {
+			platforms = []string{"zhihu"}
+		}
+		platform = platforms[0]
 	}
+
+	crawlerType       := n.GetString(config, "crawlerType", "search")
+	keywords          := n.GetStringSlice(config, "keywords")
+	specifiedIds      := n.GetString(config, "specifiedIds", "")
+	creatorIds        := n.GetString(config, "creatorIds", "")
+	loginType         := n.GetString(config, "loginType", "cookie")
+	saveOption        := n.GetString(config, "saveOption", "db")
+	startPage         := n.GetInt(config, "startPage", 1)
+	enableComments    := n.GetBool(config, "enableComments", true)
+	enableSubComments := n.GetBool(config, "enableSubComments", false)
+	headless          := n.GetBool(config, "headless", true)
+	topics            := n.GetStringSlice(config, "topics")
+	waitForCompletion := n.GetBool(config, "waitForCompletion", true)
+	timeoutMinutes    := n.GetInt(config, "timeoutMinutes", 10)
 
 	syncCodes := platformSync.ResolveSyncCodes(platforms)
 
@@ -55,14 +72,24 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 	// 下游 platform_sync 节点以此作为「本次新增」的主键 baseline。
 	sourceMaxIDs := n.captureSourceBaselines(ctx, syncCodes)
 
-	log.Printf("[CrawlerRunNode] Starting crawler: platforms=%v syncCodes=%v keywords=%v sourceBaselines=%v",
-		platforms, syncCodes, keywords, sourceMaxIDs)
+	log.Printf("[CrawlerRunNode] Starting crawler: platform=%s crawlerType=%s keywords=%v sourceBaselines=%v",
+		platform, crawlerType, keywords, sourceMaxIDs)
 
 	result, err := n.crawlerSvc.Trigger(ctx, crawlerSvc.TriggerParams{
-		Spiders:        platforms,
-		Keywords:       keywords,
-		Topics:         topics,
-		TimeoutMinutes: timeoutMinutes,
+		Spiders:           platforms, // 兼容旧字段
+		Platform:          platform,
+		CrawlerType:       crawlerType,
+		Keywords:          keywords,
+		SpecifiedIds:      specifiedIds,
+		CreatorIds:        creatorIds,
+		LoginType:         loginType,
+		SaveOption:        saveOption,
+		StartPage:         startPage,
+		EnableComments:    enableComments,
+		EnableSubComments: enableSubComments,
+		Headless:          headless,
+		Topics:            topics,
+		TimeoutMinutes:    timeoutMinutes,
 	})
 	if err != nil {
 		return nil, n.WrapError("failed to trigger crawler", err)
@@ -88,9 +115,9 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 	produced := map[string]interface{}{
 		"crawlerRunId":       result.RunID,
 		"crawlerStartedAt":   result.StartedAt.Format(time.RFC3339),
-		"platforms":          platforms,
+		"platform":           platform,
 		"syncPlatformCodes":  syncCodes,
-		"sourceMaxIdsBefore": sourceMaxIDs, // 平台 syncCode → 触发爬虫前的源表 max(id)
+		"sourceMaxIdsBefore": sourceMaxIDs,
 		"keywords":           keywords,
 		"topics":             topics,
 		"status":             status,

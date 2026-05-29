@@ -11,7 +11,6 @@ const OpinionPage = lazy(() => import('@/pages/opinion/OpinionPage'))
 const TopicsPage = lazy(() => import('@/pages/topics/TopicsPage'))
 const AlertsPage = lazy(() => import('@/pages/alerts/AlertsPage'))
 const StatsPage = lazy(() => import('@/pages/stats/StatsPage'))
-const CrawlerPage = lazy(() => import('@/pages/crawler/CrawlerPage'))
 const AiAssistantPage = lazy(() => import('@/pages/assistant/AiAssistantPage'))
 const PlatformDataPage = lazy(() => import('@/pages/platform/PlatformDataPage'))
 const WorkflowListPage = lazy(() => import('@/pages/workflow/WorkflowListPage'))
@@ -33,7 +32,6 @@ const App: React.FC = () => (
             <Route path="/topics" element={<TopicsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/stats" element={<StatsPage />} />
-            <Route path="/crawler" element={<CrawlerPage />} />
             <Route path="/platform" element={<PlatformDataPage />} />
             <Route path="/assistant" element={<AiAssistantPage />} />
             <Route path="/workflows" element={<WorkflowListPage />} />
