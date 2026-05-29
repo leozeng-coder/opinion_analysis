@@ -258,7 +258,7 @@ const CrawlerPage: React.FC = () => {
                     label="关键词"
                     rules={[{ required: true, message: '请输入关键词' }]}
                   >
-                    <Input placeholder="多个关键词用逗号分隔，例如：编程副业,编程兼职" />
+                    <Input placeholder="多个关键词用逗号分隔，例如：赛尔号,摩尔庄园" />
                   </Form.Item>
                 )}
 

@@ -54,8 +54,20 @@ func (e *Engine) OnCrawlEnabled() bool {
 	return e.store.System.GetAlertConfig().OnCrawl
 }
 
-// EvaluateAll 评估全部启用中的规则。
+// EvaluateAll 评估全部启用中的规则（按各规则自身配置的时间范围）。
 func (e *Engine) EvaluateAll(ctx context.Context, source string) (EvaluateResult, error) {
+	return e.evaluate(ctx, source, nil, 0)
+}
+
+// EvaluateRules 评估指定规则（ruleIDs 为空则评估全部启用规则）。
+// overrideDays > 0 时，统一覆盖各规则的时间范围（回溯天数）；
+// overrideDays <= 0 时，沿用每条规则自己配置的 TimeRangeDays。
+func (e *Engine) EvaluateRules(ctx context.Context, source string, ruleIDs []uint, overrideDays int) (EvaluateResult, error) {
+	return e.evaluate(ctx, source, ruleIDs, overrideDays)
+}
+
+// evaluate 评估核心：可按 ruleIDs 过滤、可用 overrideDays 覆盖时间范围。
+func (e *Engine) evaluate(ctx context.Context, source string, ruleIDs []uint, overrideDays int) (EvaluateResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -64,8 +76,12 @@ func (e *Engine) EvaluateAll(ctx context.Context, source string) (EvaluateResult
 	if err != nil {
 		return result, err
 	}
+	if len(ruleIDs) > 0 {
+		rules = filterRulesByID(rules, ruleIDs)
+	}
 	result.Evaluated = len(rules)
-	log.Printf("[alert] evaluating %d active rules (source=%s)", len(rules), source)
+	log.Printf("[alert] evaluating %d rules (source=%s, ruleIDs=%v, overrideDays=%d)",
+		len(rules), source, ruleIDs, overrideDays)
 
 	smtpCfg, _ := e.store.System.GetSmtpConfig()
 
@@ -76,7 +92,7 @@ func (e *Engine) EvaluateAll(ctx context.Context, source string) (EvaluateResult
 		default:
 		}
 		rule := &rules[i]
-		rr, evalErr := e.evaluateRule(ctx, rule, smtpCfg)
+		rr, evalErr := e.evaluateRule(ctx, rule, smtpCfg, overrideDays)
 		result.Details = append(result.Details, rr)
 		if evalErr != nil {
 			log.Printf("[alert] rule=%d error: %v", rule.ID, evalErr)
@@ -96,10 +112,26 @@ func (e *Engine) EvaluateAll(ctx context.Context, source string) (EvaluateResult
 	return result, nil
 }
 
+// filterRulesByID 保留 id 在 ruleIDs 集合中的规则。
+func filterRulesByID(rules []model.AlertRule, ruleIDs []uint) []model.AlertRule {
+	want := make(map[uint]bool, len(ruleIDs))
+	for _, id := range ruleIDs {
+		want[id] = true
+	}
+	out := make([]model.AlertRule, 0, len(ruleIDs))
+	for i := range rules {
+		if want[rules[i].ID] {
+			out = append(out, rules[i])
+		}
+	}
+	return out
+}
+
 func (e *Engine) evaluateRule(
 	ctx context.Context,
 	rule *model.AlertRule,
 	smtpCfg repository.SmtpConfigData,
+	overrideDays int,
 ) (RuleResult, error) {
 	rr := RuleResult{
 		RuleID: rule.ID, RuleName: rule.Name, Threshold: rule.Threshold,
@@ -112,7 +144,7 @@ func (e *Engine) evaluateRule(
 		return rr, nil
 	}
 
-	windowStart := countWindowStart(now, rule)
+	windowStart := countWindowStart(now, rule, overrideDays)
 	rr.WindowStart = windowStart.Format("2006-01-02 15:04")
 
 	keywordsAnd := parseRuleKeywords(rule.KeywordsAnd)
@@ -160,12 +192,15 @@ func (e *Engine) evaluateRule(
 	return rr, nil
 }
 
-// countWindowStart 统计窗口：默认今日 0 点至今（按 published_at）；若今日已触发过则从上次触发时间起算。
-func countWindowStart(now time.Time, rule *model.AlertRule) time.Time {
+// countWindowStart 统计窗口：从 now 往前回溯 N 天（按 published_at）；若今日已触发过则从上次触发时间起算。
+// 回溯天数优先级：overrideDays（节点显式配置）> rule.TimeRangeDays（规则自身配置）> 默认 3 天。
+func countWindowStart(now time.Time, rule *model.AlertRule, overrideDays int) time.Time {
 	loc := now.Location()
 
-	// Calculate time range based on rule configuration
-	days := rule.TimeRangeDays
+	days := overrideDays
+	if days <= 0 {
+		days = rule.TimeRangeDays
+	}
 	if days <= 0 {
 		days = 3 // default to 3 days
 	}

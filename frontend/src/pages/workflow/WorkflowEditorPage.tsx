@@ -15,9 +15,10 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { Form, Input, Button, Card, Space, message, Switch, Modal, InputNumber, Select, Drawer, Tag } from 'antd'
-import { SaveOutlined, ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons'
+import { SaveOutlined, ArrowLeftOutlined, PlusOutlined, MinusCircleOutlined } from '@ant-design/icons'
 import PageHeader from '@/components/common/PageHeader'
 import { workflowApi } from '@/api/workflow'
+import { alertApi } from '@/api/alert'
 import { Workflow } from '@/types'
 
 const { TextArea } = Input
@@ -36,10 +37,13 @@ export const NODE_REGISTRY = {
   },
   alert_evaluate: {
     label: '告警评估',
-    description: '评估所有告警规则',
+    description: '评估告警规则（可指定规则与时间范围）',
     color: '#ff4d4f',
     icon: '⚠️',
-    configSchema: [],
+    configSchema: [
+      { name: 'ruleIds', label: '评估规则', type: 'alert-rules-select', required: false },
+      { name: 'timeRangeDays', label: '查询时间范围(天)', type: 'number', required: false, min: 1, max: 365, placeholder: '留空则用各规则自己配置的时间范围' },
+    ],
   },
   rag_vectorize: {
     label: 'RAG 向量化',
@@ -54,11 +58,22 @@ export const NODE_REGISTRY = {
   },
   condition: {
     label: '条件判断',
-    description: '根据条件决定执行路径',
+    description: '条件不成立时，下游节点将被跳过',
     color: '#faad14',
     icon: '🔀',
     configSchema: [
-      { name: 'expression', label: '条件表达式', type: 'text', required: true, placeholder: 'input.taggedCount > 10' },
+      {
+        name: 'logic',
+        label: '组合方式',
+        type: 'select',
+        required: false,
+        default: 'and',
+        options: [
+          { label: '全部满足 (AND)', value: 'and' },
+          { label: '任一满足 (OR)', value: 'or' },
+        ],
+      },
+      { name: 'conditions', label: '条件规则', type: 'condition-rules', required: false },
     ],
   },
   delay: {
@@ -156,7 +171,61 @@ export const NODE_REGISTRY = {
       { name: 'checkRecent', label: '检查最近运行', type: 'boolean', required: false },
     ],
   },
+  digest_generate: {
+    label: '生成摘要',
+    description: '触发每日舆情 AI 分析摘要生成',
+    color: '#9254de',
+    icon: '📝',
+    configSchema: [
+      { name: 'days', label: '统计天数', type: 'number', required: false, default: 1, min: 1, max: 30 },
+    ],
+  },
+  http_request: {
+    label: 'HTTP 请求',
+    description: '向外部地址发送任意 HTTP 请求（webhook/回调）',
+    color: '#08979c',
+    icon: '🌐',
+    configSchema: [
+      { name: 'url', label: '请求地址', type: 'text', required: true, placeholder: 'https://example.com/webhook' },
+      {
+        name: 'method',
+        label: '请求方法',
+        type: 'select',
+        required: true,
+        default: 'POST',
+        options: [
+          { label: 'GET', value: 'GET' },
+          { label: 'POST', value: 'POST' },
+          { label: 'PUT', value: 'PUT' },
+          { label: 'DELETE', value: 'DELETE' },
+          { label: 'PATCH', value: 'PATCH' },
+        ],
+      },
+      { name: 'body', label: '请求体', type: 'text', required: false, placeholder: 'JSON 字符串，可留空' },
+      { name: 'timeoutSeconds', label: '超时时间(秒)', type: 'number', required: false, default: 30, min: 1, max: 300 },
+    ],
+  },
 }
+
+// 条件节点：比较运算符选项
+const CONDITION_OPERATORS = [
+  { label: '>', value: '>' },
+  { label: '≥', value: '>=' },
+  { label: '<', value: '<' },
+  { label: '≤', value: '<=' },
+  { label: '=', value: '==' },
+  { label: '≠', value: '!=' },
+]
+
+// 条件节点：可选上游字段（仅展示中文，value 为后端实际字段名）
+// 均为数值类计数字段，因此比较运算符 > >= < <= == != 都适用。
+const CONDITION_FIELD_SUGGESTIONS = [
+  { value: 'articlesCount', label: '同步文章数' },
+  { value: 'syncNewCount', label: '新增文章数' },
+  { value: 'taggedCount', label: '打标文章数' },
+  { value: 'alertCount', label: '触发告警数' },
+  { value: 'ragArticlesDone', label: '向量化文章数' },
+]
 
 // 自定义节点组件
 const CustomNode = ({ data }: any) => {
@@ -216,11 +285,21 @@ const WorkflowEditorPage: React.FC = () => {
   // 节点类型选择器
   const [nodeTypeModalVisible, setNodeTypeModalVisible] = useState(false)
 
+  // 告警规则（供「告警评估」节点选择）
+  const [alertRules, setAlertRules] = useState<{ id: number; name: string }[]>([])
+
   useEffect(() => {
     if (isEdit) {
       loadWorkflow()
     }
   }, [id])
+
+  useEffect(() => {
+    alertApi
+      .listRules()
+      .then((rules) => setAlertRules(rules || []))
+      .catch(() => setAlertRules([]))
+  }, [])
 
   const loadWorkflow = async () => {
     setLoading(true)
@@ -575,6 +654,77 @@ const WorkflowEditorPage: React.FC = () => {
               const isTagsField = field.type === 'tags'
               const isSelectMultiple = field.type === 'select-multiple'
               const isSelect = field.type === 'select'
+
+              // 告警规则多选（选项来自现有规则，留空=全部启用规则）
+              if (field.type === 'alert-rules-select') {
+                return (
+                  <Form.Item
+                    key={field.name}
+                    label={field.label}
+                    name={field.name}
+                    tooltip="留空则评估全部启用规则"
+                  >
+                    <Select
+                      mode="multiple"
+                      allowClear
+                      placeholder="留空 = 全部启用规则"
+                      style={{ width: '100%' }}
+                      options={alertRules.map((r) => ({ label: r.name, value: r.id }))}
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
+                )
+              }
+
+              // 条件规则表格（field / operator / value 多行）
+              if (field.type === 'condition-rules') {
+                return (
+                  <Form.Item key={field.name} label={field.label}>
+                    <Form.List name={field.name}>
+                      {(rows, { add, remove }) => (
+                        <div>
+                          {rows.map(({ key, name, ...restField }) => (
+                            <Space key={key} align="baseline" style={{ display: 'flex', marginBottom: 8 }}>
+                              <Form.Item
+                                {...restField}
+                                name={[name, 'field']}
+                                rules={[{ required: true, message: '字段' }]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <Select
+                                  showSearch
+                                  optionFilterProp="label"
+                                  options={CONDITION_FIELD_SUGGESTIONS}
+                                  placeholder="选择字段"
+                                  style={{ width: 160 }}
+                                />
+                              </Form.Item>
+                              <Form.Item {...restField} name={[name, 'op']} initialValue=">" style={{ marginBottom: 0 }}>
+                                <Select style={{ width: 70 }} options={CONDITION_OPERATORS} />
+                              </Form.Item>
+                              <Form.Item
+                                {...restField}
+                                name={[name, 'value']}
+                                rules={[{ required: true, message: '值' }]}
+                                style={{ marginBottom: 0 }}
+                              >
+                                <InputNumber placeholder="数值" style={{ width: 110 }} />
+                              </Form.Item>
+                              <MinusCircleOutlined onClick={() => remove(name)} />
+                            </Space>
+                          ))}
+                          <Button type="dashed" onClick={() => add({ op: '>' })} block icon={<PlusOutlined />}>
+                            添加条件
+                          </Button>
+                          <div style={{ fontSize: 12, color: '#999', marginTop: 6 }}>
+                            不填任何条件时，默认判断「上游是否有文章」
+                          </div>
+                        </div>
+                      )}
+                    </Form.List>
+                  </Form.Item>
+                )
+              }
 
               return (
                 <Form.Item

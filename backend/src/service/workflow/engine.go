@@ -16,6 +16,8 @@ import (
 	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
+	"opinion-analysis/src/service/digest"
+	actionNodes "opinion-analysis/src/service/workflow/nodes/action"
 	controlNodes "opinion-analysis/src/service/workflow/nodes/control"
 	crawlerNodes "opinion-analysis/src/service/workflow/nodes/crawler"
 	processorNodes "opinion-analysis/src/service/workflow/nodes/processor"
@@ -72,16 +74,24 @@ func NewEngine(
 
 // registerNodes 注册所有节点执行器
 func (e *Engine) registerNodes() {
-	// 注册爬虫类节点
+	// 爬虫类节点
 	MustRegisterNode(crawlerNodes.NewRunNode(e.db, e.store.Crawler))
+	MustRegisterNode(crawlerNodes.NewScheduleNode(e.store.Crawler))
+	MustRegisterNode(crawlerNodes.NewStatusNode(e.store.Crawler))
 
-	// 注册处理类节点
+	// 处理类节点
 	MustRegisterNode(processorNodes.NewPlatformSyncNode(e.db))
 	MustRegisterNode(processorNodes.NewAITaggerNode(e.taggerSvc))
 	MustRegisterNode(processorNodes.NewRAGVectorizeNode(e.store.RAG, e.ragProc))
 	MustRegisterNode(processorNodes.NewAlertEvaluateNode(e.alertEngine))
+	MustRegisterNode(processorNodes.NewDigestGenerateNode(
+		digest.NewGenerator(e.db, e.store.Digest, e.taggerSvc),
+	))
 
-	// 注册控制流节点
+	// 动作类节点
+	MustRegisterNode(actionNodes.NewHTTPRequestNode())
+
+	// 控制流节点
 	MustRegisterNode(controlNodes.NewDelayNode())
 	MustRegisterNode(controlNodes.NewConditionNode())
 }
@@ -194,7 +204,23 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 
 	// 5. 按顺序执行节点
 	nodeOutputs := make(map[string]map[string]interface{})
+	// outgoingActive[nodeID] 标记该节点的出边是否「有效」：
+	//   - 普通节点执行成功 → true
+	//   - condition 节点 → 取 conditionResult
+	//   - 被跳过的节点 → false
+	// 下游节点只有在「至少一条入边有效」时才会执行，从而实现条件分支。
+	outgoingActive := make(map[string]bool)
 	partialNodes := 0 // 节点 success 但内部有错误（partial_success）的计数
+	skippedNodes := 0 // 因上游条件不满足而被跳过的节点计数
+
+	// 预计算每个节点是否有入边（无入边的起点节点始终执行）
+	hasIncoming := make(map[string]bool)
+	for _, edge := range edgeList {
+		if t, ok := edge["target"].(string); ok {
+			hasIncoming[t] = true
+		}
+	}
+
 	e.logger.Info("starting node execution",
 		zap.Int("totalNodes", len(sortedNodes)))
 
@@ -217,6 +243,19 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 		if nodeType == "trigger" {
 			e.logger.Info("skipping trigger node", zap.String("nodeId", nodeID))
 			nodeOutputs[nodeID] = manualInput
+			outgoingActive[nodeID] = true
+			continue
+		}
+
+		// 条件分支：若该节点有入边但没有任何一条「有效」入边，则跳过
+		// （上游 condition 判否，或上游本身被跳过）。
+		if hasIncoming[nodeID] && !hasActiveIncoming(nodeID, edgeList, outgoingActive) {
+			e.logger.Info("skipping node: no active upstream branch",
+				zap.String("nodeId", nodeID),
+				zap.String("nodeType", nodeType))
+			outgoingActive[nodeID] = false
+			skippedNodes++
+			e.recordSkippedNode(execution.ID, nodeID)
 			continue
 		}
 
@@ -253,6 +292,14 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 		}
 
 		nodeOutputs[nodeID] = output
+
+		// 记录出边有效性：condition 节点按 conditionResult，其它节点默认有效。
+		if nodeType == "condition" {
+			outgoingActive[nodeID] = conditionPassed(output)
+		} else {
+			outgoingActive[nodeID] = true
+		}
+
 		e.logger.Info("node execution succeeded",
 			zap.String("nodeId", nodeID),
 			zap.Any("output", output),
@@ -265,6 +312,12 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 	if partialNodes > 0 {
 		finalStatus = "partial_success"
 		finalMsg = fmt.Sprintf("%d 个节点存在部分失败，详见节点日志", partialNodes)
+	}
+	if skippedNodes > 0 {
+		if finalMsg != "" {
+			finalMsg += "；"
+		}
+		finalMsg += fmt.Sprintf("%d 个节点因条件分支被跳过", skippedNodes)
 	}
 	e.updateExecutionStatus(execution.ID, finalStatus, finalMsg)
 
@@ -421,6 +474,53 @@ func (e *Engine) collectInputs(nodeID string, edgeList []map[string]interface{},
 	}
 
 	return input
+}
+
+// hasActiveIncoming 判断 nodeID 是否存在至少一条「有效」入边。
+// 由于按拓扑序执行，所有上游节点此时都已处理完，outgoingActive 已记录其有效性。
+func hasActiveIncoming(nodeID string, edgeList []map[string]interface{}, outgoingActive map[string]bool) bool {
+	for _, edge := range edgeList {
+		target, _ := edge["target"].(string)
+		if target != nodeID {
+			continue
+		}
+		source, _ := edge["source"].(string)
+		if active, ok := outgoingActive[source]; ok && active {
+			return true
+		}
+	}
+	return false
+}
+
+// conditionPassed 从 condition 节点输出读取 conditionResult；缺省视为通过。
+func conditionPassed(output map[string]interface{}) bool {
+	if output == nil {
+		return true
+	}
+	if v, ok := output["conditionResult"].(bool); ok {
+		return v
+	}
+	return true
+}
+
+// recordSkippedNode 为被条件分支跳过的节点写一条 skipped 执行记录，便于前端展示。
+func (e *Engine) recordSkippedNode(executionID int64, nodeID string) {
+	now := time.Now()
+	rec := &model.WorkflowNodeExecution{
+		ExecutionID: executionID,
+		NodeID:      nodeID,
+		Status:      "skipped",
+		Input:       model.JSON("{}"),
+		Output:      model.JSON("{}"),
+		ErrorMsg:    "上游条件不满足，节点被跳过",
+		StartedAt:   now,
+		FinishedAt:  &now,
+	}
+	if err := e.store.WorkflowNodeExecution.Create(rec); err != nil {
+		e.logger.Warn("failed to record skipped node",
+			zap.String("nodeId", nodeID),
+			zap.Error(err))
+	}
 }
 
 // diffPayload 返回 output 相对 input 的增量字段（新增或值发生变化）。

@@ -46,5 +46,7 @@ func AllModels() []any {
 		&Workflow{},
 		&WorkflowExecution{},
 		&WorkflowNodeExecution{},
+		// 平台同步偏移量（增量游标）
+		&PlatformSyncOffset{},
 	}
 }
