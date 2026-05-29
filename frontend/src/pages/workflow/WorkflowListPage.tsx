@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Table, Button, Space, Tag, message, Popconfirm } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, PlayCircleOutlined, ClockCircleOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, PlayCircleOutlined, ClockCircleOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import PageHeader from '@/components/common/PageHeader'
 import { workflowApi } from '@/api/workflow'
@@ -32,18 +32,9 @@ const WorkflowListPage: React.FC = () => {
     }
   }
 
-  const handleExecute = async (id: number) => {
-    try {
-      const execution = await workflowApi.execute(id)
-      message.success(`工作流已开始执行，执行ID: ${execution.id}`)
-
-      // 可选：跳转到执行历史页面
-      setTimeout(() => {
-        navigate(`/workflows/${id}/executions`)
-      }, 1000)
-    } catch (error: any) {
-      message.error(error.message || '执行工作流失败')
-    }
+  // 进入编辑器并自动触发执行，在内置控制台查看实时日志
+  const handleExecute = (id: number) => {
+    navigate(`/workflows/${id}/edit`, { state: { autoRun: true } })
   }
 
   const handleDelete = async (id: number) => {
@@ -121,21 +112,6 @@ const WorkflowListPage: React.FC = () => {
           >
             执行
           </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => navigate(`/workflows/${record.id}/edit`)}
-          >
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => navigate(`/workflows/${record.id}/executions`)}
-          >
-            日志
-          </Button>
           <Popconfirm
             title="确定删除此工作流吗？"
             onConfirm={() => handleDelete(record.id!)}
@@ -172,6 +148,10 @@ const WorkflowListPage: React.FC = () => {
           dataSource={workflows}
           rowKey="id"
           loading={loading}
+          onRow={(record) => ({
+            onDoubleClick: () => navigate(`/workflows/${record.id}/edit`),
+            style: { cursor: 'pointer' },
+          })}
           pagination={{
             current: page,
             pageSize,
