@@ -36,6 +36,10 @@ func Forbidden(c *gin.Context) {
 	c.JSON(http.StatusForbidden, Response{Code: 403, Message: "forbidden"})
 }
 
+func ForbiddenMsg(c *gin.Context, msg string) {
+	c.JSON(http.StatusForbidden, Response{Code: 403, Message: msg})
+}
+
 func ServerError(c *gin.Context) {
 	c.JSON(http.StatusInternalServerError, Response{Code: 500, Message: "internal server error"})
 }

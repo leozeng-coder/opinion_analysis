@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -40,7 +41,7 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 				return
 			}
 		}
-		response.Forbidden(c)
+		response.ForbiddenMsg(c, fmt.Sprintf("权限不足：当前角色为 %v，需要 %s 角色才能操作", role, strings.Join(roles, "/")))
 		c.Abort()
 	}
 }
