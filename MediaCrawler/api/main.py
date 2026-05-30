@@ -27,8 +27,6 @@ import subprocess
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 from .routers import crawler_router, data_router, websocket_router
 from .middleware import ProxyAuthMiddleware
@@ -43,9 +41,6 @@ app = FastAPI(
 SECRET_KEY = os.getenv("PROXY_SECRET_KEY", "your-secret-key-change-in-production")
 app.add_middleware(ProxyAuthMiddleware, secret_key=SECRET_KEY, time_tolerance=300)
 
-# Get webui static files directory
-WEBUI_DIR = os.path.join(os.path.dirname(__file__), "webui")
-
 # 注意：不需要 CORS 中间件，因为所有请求都通过 Go 后端代理
 # Go 后端已经处理了 CORS
 
@@ -56,16 +51,11 @@ app.include_router(websocket_router, prefix="/api")
 
 
 @app.get("/")
-async def serve_frontend():
-    """Return frontend page"""
-    index_path = os.path.join(WEBUI_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
+async def root():
     return {
-        "message": "MediaCrawler WebUI API",
+        "message": "MediaCrawler API",
         "version": "1.0.0",
         "docs": "/docs",
-        "note": "WebUI not found, please build it first: cd webui && npm run build"
     }
 
 
@@ -118,19 +108,6 @@ async def check_environment():
             "message": "Environment check error",
             "error": str(e) or "Unknown error occurred"
         }
-
-
-# Mount static resources - must be placed after all routes
-if os.path.exists(WEBUI_DIR):
-    assets_dir = os.path.join(WEBUI_DIR, "assets")
-    if os.path.exists(assets_dir):
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
-    # Mount logos directory
-    logos_dir = os.path.join(WEBUI_DIR, "logos")
-    if os.path.exists(logos_dir):
-        app.mount("/logos", StaticFiles(directory=logos_dir), name="logos")
-    # Mount other static files (e.g., vite.svg)
-    app.mount("/static", StaticFiles(directory=WEBUI_DIR), name="webui-static")
 
 
 if __name__ == "__main__":

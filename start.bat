@@ -27,6 +27,13 @@ start "opinion-front-5173" cmd.exe /k call "%~dp0scripts\run-frontend.cmd"
 echo Starting admin :5174 ...
 start "opinion-admin-5174" cmd.exe /k call "%~dp0scripts\run-admin.cmd"
 
+if "%SKIP_CRAWLER%"=="1" (
+    echo [launcher] SKIP_CRAWLER=1 - MediaCrawler API not started.
+) else (
+    echo Starting MediaCrawler API :8085 - set SKIP_CRAWLER=1 to skip
+    start "opinion-crawler-8085" cmd.exe /k call "%~dp0scripts\run-crawler.cmd"
+)
+
 timeout /t 6 /nobreak >nul
 start "" "http://localhost:5173"
 start "" "http://localhost:5174"
@@ -36,6 +43,7 @@ echo   Frontend : http://localhost:5173
 echo   Admin    : http://localhost:5174
 echo   API      : http://localhost:8080
 if not "%SKIP_RAG%"=="1" echo   RAG      : http://127.0.0.1:5055
+if not "%SKIP_CRAWLER%"=="1" echo   Crawler  : http://127.0.0.1:8085
 echo.
 pause
 endlocal
