@@ -45,6 +45,22 @@ import { Workflow, WorkflowExecution, WorkflowNodeExecution, CrawlerLog } from '
 
 const { TextArea } = Input
 
+// Inject shimmer animation CSS once at module load
+if (typeof document !== 'undefined' && !document.getElementById('wf-node-anim')) {
+  const s = document.createElement('style')
+  s.id = 'wf-node-anim'
+  s.textContent = `
+    @keyframes wfShimmer {
+      0%   { transform: translateX(-120%) skewX(-12deg); }
+      100% { transform: translateX(320%)  skewX(-12deg); }
+    }
+  `
+  document.head.appendChild(s)
+}
+
+// Context: maps nodeId → execution status ('running'|'success'|'failed'|'skipped'|'cancelled')
+const ExecutionStatusContext = React.createContext<Record<string, string>>({})
+
 // 节点类型注册表
 export const NODE_REGISTRY = {
   ai_tagger: {
@@ -310,7 +326,69 @@ export const NODE_REGISTRY = {
   },
 }
 
-// 把已保存的 cron 字符串解析回表单字段（用于加载已有工作流）
+// 工作流图结构校验，返回警告信息列表（不拦截保存）
+function validateWorkflowGraph(
+  nodes: Node[],
+  edges: { source: string; target: string }[]
+): string[] {
+  const warnings: string[] = []
+  if (nodes.length === 0) return warnings
+
+  const inDegree: Record<string, number> = {}
+  const outDegree: Record<string, number> = {}
+  nodes.forEach((n) => { inDegree[n.id] = 0; outDegree[n.id] = 0 })
+  edges.forEach((e) => { outDegree[e.source] = (outDegree[e.source] || 0) + 1; inDegree[e.target] = (inDegree[e.target] || 0) + 1 })
+
+  const sourceNodes = nodes.filter((n) => NODE_CATEGORY[n.data?.type] === 'source')
+  const syncNodes   = nodes.filter((n) => NODE_CATEGORY[n.data?.type] === 'sync')
+
+  // 1. 没有起始节点（crawler_run）
+  if (sourceNodes.length === 0) {
+    warnings.push('工作流没有起始节点（执行爬虫），数据来源不明确')
+  }
+
+  // 2. 起始节点有入边（不应该有上游）
+  sourceNodes.forEach((n) => {
+    if (inDegree[n.id] > 0) {
+      warnings.push(`起始节点「${NODE_REGISTRY[n.data.type as keyof typeof NODE_REGISTRY]?.label || n.data.type}」有入边，起始节点通常不应有上游`)
+    }
+  })
+
+  // 3. 数据同步节点没有上游爬虫节点
+  syncNodes.forEach((n) => {
+    const hasSourceUpstream = edges.some((e) => {
+      if (e.target !== n.id) return false
+      const upNode = nodes.find((nd) => nd.id === e.source)
+      return upNode && NODE_CATEGORY[upNode.data?.type] === 'source'
+    })
+    if (!hasSourceUpstream && inDegree[n.id] === 0) {
+      warnings.push(`数据同步节点「${NODE_REGISTRY[n.data.type as keyof typeof NODE_REGISTRY]?.label || n.data.type}」没有连接上游节点，可能无法获取数据`)
+    }
+  })
+
+  // 4. 孤立节点（无入边且无出边，且不是起始节点）
+  nodes.forEach((n) => {
+    if (inDegree[n.id] === 0 && outDegree[n.id] === 0 && NODE_CATEGORY[n.data?.type] !== 'source') {
+      warnings.push(`节点「${NODE_REGISTRY[n.data.type as keyof typeof NODE_REGISTRY]?.label || n.data.type}」未连接任何节点`)
+    }
+  })
+
+  // 5. condition 节点没有出边
+  nodes.filter((n) => n.data?.type === 'condition').forEach((n) => {
+    if (outDegree[n.id] === 0) {
+      warnings.push('条件判断节点没有下游节点，判断结果无法生效')
+    }
+  })
+
+  // 6. 多个起始节点
+  if (sourceNodes.length > 1) {
+    warnings.push(`存在 ${sourceNodes.length} 个起始节点，工作流将依次执行所有爬虫，请确认是否符合预期`)
+  }
+
+  return warnings
+}
+
+
 function parseCronToFields(cron: string): Record<string, any> | null {
   const p = cron.trim().split(/\s+/)
   if (p.length !== 5) return null
@@ -372,69 +450,201 @@ const CONDITION_FIELD_SUGGESTIONS = [
   { value: 'ragArticlesDone', label: '向量化文章数' },
 ]
 
-// 自定义节点组件：方形图标节点 + 下方标题（n8n 风格，沿用本系统配色）
+// 节点分类
+const NODE_CATEGORY: Record<string, 'source' | 'sync' | 'process' | 'ops'> = {
+  crawler_run:      'source',
+  platform_sync:    'sync',
+  data_filter:      'process',
+  ai_tagger:        'process',
+  rag_vectorize:    'process',
+  alert_evaluate:   'process',
+  digest_generate:  'process',
+  condition:        'process',
+  delay:            'process',
+  crawler_schedule: 'ops',
+  crawler_status:   'ops',
+  http_request:     'ops',
+}
+
+// 节点形状渲染：source=圆形，sync=菱形，process=圆角矩形，ops=六边形
+const NodeShape = ({ category, color, size, icon, hovered, hasTarget, hasSource }: {
+  category: 'source' | 'sync' | 'process' | 'ops'
+  color: string
+  size: number
+  icon: string
+  hovered: boolean
+  hasTarget: boolean
+  hasSource: boolean
+}) => {
+  const handleTarget = (
+    <Handle
+      type="target"
+      position={Position.Left}
+      style={{
+        width: 5, height: 18, borderRadius: 2,
+        background: '#9e9e9e', border: 'none',
+        opacity: hasTarget || hovered ? 1 : 0,
+        transition: 'opacity .15s',
+      }}
+    />
+  )
+  const handleSource = (
+    <Handle
+      type="source"
+      position={Position.Right}
+      style={{
+        width: 12, height: 12,
+        background: color, border: '2px solid #fff',
+        boxShadow: `0 0 0 1px ${color}`,
+        opacity: hasSource || hovered ? 1 : 0,
+        transition: 'opacity .15s',
+      }}
+    />
+  )
+
+  const commonInner = (extraStyle: React.CSSProperties) => (
+    <div style={{
+      width: size, height: size,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 28, position: 'relative',
+      ...extraStyle,
+    }}>
+      {handleTarget}
+      <span>{icon}</span>
+      {handleSource}
+    </div>
+  )
+
+  if (category === 'source') {
+    // 左侧大圆角、右侧直角，参考 n8n trigger 节点风格
+    return (
+      <div style={{
+        width: size, height: size, position: 'relative',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        borderRadius: '22px 4px 4px 22px',
+        background: '#1f2937',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+        fontSize: 30,
+      }}>
+        {handleTarget}
+        <span style={{ filter: `drop-shadow(0 0 4px ${color})`, color }}>{icon}</span>
+        {handleSource}
+      </div>
+    )
+  }
+
+  if (category === 'sync') {
+    // 菱形：用旋转的正方形实现，外层 div 撑开空间，内层旋转
+    const d = Math.round(size * 0.72)
+    return (
+      <div style={{ width: size, height: size, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {handleTarget}
+        <div style={{
+          width: d, height: d,
+          transform: 'rotate(45deg)',
+          background: '#fff',
+          border: `2px solid ${color}`,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        }} />
+        <span style={{ position: 'absolute', fontSize: 24, pointerEvents: 'none' }}>{icon}</span>
+        {handleSource}
+      </div>
+    )
+  }
+
+  if (category === 'ops') {
+    // 圆形：彩色描边 + 白色背景
+    return commonInner({
+      borderRadius: '50%',
+      background: '#fff',
+      border: `2.5px solid ${color}`,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+    })
+  }
+
+  // process：圆角矩形（原有样式）
+  return commonInner({
+    borderRadius: 16,
+    background: '#fff',
+    border: `1.5px solid ${color}`,
+    boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+  })
+}
+
+// 自定义节点组件
 const CustomNode = ({ id, data }: any) => {
   const nodeType = NODE_REGISTRY[data.type as keyof typeof NODE_REGISTRY]
   const color = nodeType?.color || '#8c8c8c'
-  // 用户自定义过名称才作为副标题展示（默认的 node_xxx 自动 id 不展示）
+  const category = NODE_CATEGORY[data.type] || 'process'
   const subtitle = data.label && !String(data.label).startsWith('node_') ? data.label : ''
 
-  // 连接点仅在「已连接」时显示；未连接时隐藏，悬停节点时临时显形以便发起连线
   const edges = useStore((s) => s.edges)
   const [hovered, setHovered] = useState(false)
   const hasTarget = edges.some((e) => e.target === id)
   const hasSource = edges.some((e) => e.source === id)
 
+  const statusMap = React.useContext(ExecutionStatusContext)
+  const execStatus = statusMap[id]
+  const isRunning  = execStatus === 'running'
+  const isSuccess  = execStatus === 'success' || execStatus === 'partial_success'
+  const isFailed   = execStatus === 'failed'
+  const isDimmed   = execStatus === 'skipped' || execStatus === 'cancelled'
+
+  // Clip shape for shimmer overlay matches each category's visual boundary
+  const shimmerClip: React.CSSProperties =
+    category === 'source' ? { borderRadius: '22px 4px 4px 22px' } :
+    category === 'ops'    ? { borderRadius: '50%' } :
+    category === 'sync'   ? { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' } :
+                            { borderRadius: 16 }
+
   return (
-    // 节点主体 = 正方形本身（ReactFlow 以此测量节点尺寸），
-    // 连接点位于正方形左右边的垂直中点，与参考图一致；标题浮在正方形下方、不影响测量。
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      style={{
-        position: 'relative',
-        width: 72,
-        height: 72,
-        borderRadius: 16,
-        background: '#fff',
-        border: `1.5px solid ${color}`,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 30,
-        cursor: 'pointer',
-      }}
+      style={{ position: 'relative', cursor: 'pointer', opacity: isDimmed ? 0.4 : 1, transition: 'opacity .3s' }}
     >
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{
-          width: 5,
-          height: 18,
-          borderRadius: 2,
-          background: '#9e9e9e',
-          border: 'none',
-          opacity: hasTarget || hovered ? 1 : 0,
-          transition: 'opacity .15s',
-        }}
-      />
-      <span>{nodeType?.icon}</span>
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{
-          width: 12,
-          height: 12,
-          background: color,
-          border: '2px solid #fff',
-          boxShadow: `0 0 0 1px ${color}`,
-          opacity: hasSource || hovered ? 1 : 0,
-          transition: 'opacity .15s',
-        }}
+      <NodeShape
+        category={category}
+        color={color}
+        size={72}
+        icon={nodeType?.icon || ''}
+        hovered={hovered}
+        hasTarget={hasTarget}
+        hasSource={hasSource}
       />
 
-      {/* 标题浮在正方形正下方，绝对定位、不参与节点尺寸测量与对齐 */}
+      {/* 流光效果：执行中节点，节点主色光带从左向右扫过（数据流方向） */}
+      {isRunning && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, width: 72, height: 72,
+          overflow: 'hidden', pointerEvents: 'none', zIndex: 5,
+          ...shimmerClip,
+        }}>
+          <div style={{
+            position: 'absolute', top: 0, left: 0,
+            width: '50%', height: '100%',
+            background: `linear-gradient(90deg, transparent 0%, ${color}66 50%, transparent 100%)`,
+            animation: 'wfShimmer 1.4s ease-in-out infinite',
+          }} />
+        </div>
+      )}
+
+      {/* 状态徽章：成功 / 失败 */}
+      {(isSuccess || isFailed) && (
+        <div style={{
+          position: 'absolute', top: -5, right: -5,
+          width: 18, height: 18, borderRadius: '50%',
+          background: isSuccess ? '#52c41a' : '#ff4d4f',
+          border: '2px solid #fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 10, color: '#fff', fontWeight: 700,
+          zIndex: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+          pointerEvents: 'none',
+        }}>
+          {isSuccess ? '✓' : '✗'}
+        </div>
+      )}
+
       <div
         style={{
           position: 'absolute',
@@ -447,27 +657,11 @@ const CustomNode = ({ id, data }: any) => {
           pointerEvents: 'none',
         }}
       >
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            color: '#262626',
-            lineHeight: 1.3,
-          }}
-        >
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#262626', lineHeight: 1.3 }}>
           {nodeType?.label || data.type}
         </div>
         {subtitle && (
-          <div
-            style={{
-              fontSize: 11,
-              color: '#8c8c8c',
-              lineHeight: 1.3,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
+          <div style={{ fontSize: 11, color: '#8c8c8c', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {subtitle}
           </div>
         )}
@@ -1379,6 +1573,21 @@ const WorkflowEditorPage: React.FC = () => {
       return
     }
 
+    // 图结构校验：告警但不拦截
+    const edgeSimple = edges.map((e) => ({ source: e.source, target: e.target }))
+    const warnings = validateWorkflowGraph(nodes, edgeSimple)
+    if (warnings.length > 0) {
+      Modal.warning({
+        title: '工作流结构提示',
+        content: (
+          <ul style={{ paddingLeft: 16, margin: 0 }}>
+            {warnings.map((w, i) => <li key={i} style={{ marginBottom: 4 }}>{w}</li>)}
+          </ul>
+        ),
+        okText: '继续保存',
+      })
+    }
+
     setSaving(true)
     try {
       // 根据触发类型组装 triggerConfig
@@ -1439,6 +1648,13 @@ const WorkflowEditorPage: React.FC = () => {
   const watchedFixedFreq     = Form.useWatch('tc_fixedFreq',    form)
   // 节点配置抽屉：监听 crawlerType，用于条件性显示关键词/ID输入框
   const watchedNodeCrawlerType = Form.useWatch('crawlerType', nodeConfigForm)
+
+  // 节点执行状态映射：nodeId → status，供画布节点渲染流光/徽章效果
+  const nodeStatusMap = React.useMemo(() => {
+    const map: Record<string, string> = {}
+    nodeLogs.forEach((log) => { map[log.nodeId] = log.status })
+    return map
+  }, [nodeLogs])
 
   // 控制台实时日志行（工作流编排 + 爬虫实时日志合并）
   const consoleLines = buildConsoleLines({
@@ -1682,6 +1898,7 @@ const WorkflowEditorPage: React.FC = () => {
             onDrop={isExecuting ? undefined : onDrop}
             onDragOver={isExecuting ? undefined : onDragOver}
           >
+            <ExecutionStatusContext.Provider value={nodeStatusMap}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -1702,6 +1919,7 @@ const WorkflowEditorPage: React.FC = () => {
               <HelperLines horizontal={helperLineH} vertical={helperLineV} />
 
             </ReactFlow>
+            </ExecutionStatusContext.Provider>
           </div>
         </Card>
 
@@ -1721,57 +1939,95 @@ const WorkflowEditorPage: React.FC = () => {
           <div style={{ padding: '12px 14px', borderBottom: '1px solid #f0f0f0', fontWeight: 600 }}>
             节点库
           </div>
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: 'auto',
-              padding: 12,
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 12,
-              alignContent: 'start',
-            }}
-          >
-            {Object.entries(NODE_REGISTRY).map(([key, config]) => (
-              <div
-                key={key}
-                draggable={!isExecuting}
-                onDragStart={(e) => !isExecuting && onPaletteDragStart(e, key)}
-                title={config.description}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 6,
-                  cursor: isExecuting ? 'not-allowed' : 'grab',
-                  opacity: isExecuting ? 0.5 : 1,
-                  textAlign: 'center',
-                  padding: '4px 0',
-                }}
-              >
-                {/* 与画布节点 CustomNode 完全一致的图标样式 */}
-                <div
-                  style={{
-                    width: 60,
-                    height: 60,
-                    borderRadius: 14,
-                    background: '#fff',
-                    border: `1.5px solid ${config.color}`,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 30,
-                  }}
-                >
-                  {config.icon}
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 14px 14px' }}>
+            {([
+              { category: 'source'  as const, label: '起始节点', desc: '数据来源' },
+              { category: 'sync'    as const, label: '数据同步', desc: '平台数据接入' },
+              { category: 'process' as const, label: '中间节点', desc: '数据处理与分析' },
+              { category: 'ops'     as const, label: '运维节点', desc: '配置与外部调用' },
+            ]).map(({ category, label, desc }) => {
+              const items = Object.entries(NODE_REGISTRY).filter(([key]) => NODE_CATEGORY[key] === category)
+              if (items.length === 0) return null
+              return (
+                <div key={category} style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#595959', whiteSpace: 'nowrap' }}>{label}</span>
+                    <span style={{ fontSize: 11, color: '#bfbfbf' }}>{desc}</span>
+                    <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {items.map(([key, config]) => {
+                      const cat = NODE_CATEGORY[key] || 'process'
+                      return (
+                        <div
+                          key={key}
+                          draggable={!isExecuting}
+                          onDragStart={(e) => !isExecuting && onPaletteDragStart(e, key)}
+                          title={config.description}
+                          style={{
+                            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                            cursor: isExecuting ? 'not-allowed' : 'grab',
+                            opacity: isExecuting ? 0.5 : 1,
+                            textAlign: 'center', padding: '4px 0',
+                          }}
+                        >
+                          {cat === 'source' ? (
+                            <div style={{
+                              width: 52, height: 52, position: 'relative',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              borderRadius: '16px 3px 3px 16px',
+                              background: '#1f2937',
+                              boxShadow: '0 3px 8px rgba(0,0,0,0.22)',
+                              fontSize: 24,
+                            }}>
+                              <span style={{ filter: `drop-shadow(0 0 4px ${config.color})`, color: config.color }}>{config.icon}</span>
+                            </div>
+                          ) : cat === 'sync' ? (
+                            <div style={{ width: 52, height: 52, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <div style={{
+                                width: 36, height: 36,
+                                transform: 'rotate(45deg)',
+                                background: '#fff',
+                                border: `2px solid ${config.color}`,
+                                boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+                              }} />
+                              <span style={{ position: 'absolute', fontSize: 20, pointerEvents: 'none' }}>{config.icon}</span>
+                            </div>
+                          ) : cat === 'ops' ? (
+                            <div style={{
+                              width: 52, height: 52,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              borderRadius: '50%',
+                              background: '#fff',
+                              border: `2.5px solid ${config.color}`,
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+                              fontSize: 24,
+                            }}>
+                              {config.icon}
+                            </div>
+                          ) : (
+                            <div style={{
+                              width: 52, height: 52,
+                              borderRadius: 12,
+                              background: '#fff',
+                              border: `1.5px solid ${config.color}`,
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.06)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: 24,
+                            }}>
+                              {config.icon}
+                            </div>
+                          )}
+                          <span style={{ fontSize: 11, fontWeight: 500, lineHeight: 1.2, color: '#434343' }}>
+                            {config.label}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-                <span style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.2, color: '#262626' }}>
-                  {config.label}
-                </span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>
