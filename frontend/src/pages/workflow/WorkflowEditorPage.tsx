@@ -178,7 +178,7 @@ export const NODE_REGISTRY = {
         ],
         placeholder: '留空默认 search',
       },
-      { name: 'topics', label: '话题', type: 'tags', required: false, placeholder: '输入话题后按回车添加' },
+      { name: 'topics', label: '话题', type: 'tags', required: true, placeholder: '输入话题后按回车添加' },
       { name: 'keywords', label: '关键词', type: 'tags', required: false, placeholder: '按回车添加，多个关键词逐条添加', showIf: { field: 'crawlerType', values: ['search', '', undefined] } },
       { name: 'specifiedIds', label: '指定内容 ID', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔', showIf: { field: 'crawlerType', value: 'detail' } },
       { name: 'creatorIds', label: '创作者 ID', type: 'text', required: false, placeholder: '多个 ID 用逗号分隔', showIf: { field: 'crawlerType', value: 'creator' } },
@@ -878,6 +878,23 @@ const saveConsoleCache = (wfId: string, data: ConsoleCache) => {
 const clearConsoleCache = (wfId: string) => {
   try {
     localStorage.removeItem(CONSOLE_CACHE_PREFIX + wfId)
+    localStorage.setItem(CONSOLE_CACHE_PREFIX + wfId + '_cleared', '1')
+  } catch {
+    // 忽略
+  }
+}
+
+const isConsoleCacheCleared = (wfId: string): boolean => {
+  try {
+    return localStorage.getItem(CONSOLE_CACHE_PREFIX + wfId + '_cleared') === '1'
+  } catch {
+    return false
+  }
+}
+
+const resetConsoleCacheCleared = (wfId: string) => {
+  try {
+    localStorage.removeItem(CONSOLE_CACHE_PREFIX + wfId + '_cleared')
   } catch {
     // 忽略
   }
@@ -1111,6 +1128,7 @@ const WorkflowEditorPage: React.FC = () => {
         const running = list.find((e) => e.status === 'running')
         if (running && !pollTimerRef.current) {
           // 后台正在执行：接管监控，拉取完整节点日志 + 爬虫实时日志
+          if (id) resetConsoleCacheCleared(id)
           setIsExecuting(true)
           setCurrentExecution(running)
           setConsoleMode('console')
@@ -1118,6 +1136,8 @@ const WorkflowEditorPage: React.FC = () => {
           return
         }
         if (!running) {
+          // 用户手动清空过控制台 → 不自动恢复最新执行
+          if (id && isConsoleCacheCleared(id)) return
           // 没有运行中的执行：展示最新一次执行，刷新为服务端最终状态 + 完整节点日志
           const latest = list[0]
           if (latest) {
@@ -1150,6 +1170,7 @@ const WorkflowEditorPage: React.FC = () => {
     try {
       const exec = await workflowApi.execute(Number(id))
       message.success(`已开始执行（执行 #${exec.id}）`)
+      resetConsoleCacheCleared(id)
       setIsExecuting(true)
       setCurrentExecution(exec)
       setNodeLogs([])
@@ -1229,6 +1250,8 @@ const WorkflowEditorPage: React.FC = () => {
     const st = location.state as { autoRun?: boolean } | null
     if (isEdit && !loading && st?.autoRun && !autoRunHandledRef.current && !isExecuting) {
       autoRunHandledRef.current = true
+      // 清除 history state，防止刷新页面重复触发
+      navigate(location.pathname, { replace: true, state: {} })
       handleExecute()
     }
   }, [isEdit, loading, location.state, isExecuting, handleExecute])

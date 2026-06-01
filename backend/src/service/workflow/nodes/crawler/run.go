@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,10 @@ func NewRunNode(db *gorm.DB, crawlerRepo *repository.CrawlerRepository) *RunNode
 }
 
 func (n *RunNode) Validate(config map[string]interface{}) error {
+	topics := n.GetStringSlice(config, "topics")
+	if len(topics) == 0 {
+		return fmt.Errorf("话题（topics）为必填项")
+	}
 	return nil
 }
 

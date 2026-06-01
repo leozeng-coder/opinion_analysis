@@ -211,12 +211,17 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 		startPage = 1
 	}
 
-	// 合并关键词
+	// 合并关键词；keywords 为空时用 topics 兜底（topics 作为搜索词传给 MediaCrawler）
 	keywords := ""
 	if len(params.Keywords) > 0 {
 		keywords = params.Keywords[0]
 		for i := 1; i < len(params.Keywords); i++ {
-			keywords += " " + params.Keywords[i]
+			keywords += "," + params.Keywords[i]
+		}
+	} else if len(params.Topics) > 0 {
+		keywords = params.Topics[0]
+		for i := 1; i < len(params.Topics); i++ {
+			keywords += "," + params.Topics[i]
 		}
 	}
 
