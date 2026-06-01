@@ -371,7 +371,7 @@ const AiAssistantPage: React.FC = () => {
         </div>
         <div className={styles.sidebarFoot}>
           <Text type="secondary" className={styles.sidebarFootText}>
-            会话按账号保存在服务器（用户隔离）
+          历史对话
           </Text>
         </div>
       </aside>

@@ -6,6 +6,7 @@ func AllModels() []any {
 		&User{},
 		&DataSource{},
 		&Article{},
+		&ArticleComment{},
 		&Topic{},
 		&AlertRule{},
 		&AlertRecord{},

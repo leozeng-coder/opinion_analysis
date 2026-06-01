@@ -10,7 +10,9 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -406,14 +408,43 @@ def reset_embedding_sync_markers() -> int:
 def rebuild_milvus_collection() -> Dict[str, Any]:
     """按当前嵌入模型维度 drop 并重建 Milvus 集合，并重置 MySQL 同步标记。"""
     global _client
+    import gc
+
     refresh_runtime_settings()
     model_dim = get_embed_dim()
-    raw = MilvusClient(uri=MILVUS_URI)
-    dropped = False
-    if raw.has_collection(COL_NAME):
-        raw.drop_collection(COL_NAME)
-        dropped = True
-    _client = None
+
+    # 彻底释放 Milvus Lite 文件句柄：置空引用 + 强制 GC
+    if _client is not None:
+        try:
+            _client.close()
+        except Exception:
+            pass
+        _client = None
+
+    gc.collect()
+    time.sleep(0.5)
+
+    # 直接删除整个 Milvus 数据目录（比 drop_collection 更可靠）
+    milvus_path = Path(MILVUS_URI)
+    dropped = milvus_path.exists()
+    if dropped:
+        try:
+            shutil.rmtree(milvus_path)
+        except Exception:
+            # 如果整个目录删不掉，至少删 collection 子目录
+            col_dir = milvus_path / "collections" / COL_NAME
+            if col_dir.exists():
+                shutil.rmtree(col_dir, ignore_errors=True)
+            # 删除可能残留的 manifest 文件
+            manifest = col_dir / "manifest.json"
+            if manifest.exists():
+                try:
+                    manifest.unlink()
+                except Exception:
+                    pass
+
+    time.sleep(0.3)
+
     new_client = ensure_milvus_client()
     coll_dim = get_collection_embed_dim(new_client)
     cleared = reset_embedding_sync_markers()
@@ -449,6 +480,7 @@ def ensure_milvus_client() -> MilvusClient:
         schema.add_field("title", DataType.VARCHAR, max_length=512)
         schema.add_field("snippet", DataType.VARCHAR, max_length=4096)
         schema.add_field("platform", DataType.VARCHAR, max_length=32)
+        schema.add_field("chunk_type", DataType.VARCHAR, max_length=16)
         index_params = MilvusClient.prepare_index_params()
         index_params.add_index("embedding", index_type="AUTOINDEX", metric_type="COSINE")
         client.create_collection(COL_NAME, schema=schema, index_params=index_params)
@@ -465,37 +497,86 @@ def delete_chunks_for_article(client: MilvusClient, article_id: int) -> None:
         log.debug("milvus delete chunks: %s", e)
 
 
+def _build_comment_text(comments: List[Dict[str, str]]) -> str:
+    """将评论列表组装为可读文本块，用于向量化。"""
+    if not comments:
+        return ""
+    lines: List[str] = []
+    for c in comments:
+        nickname = (c.get("nickname") or "匿名").strip()
+        content = (c.get("content") or "").strip()
+        if not content:
+            continue
+        is_reply = c.get("is_reply") == "1"
+        prefix = "  └ " if is_reply else "[评论] "
+        lines.append(f"{prefix}{nickname}: {content}")
+    return "\n".join(lines)
+
+
 def upsert_article_chunks(
     client: MilvusClient,
     article_id: int,
     title: str,
     content: str,
     platform: str,
+    comments: Optional[List[Dict[str, str]]] = None,
 ) -> int:
     full = build_full_embed_text(title, content)
-    pieces = semantic_chunks(full)
-    if not pieces:
+    content_pieces = semantic_chunks(full)
+
+    comment_pieces: List[str] = []
+    if comments:
+        comment_text = _build_comment_text(comments)
+        if comment_text:
+            comment_pieces = semantic_chunks(comment_text)
+
+    if not content_pieces and not comment_pieces:
         delete_chunks_for_article(client, article_id)
         return 0
 
-    embed_inputs = [embed_chunk_text(title, piece) for piece in pieces]
-    vecs = encode_embeddings(embed_inputs)
+    all_embed_inputs: List[str] = []
+    for piece in content_pieces:
+        all_embed_inputs.append(embed_chunk_text(title, piece))
+    for piece in comment_pieces:
+        all_embed_inputs.append(embed_chunk_text(title, piece))
+
+    vecs = encode_embeddings(all_embed_inputs)
 
     rows: List[Dict[str, Any]] = []
-    for i, (piece, vec) in enumerate(zip(pieces, vecs)):
+    idx = 0
+    for i, piece in enumerate(content_pieces):
         h = sha256_text(piece)[:12]
-        pk = f"{int(article_id)}:{i}:{h}"
+        pk = f"{int(article_id)}:{idx}:{h}"
         if len(pk) > 96:
             pk = pk[:96]
         rows.append({
             "chunk_pk": pk,
             "article_id": int(article_id),
-            "chunk_idx": i,
-            "embedding": vec,
+            "chunk_idx": idx,
+            "embedding": vecs[i],
             "title": clip_runes(title or "", 500),
             "snippet": clip_runes(piece, 4000),
             "platform": clip_runes(platform or "", 30),
+            "chunk_type": "content",
         })
+        idx += 1
+
+    for i, piece in enumerate(comment_pieces):
+        h = sha256_text(piece)[:12]
+        pk = f"{int(article_id)}:{idx}:{h}"
+        if len(pk) > 96:
+            pk = pk[:96]
+        rows.append({
+            "chunk_pk": pk,
+            "article_id": int(article_id),
+            "chunk_idx": idx,
+            "embedding": vecs[len(content_pieces) + i],
+            "title": clip_runes(title or "", 500),
+            "snippet": clip_runes(piece, 4000),
+            "platform": clip_runes(platform or "", 30),
+            "chunk_type": "comment",
+        })
+        idx += 1
 
     delete_chunks_for_article(client, article_id)
     client.insert(COL_NAME, rows)
@@ -637,17 +718,45 @@ def _incremental_sync_impl(sync_log_id: Optional[int], mode: Optional[str]) -> D
             text = build_full_embed_text(row.get("title") or "", row.get("content") or "")
             if not text:
                 continue
-            h = sha256_text(text)
+
+            aid = int(row["id"])
+
+            # 查询该文章的评论
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT content, nickname, parent_id
+                    FROM article_comments
+                    WHERE article_id = %s AND deleted_at IS NULL
+                    ORDER BY published_at ASC
+                    """,
+                    (aid,),
+                )
+                comment_rows = cur.fetchall()
+
+            comments: List[Dict[str, str]] = []
+            comments_text_parts: List[str] = []
+            for cr in comment_rows:
+                c_content = (cr.get("content") or "").strip()
+                c_nickname = (cr.get("nickname") or "").strip()
+                is_reply = "1" if cr.get("parent_id") else "0"
+                if c_content:
+                    comments.append({"content": c_content, "nickname": c_nickname, "is_reply": is_reply})
+                    comments_text_parts.append(c_content)
+
+            # hash 包含正文 + 评论，评论变更也会触发重新向量化
+            hash_source = text + "\n" + "\n".join(comments_text_parts) if comments_text_parts else text
+            h = sha256_text(hash_source)
             if row.get("embedding_content_hash") == h and row.get("embedding_synced_at"):
                 continue
 
-            aid = int(row["id"])
             n_chunks = upsert_article_chunks(
                 client,
                 aid,
                 str(row.get("title") or ""),
                 str(row.get("content") or ""),
                 str(row.get("platform") or ""),
+                comments=comments if comments else None,
             )
             chunks_up += n_chunks
 
@@ -723,7 +832,17 @@ def keyword_candidate_ids(query: str) -> List[int]:
                 """,
                 (like, like),
             )
-            return [int(r["id"]) for r in cur.fetchall()]
+            ids = [int(r["id"]) for r in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT DISTINCT article_id FROM article_comments
+                WHERE deleted_at IS NULL AND content LIKE %s
+                LIMIT 30
+                """,
+                (like,),
+            )
+            comment_ids = [int(r["article_id"]) for r in cur.fetchall()]
+            return list(set(ids + comment_ids))
     except Exception as e:
         log.warning("keyword search: %s", e)
         return []
@@ -751,7 +870,7 @@ def hybrid_search(query: str, top_k: int) -> List[Dict[str, Any]]:
         anns_field="embedding",
         search_params={"metric_type": "COSINE"},
         limit=lim,
-        output_fields=["article_id", "title", "snippet", "platform", "chunk_idx"],
+        output_fields=["article_id", "title", "snippet", "platform", "chunk_idx", "chunk_type"],
     )
 
     by_article: Dict[int, Tuple[float, Dict[str, Any]]] = {}
@@ -763,6 +882,7 @@ def hybrid_search(query: str, top_k: int) -> List[Dict[str, Any]]:
         title = str(hit.get("entity", {}).get("title") or "")
         snippet = str(hit.get("entity", {}).get("snippet") or "")
         plat = str(hit.get("entity", {}).get("platform") or "")
+        chunk_type = str(hit.get("entity", {}).get("chunk_type") or "content")
         dist = float(hit.get("distance", 0.0))
         sim = distance_to_sim(dist)
         if aid in kw_ids:
@@ -776,6 +896,7 @@ def hybrid_search(query: str, top_k: int) -> List[Dict[str, Any]]:
             "score": round(sim, 4),
             "source": src,
             "chunk_idx": int(hit.get("entity", {}).get("chunk_idx") or 0),
+            "chunk_type": chunk_type,
         }
         prev = by_article.get(aid)
         if prev is None or sim > prev[0]:

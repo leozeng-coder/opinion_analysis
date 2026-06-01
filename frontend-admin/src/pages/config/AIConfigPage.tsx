@@ -7,6 +7,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Popconfirm,
   Row,
   Select,
@@ -302,7 +303,6 @@ const AIConfigPage: React.FC = () => {
   }
 
   const handleRagRestart = () => {
-    const { Modal } = require('antd')
     Modal.confirm({
       title: '重启 RAG 服务',
       content: '将停止占用端口的旧 RAG 进程并重新拉起（加载最新代码与配置）。本地模型首次加载可能需 1～2 分钟，是否继续？',
@@ -346,7 +346,6 @@ const AIConfigPage: React.FC = () => {
   }
 
   const handleRagRebuildAndSync = () => {
-    const { Modal } = require('antd')
     Modal.confirm({
       title: '重建 Milvus 向量库',
       content:

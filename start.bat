@@ -16,10 +16,18 @@ start "opinion-backend-8080" cmd.exe /k call "%~dp0scripts\run-backend.cmd"
 
 if "%SKIP_RAG%"=="1" (
     echo [launcher] SKIP_RAG=1 - RAG service not started.
-) else (
+    goto :AFTER_RAG
+)
+REM Check if Go backend manages RAG (auto_start: true in config.yaml).
+REM If so, skip manual RAG launch to avoid port conflict.
+findstr /C:"auto_start: true" "%~dp0backend\config\config.yaml" >nul 2>&1
+if errorlevel 1 (
     echo Starting RAG :5055 - set SKIP_RAG=1 to skip
     start "opinion-rag-5055" cmd.exe /k call "%~dp0scripts\run-rag-service.cmd"
+) else (
+    echo [launcher] RAG managed by backend auto_start - skipping manual launch.
 )
+:AFTER_RAG
 
 echo Starting frontend :5173 ...
 start "opinion-front-5173" cmd.exe /k call "%~dp0scripts\run-frontend.cmd"

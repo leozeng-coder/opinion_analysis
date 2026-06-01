@@ -61,16 +61,17 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 		}
 
 		article := model.Article{
-			SourceID:    config.SourceID,
-			Title:       note.Title,
-			Content:     note.Desc,
-			Author:      note.Nickname,
-			OriginURL:   note.NoteURL,
-			Platform:    "xhs",
-			PublishedAt: time.Unix(timestamp, 0),
-			Keywords:    extractKeywords(note.TagList),
-			Sentiment:   "neutral",
-			SentScore:   0.5,
+			SourceID:       config.SourceID,
+			Title:          note.Title,
+			Content:        note.Desc,
+			Author:         note.Nickname,
+			OriginURL:      note.NoteURL,
+			Platform:       "xhs",
+			PlatformItemID: note.NoteID,
+			PublishedAt:    time.Unix(timestamp, 0),
+			Keywords:       extractKeywords(note.TagList),
+			Sentiment:      "neutral",
+			SentScore:      0.5,
 		}
 
 		if config.EnableSentiment {
@@ -82,6 +83,7 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 			continue
 		}
 
+		_ = s.syncComments(article.ID, "xhs", note.NoteID)
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
 
@@ -133,16 +135,17 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 		}
 
 		article := model.Article{
-			SourceID:    config.SourceID,
-			Title:       aweme.Title,
-			Content:     aweme.Desc,
-			Author:      aweme.Nickname,
-			OriginURL:   aweme.AwemeURL,
-			Platform:    "douyin",
-			PublishedAt: time.Unix(aweme.CreateTime, 0),
-			Keywords:    "[]",
-			Sentiment:   "neutral",
-			SentScore:   0.5,
+			SourceID:       config.SourceID,
+			Title:          aweme.Title,
+			Content:        aweme.Desc,
+			Author:         aweme.Nickname,
+			OriginURL:      aweme.AwemeURL,
+			Platform:       "douyin",
+			PlatformItemID: strconv.FormatInt(aweme.AwemeID, 10),
+			PublishedAt:    time.Unix(aweme.CreateTime, 0),
+			Keywords:       "[]",
+			Sentiment:      "neutral",
+			SentScore:      0.5,
 		}
 
 		if config.EnableSentiment {
@@ -154,6 +157,7 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 			continue
 		}
 
+		_ = s.syncComments(article.ID, "douyin", strconv.FormatInt(aweme.AwemeID, 10))
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
 
@@ -205,16 +209,17 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 		}
 
 		article := model.Article{
-			SourceID:    config.SourceID,
-			Title:       video.Title,
-			Content:     video.Desc,
-			Author:      video.Nickname,
-			OriginURL:   video.VideoURL,
-			Platform:    "bilibili",
-			PublishedAt: time.Unix(video.CreateTime, 0),
-			Keywords:    "[]",
-			Sentiment:   "neutral",
-			SentScore:   0.5,
+			SourceID:       config.SourceID,
+			Title:          video.Title,
+			Content:        video.Desc,
+			Author:         video.Nickname,
+			OriginURL:      video.VideoURL,
+			Platform:       "bilibili",
+			PlatformItemID: strconv.FormatInt(video.VideoID, 10),
+			PublishedAt:    time.Unix(video.CreateTime, 0),
+			Keywords:       "[]",
+			Sentiment:      "neutral",
+			SentScore:      0.5,
 		}
 
 		if config.EnableSentiment {
@@ -226,6 +231,7 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 			continue
 		}
 
+		_ = s.syncComments(article.ID, "bilibili", strconv.FormatInt(video.VideoID, 10))
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
 
@@ -282,16 +288,17 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 		}
 
 		article := model.Article{
-			SourceID:    config.SourceID,
-			Title:       title,
-			Content:     note.Content,
-			Author:      note.Nickname,
-			OriginURL:   note.NoteURL,
-			Platform:    "weibo",
-			PublishedAt: time.Unix(note.CreateTime, 0),
-			Keywords:    "[]",
-			Sentiment:   "neutral",
-			SentScore:   0.5,
+			SourceID:       config.SourceID,
+			Title:          title,
+			Content:        note.Content,
+			Author:         note.Nickname,
+			OriginURL:      note.NoteURL,
+			Platform:       "weibo",
+			PlatformItemID: strconv.FormatInt(note.NoteID, 10),
+			PublishedAt:    time.Unix(note.CreateTime, 0),
+			Keywords:       "[]",
+			Sentiment:      "neutral",
+			SentScore:      0.5,
 		}
 
 		if config.EnableSentiment {
@@ -303,6 +310,7 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			continue
 		}
 
+		_ = s.syncComments(article.ID, "weibo", strconv.FormatInt(note.NoteID, 10))
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
 
@@ -354,16 +362,17 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 		}
 
 		article := model.Article{
-			SourceID:    config.SourceID,
-			Title:       video.Title,
-			Content:     video.Desc,
-			Author:      video.Nickname,
-			OriginURL:   video.VideoURL,
-			Platform:    "kuaishou",
-			PublishedAt: time.Unix(video.CreateTime, 0),
-			Keywords:    "[]",
-			Sentiment:   "neutral",
-			SentScore:   0.5,
+			SourceID:       config.SourceID,
+			Title:          video.Title,
+			Content:        video.Desc,
+			Author:         video.Nickname,
+			OriginURL:      video.VideoURL,
+			Platform:       "kuaishou",
+			PlatformItemID: video.VideoID,
+			PublishedAt:    time.Unix(video.CreateTime, 0),
+			Keywords:       "[]",
+			Sentiment:      "neutral",
+			SentScore:      0.5,
 		}
 
 		if config.EnableSentiment {
@@ -375,6 +384,7 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 			continue
 		}
 
+		_ = s.syncComments(article.ID, "kuaishou", video.VideoID)
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
 
@@ -435,16 +445,17 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 		}
 
 		article := model.Article{
-			SourceID:    config.SourceID,
-			Title:       note.Title,
-			Content:     note.Desc,
-			Author:      note.UserNickname,
-			OriginURL:   note.NoteURL,
-			Platform:    "tieba",
-			PublishedAt: publishTime,
-			Keywords:    "[]",
-			Sentiment:   "neutral",
-			SentScore:   0.5,
+			SourceID:       config.SourceID,
+			Title:          note.Title,
+			Content:        note.Desc,
+			Author:         note.UserNickname,
+			OriginURL:      note.NoteURL,
+			Platform:       "tieba",
+			PlatformItemID: note.NoteID,
+			PublishedAt:    publishTime,
+			Keywords:       "[]",
+			Sentiment:      "neutral",
+			SentScore:      0.5,
 		}
 
 		if config.EnableSentiment {
@@ -455,6 +466,7 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
 			continue
 		}
+		_ = s.syncComments(article.ID, "tieba", note.NoteID)
 
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
@@ -525,16 +537,17 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 		}
 
 		article := model.Article{
-			SourceID:    config.SourceID,
-			Title:       content.Title,
-			Content:     content.ContentText,
-			Author:      content.UserNickname,
-			OriginURL:   content.ContentURL,
-			Platform:    "zhihu",
-			PublishedAt: createdTime,
-			Keywords:    "[]",
-			Sentiment:   "neutral",
-			SentScore:   0.5,
+			SourceID:       config.SourceID,
+			Title:          content.Title,
+			Content:        content.ContentText,
+			Author:         content.UserNickname,
+			OriginURL:      content.ContentURL,
+			Platform:       "zhihu",
+			PlatformItemID: content.ContentID,
+			PublishedAt:    createdTime,
+			Keywords:       "[]",
+			Sentiment:      "neutral",
+			SentScore:      0.5,
 		}
 
 		if config.EnableSentiment {
@@ -545,6 +558,7 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
 			continue
 		}
+		_ = s.syncComments(article.ID, "zhihu", content.ContentID)
 
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}

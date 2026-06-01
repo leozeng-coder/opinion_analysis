@@ -15,7 +15,8 @@ type Article struct {
 	Content     string         `gorm:"type:longtext" json:"content"`
 	Author      string         `gorm:"size:128" json:"author"`
 	OriginURL   string         `gorm:"size:1024" json:"originUrl"`
-	Platform    string         `gorm:"size:32;index" json:"platform"`
+	Platform       string         `gorm:"size:32;index" json:"platform"`
+	PlatformItemID string         `gorm:"size:255;index" json:"platformItemId"`
 	Sentiment   string         `gorm:"size:16;index" json:"sentiment"`
 	SentScore   float64        `json:"sentScore"`
 	Keywords    string         `gorm:"type:json" json:"keywords"`

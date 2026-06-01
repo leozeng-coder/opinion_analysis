@@ -25,7 +25,8 @@ type Chunk struct {
 	Snippet   string  `json:"snippet"`
 	Platform  string  `json:"platform"`
 	Score     float64 `json:"score"`
-	Source    string  `json:"source"` // vector | keyword | hybrid
+	Source    string  `json:"source"`    // vector | keyword | hybrid
+	ChunkType string  `json:"chunk_type"` // content | comment
 }
 
 type searchReq struct {
@@ -142,8 +143,16 @@ func FormatContext(chunks []Chunk) string {
 		if i > 0 {
 			b.WriteString("\n---\n")
 		}
-		fmt.Fprintf(&b, "[#%d id=%d platform=%s score=%.3f src=%s]\n标题：%s\n摘要：%s",
-			i+1, ch.ArticleID, ch.Platform, ch.Score, ch.Source, ch.Title, ch.Snippet)
+		chType := ch.ChunkType
+		if chType == "" {
+			chType = "content"
+		}
+		label := "正文"
+		if chType == "comment" {
+			label = "用户评论"
+		}
+		fmt.Fprintf(&b, "[#%d id=%d platform=%s type=%s score=%.3f src=%s]\n标题：%s\n%s：%s",
+			i+1, ch.ArticleID, ch.Platform, label, ch.Score, ch.Source, ch.Title, label, ch.Snippet)
 	}
 	return b.String()
 }
