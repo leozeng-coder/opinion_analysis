@@ -73,6 +73,10 @@ func (r *ArticleRepository) FindByID(id string) (*model.Article, error) {
 	return &article, nil
 }
 
+func (r *ArticleRepository) UpdateFields(id uint, fields map[string]any) error {
+	return r.db.Model(&model.Article{}).Where("id = ?", id).Updates(fields).Error
+}
+
 func (r *ArticleRepository) DistinctPlatforms() ([]string, error) {
 	var platforms []string
 	err := r.db.Model(&model.Article{}).

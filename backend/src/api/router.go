@@ -268,6 +268,13 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					middleware.Audit(db, "rag", "restart_service"),
 					adminRagH.RestartService)
 				admin.GET("/rag/articles", adminRagH.ListKBArticles)
+				admin.GET("/rag/articles/:id", adminRagH.GetKBArticleDetail)
+				admin.PUT("/rag/chunks",
+					middleware.Audit(db, "rag", "update_chunk"),
+					adminRagH.UpdateChunk)
+				admin.DELETE("/rag/chunks",
+					middleware.Audit(db, "rag", "delete_chunk"),
+					adminRagH.DeleteChunk)
 				admin.DELETE("/rag/articles/:id/embedding",
 					middleware.Audit(db, "rag", "delete_embedding"),
 					adminRagH.DeleteArticleEmbedding)

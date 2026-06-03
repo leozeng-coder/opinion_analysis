@@ -265,3 +265,27 @@ export interface RagKBArticle {
   embeddingSyncedAt?: string
   synced: boolean
 }
+
+export interface RagKBChunk {
+  chunkPk: string
+  chunkIdx: number
+  snippet: string
+  chunkType: 'content' | 'comment' | string
+}
+
+export interface RagKBArticleDetail {
+  article: {
+    id: number
+    title: string
+    platform: string
+    author: string
+    originUrl: string
+    sentiment: string
+    sentScore: number
+    aiTags?: string | null
+    publishedAt?: string
+    embeddingSyncedAt?: string
+    synced: boolean
+  }
+  chunks: RagKBChunk[]
+}

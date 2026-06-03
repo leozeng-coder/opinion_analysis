@@ -623,8 +623,126 @@ func (h *RAGHandler) ListKBArticles(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// GetKBArticleDetail GET /api/admin/rag/articles/:id — 获取单篇文章详情（正文、评论、Milvus chunks）。
+func (h *RAGHandler) GetKBArticleDetail(c *gin.Context) {
+	id := c.Param("id")
+	url := ragServiceURL()
+	if url == "" {
+		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+		return
+	}
+	client := &http.Client{Timeout: 20 * time.Second}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet,
+		strings.TrimRight(url, "/")+"/v1/articles/"+id, nil)
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 404 {
+		response.Fail(c, 404, "文章不存在")
+		return
+	}
+	if resp.StatusCode/100 != 2 {
+		response.Fail(c, 502, string(body))
+		return
+	}
+	var result any
+	if err := json.Unmarshal(body, &result); err != nil {
+		response.Fail(c, 502, "RAG 服务返回非法 JSON")
+		return
+	}
+	response.OK(c, result)
+}
+
 // DeleteArticleEmbedding DELETE /api/admin/rag/articles/:id/embedding — 删除单篇文章的向量。
 func (h *RAGHandler) DeleteArticleEmbedding(c *gin.Context) {
 	id := c.Param("id")
 	proxyDelete(c, fmt.Sprintf("/v1/articles/%s/embedding", id))
+}
+
+// DeleteChunk DELETE /api/admin/rag/chunks?pk=... — 从 Milvus 删除单条 chunk（代理到 RAG 服务）。
+func (h *RAGHandler) DeleteChunk(c *gin.Context) {
+	pk := c.Query("pk")
+	if pk == "" {
+		response.Fail(c, 400, "缺少 pk 参数")
+		return
+	}
+	url := ragServiceURL()
+	if url == "" {
+		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+		return
+	}
+	target := strings.TrimRight(url, "/") + "/v1/chunks?pk=" + pk
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete, target, nil)
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		response.Fail(c, 502, string(body))
+		return
+	}
+	var result any
+	_ = json.Unmarshal(body, &result)
+	response.OK(c, result)
+}
+
+// UpdateChunk PUT /api/admin/rag/chunks?pk=... — 修改 chunk snippet 并重新向量化后写回 Milvus。
+func (h *RAGHandler) UpdateChunk(c *gin.Context) {
+	pk := c.Query("pk")
+	if pk == "" {
+		response.Fail(c, 400, "缺少 pk 参数")
+		return
+	}
+	url := ragServiceURL()
+	if url == "" {
+		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+		return
+	}
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		response.Fail(c, 400, "读请求体失败")
+		return
+	}
+	target := strings.TrimRight(url, "/") + "/v1/chunks?pk=" + pk
+	client := &http.Client{Timeout: 60 * time.Second} // embedder 冷启动可能较慢
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPut, target, bytes.NewReader(body))
+	if err != nil {
+		response.Fail(c, 502, err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 404 {
+		response.Fail(c, 404, "chunk 不存在")
+		return
+	}
+	if resp.StatusCode/100 != 2 {
+		response.Fail(c, 502, extractRagErrorDetail(respBody))
+		return
+	}
+	var result any
+	_ = json.Unmarshal(respBody, &result)
+	response.OK(c, result)
 }

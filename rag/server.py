@@ -465,6 +465,24 @@ def rebuild_milvus_collection() -> Dict[str, Any]:
     }
 
 
+def _open_milvus_for_read() -> Optional[MilvusClient]:
+    """打开已有 Milvus 集合用于纯标量查询，不加载嵌入模型。
+    仅用于 detail 等不需要向量运算的只读接口。"""
+    if _client is not None:
+        return _client
+    if not Path(MILVUS_URI).exists():
+        return None
+    try:
+        mc = MilvusClient(uri=MILVUS_URI)
+        if not mc.has_collection(COL_NAME):
+            return None
+        mc.load_collection(COL_NAME)
+        return mc
+    except Exception as e:
+        log.debug("open milvus for read: %s", e)
+        return None
+
+
 def ensure_milvus_client() -> MilvusClient:
     global _client
     if _client is not None:
@@ -1280,6 +1298,130 @@ def list_kb_articles(
             "synced": r.get("embedding_content_hash") is not None,
         })
     return {"total": total, "list": items}
+
+
+@app.delete("/v1/chunks")
+def delete_chunk(pk: str) -> Dict[str, Any]:
+    """从 Milvus 删除单条 chunk（按 chunk_pk）。下次同步时会从源文章重建。"""
+    if not pk:
+        raise HTTPException(status_code=400, detail="缺少 pk 参数")
+    mc = _open_milvus_for_read()
+    if mc is None:
+        raise HTTPException(status_code=503, detail="Milvus 不可用或集合不存在")
+    try:
+        mc.delete(COL_NAME, filter=f'chunk_pk == "{pk}"')
+    except Exception as e:
+        log.warning("delete chunk pk=%s: %s", pk, e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"ok": True, "chunk_pk": pk}
+
+
+class UpdateChunkRequest(BaseModel):
+    snippet: str = Field(..., min_length=1)
+
+
+@app.put("/v1/chunks")
+def update_chunk(pk: str, body: UpdateChunkRequest) -> Dict[str, Any]:
+    """修改 chunk 的 snippet 文本并重新向量化后写回 Milvus。
+    注意：手动编辑的 chunk 会在下次全量重同步时被覆盖。"""
+    if not pk:
+        raise HTTPException(status_code=400, detail="缺少 pk 参数")
+    mc = _open_milvus_for_read()
+    if mc is None:
+        raise HTTPException(status_code=503, detail="Milvus 不可用或集合不存在")
+
+    # 读取当前 chunk 的元数据
+    results = mc.query(
+        COL_NAME,
+        filter=f'chunk_pk == "{pk}"',
+        output_fields=["chunk_pk", "article_id", "chunk_idx", "title", "platform", "chunk_type"],
+    )
+    if not results:
+        raise HTTPException(status_code=404, detail="chunk 不存在")
+
+    cur = results[0]
+    title = cur.get("title") or ""
+    new_snippet = body.snippet.strip()
+    embed_text = embed_chunk_text(title, new_snippet)
+
+    try:
+        vec = encode_embeddings([embed_text])[0]
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"向量化失败: {e}") from e
+
+    row = {
+        "chunk_pk": pk,
+        "article_id": int(cur.get("article_id") or 0),
+        "chunk_idx": int(cur.get("chunk_idx") or 0),
+        "embedding": vec,
+        "title": clip_runes(title, 500),
+        "snippet": clip_runes(new_snippet, 4000),
+        "platform": clip_runes(cur.get("platform") or "", 30),
+        "chunk_type": cur.get("chunk_type") or "content",
+    }
+    mc.upsert(COL_NAME, [row])
+    return {"ok": True, "chunk_pk": pk, "snippet": new_snippet}
+
+
+@app.get("/v1/articles/{article_id}")
+def get_article_detail(article_id: int) -> Dict[str, Any]:
+    """返回单篇文章元数据及 Milvus chunk 列表（供管理后台详情抽屉使用）。"""
+    conn = mysql_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, title, platform, author, origin_url,
+                       sentiment, sent_score, ai_tags, published_at,
+                       embedding_content_hash, embedding_synced_at
+                FROM articles
+                WHERE id = %s AND deleted_at IS NULL
+                """,
+                (article_id,),
+            )
+            article = cur.fetchone()
+        if not article:
+            raise HTTPException(status_code=404, detail="文章不存在")
+    finally:
+        conn.close()
+
+    chunks: List[Dict[str, Any]] = []
+    try:
+        mc = _open_milvus_for_read()
+        if mc is not None:
+            results = mc.query(
+                COL_NAME,
+                filter=f"article_id == {int(article_id)}",
+                output_fields=["chunk_pk", "chunk_idx", "snippet", "chunk_type"],
+            )
+            chunks = sorted(results, key=lambda x: int(x.get("chunk_idx") or 0))
+    except Exception as e:
+        log.warning("query milvus chunks article_id=%s: %s", article_id, e)
+
+    return {
+        "article": {
+            "id": article["id"],
+            "title": article.get("title") or "",
+            "platform": article.get("platform") or "",
+            "author": article.get("author") or "",
+            "originUrl": article.get("origin_url") or "",
+            "sentiment": article.get("sentiment") or "",
+            "sentScore": float(article.get("sent_score") or 0),
+            "aiTags": article.get("ai_tags"),
+            "publishedAt": str(article["published_at"]) if article.get("published_at") else None,
+            "embeddingSyncedAt": str(article["embedding_synced_at"]) if article.get("embedding_synced_at") else None,
+            "synced": article.get("embedding_content_hash") is not None,
+        },
+        "chunks": [
+            {
+                "chunkPk": c.get("chunk_pk") or "",
+                "chunkIdx": int(c.get("chunk_idx") or 0),
+                "snippet": c.get("snippet") or "",
+                "chunkType": c.get("chunk_type") or "content",
+            }
+            for c in chunks
+        ],
+    }
 
 
 @app.delete("/v1/articles/{article_id}/embedding")

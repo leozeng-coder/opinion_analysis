@@ -3,6 +3,7 @@ import type {
   PageResult,
   RagConfig,
   RagKBArticle,
+  RagKBArticleDetail,
   RagMilvusRebuildResult,
   RagRestartResult,
   RagStatus,
@@ -33,6 +34,12 @@ export const adminRagApi = {
     platform?: string
     synced?: 'yes' | 'no' | ''
   }) => request.get<never, PageResult<RagKBArticle>>('/admin/rag/articles', { params }),
+  getArticleDetail: (id: number) =>
+    request.get<never, RagKBArticleDetail>(`/admin/rag/articles/${id}`),
+  updateChunk: (pk: string, snippet: string) =>
+    request.put<never, { ok: boolean; snippet: string }>(`/admin/rag/chunks`, { snippet }, { params: { pk }, timeout: 60000 }),
+  deleteChunk: (pk: string) =>
+    request.delete<never, { ok: boolean }>(`/admin/rag/chunks`, { params: { pk } }),
   deleteEmbedding: (id: number) =>
     request.delete<never, { ok: boolean }>(`/admin/rag/articles/${id}/embedding`),
 }
