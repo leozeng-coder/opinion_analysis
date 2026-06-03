@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"opinion-analysis/config"
 	"opinion-analysis/pkg/response"
 	"opinion-analysis/src/service/rag"
 	"opinion-analysis/src/service/tagger"
@@ -19,22 +18,8 @@ type AIChatHandler struct {
 	ragClient *rag.Client
 }
 
-func NewAIChatHandler(taggerSvc *tagger.Service) *AIChatHandler {
-	h := &AIChatHandler{taggerSvc: taggerSvc}
-	if config.Cfg != nil && config.Cfg.RAG.Enabled && strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL) != "" {
-		h.ragClient = &rag.Client{
-			BaseURL: strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL),
-		}
-		log.Printf("[ai-chat] RAG enabled, embedding service: %s", config.Cfg.RAG.EmbeddingServiceURL)
-	} else {
-		log.Printf("[ai-chat] RAG disabled (enabled=%v url=%q)", config.Cfg != nil && config.Cfg.RAG.Enabled, func() string {
-			if config.Cfg != nil {
-				return config.Cfg.RAG.EmbeddingServiceURL
-			}
-			return ""
-		}())
-	}
-	return h
+func NewAIChatHandler(taggerSvc *tagger.Service, ragClient *rag.Client) *AIChatHandler {
+	return &AIChatHandler{taggerSvc: taggerSvc, ragClient: ragClient}
 }
 
 type aiChatReq struct {

@@ -1,14 +1,13 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,108 +15,35 @@ import (
 	"opinion-analysis/pkg/response"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/milvus"
 	"opinion-analysis/src/service/ragprocess"
 )
 
 type RAGHandler struct {
-	rag  *repository.RAGRepository
-	proc *ragprocess.Manager
+	rag    *repository.RAGRepository
+	proc   *ragprocess.Manager
+	milvus *milvus.Service
+	embed  *milvus.EmbedderClient
+	syncer *milvus.Syncer
 }
 
-func NewRAGHandler(store *repository.Store, proc *ragprocess.Manager) *RAGHandler {
-	return &RAGHandler{rag: store.RAG, proc: proc}
+func NewRAGHandler(
+	store *repository.Store,
+	proc *ragprocess.Manager,
+	milvusSvc *milvus.Service,
+	embed *milvus.EmbedderClient,
+	syncer *milvus.Syncer,
+) *RAGHandler {
+	return &RAGHandler{
+		rag:    store.RAG,
+		proc:   proc,
+		milvus: milvusSvc,
+		embed:  embed,
+		syncer: syncer,
+	}
 }
 
-func extractRagErrorDetail(body []byte) string {
-	s := strings.TrimSpace(string(body))
-	if s == "" {
-		return "RAG 服务错误"
-	}
-	var obj map[string]any
-	if json.Unmarshal(body, &obj) == nil {
-		if d, ok := obj["detail"].(string); ok && d != "" {
-			return d
-		}
-	}
-	return s
-}
-
-func ragServiceURL() string {
-	if config.Cfg == nil {
-		return ""
-	}
-	return strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
-}
-
-func proxyRagPost(c *gin.Context, path string, payload any, timeout time.Duration) (int, []byte, error) {
-	url := ragServiceURL()
-	if url == "" {
-		return 0, nil, fmt.Errorf("未配置 rag.embedding_service_url")
-	}
-	var bodyReader io.Reader
-	if payload != nil {
-		b, err := json.Marshal(payload)
-		if err != nil {
-			return 0, nil, err
-		}
-		bodyReader = bytes.NewReader(b)
-	}
-	client := &http.Client{Timeout: timeout}
-	req, err := http.NewRequestWithContext(
-		c.Request.Context(),
-		http.MethodPost,
-		strings.TrimRight(url, "/")+path,
-		bodyReader,
-	)
-	if err != nil {
-		return 0, nil, err
-	}
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, body, nil
-}
-
-// proxyDelete 向 RAG Python 服务发 DELETE 请求。
-func proxyDelete(c *gin.Context, path string) {
-	url := ragServiceURL()
-	if url == "" {
-		response.Fail(c, 400, "未配置 rag.embedding_service_url")
-		return
-	}
-	client := &http.Client{Timeout: 8 * time.Second}
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete,
-		strings.TrimRight(url, "/")+path, nil)
-	if err != nil {
-		response.Fail(c, 502, err.Error())
-		return
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode/100 != 2 {
-		response.Fail(c, 502, string(body))
-		return
-	}
-	var result any
-	if err := json.Unmarshal(body, &result); err != nil {
-		response.Fail(c, 502, "RAG 服务返回非法 JSON")
-		return
-	}
-	response.OK(c, result)
-}
-
-// Status GET /api/admin/rag/status — 合并后端开关、RAG 服务健康与「句向量模型」说明（非对话 LLM）。
+// Status GET /api/admin/rag/status — 所有远程探测并发执行，不阻塞模型加载。
 func (h *RAGHandler) Status(c *gin.Context) {
 	out := gin.H{
 		"ragEnabled":              false,
@@ -127,14 +53,14 @@ func (h *RAGHandler) Status(c *gin.Context) {
 		"embedDim":                0,
 		"milvusUri":               "",
 		"collection":              "",
-		"note":                    "句向量用于 RAG 检索，与下方「大模型配置」中的对话 API 不是同一个模型；支持本地 Sentence-Transformers 或 OpenAI 兼容 Embedding API。",
+		"note":                    "句向量用于 RAG 检索，与「大模型配置」中的对话 API 不是同一个模型。",
 		"syncIntervalSecondsHint": 120,
 	}
-	var url string
 	if config.Cfg != nil {
 		out["ragEnabled"] = config.Cfg.RAG.Enabled
-		url = strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
-		out["embeddingServiceUrl"] = url
+		out["embeddingServiceUrl"] = config.Cfg.RAG.EmbeddingServiceURL
+		out["milvusUri"] = config.Cfg.RAG.MilvusURI
+		out["collection"] = config.Cfg.RAG.MilvusCollection
 	}
 	if h.proc != nil {
 		out["processManaged"] = h.proc.ManagedEnabled()
@@ -143,83 +69,79 @@ func (h *RAGHandler) Status(c *gin.Context) {
 			out["processPid"] = pid
 		}
 	}
-	if url == "" {
-		response.OK(c, out)
-		return
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	healthURL := strings.TrimRight(url, "/") + "/health"
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, healthURL, nil)
-	if err != nil {
-		response.OK(c, out)
-		return
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		out["serviceError"] = err.Error()
-		response.OK(c, out)
-		return
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode/100 != 2 {
-		out["serviceError"] = string(b)
-		response.OK(c, out)
-		return
-	}
-	out["serviceReachable"] = true
-	var remote map[string]any
-	if json.Unmarshal(b, &remote) == nil {
-		if v, ok := remote["embed_provider"].(string); ok {
-			out["embedProvider"] = v
-		}
-		if v, ok := remote["embed_model"].(string); ok {
-			out["embedModel"] = v
-		}
-		if v, ok := remote["embed_dimension"].(float64); ok {
-			out["embedDim"] = int(v)
-		}
-		if v, ok := remote["collection_dimension"].(float64); ok {
-			out["collectionDim"] = int(v)
-		}
-		if v, ok := remote["dimension_mismatch"].(bool); ok {
-			out["dimensionMismatch"] = v
-		}
-		if v, ok := remote["embedder_ready"].(bool); ok {
-			out["embedderReady"] = v
-		}
-		if v, ok := remote["embedder_error"].(string); ok && v != "" {
-			out["embedderError"] = v
-		}
-		if v, ok := remote["milvus_uri"].(string); ok {
-			out["milvusUri"] = v
-		}
-		if v, ok := remote["collection"].(string); ok {
-			out["collection"] = v
-		}
-		if v, ok := remote["sync_interval_sec"].(float64); ok {
-			out["syncIntervalSecondsHint"] = int(v)
-		}
+
+	// 并发探测：embedding 服务 + Milvus，各自独立超时，互不阻塞
+	var wg sync.WaitGroup
+
+	if h.embed != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// 只读 /health，不触发模型加载（dim=0 表示模型还未加载）
+			type healthResp struct {
+				EmbedDimension int    `json:"embed_dimension"`
+				EmbedModel     string `json:"embed_model"`
+				EmbedProvider  string `json:"embed_provider"`
+				EmbedderReady  bool   `json:"embedder_ready"`
+			}
+			client := &http.Client{Timeout: 3 * time.Second}
+			resp, err := client.Get(h.embed.BaseURL() + "/health")
+			if err != nil {
+				out["serviceError"] = err.Error()
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode/100 != 2 {
+				out["serviceError"] = "http " + resp.Status
+				return
+			}
+			var hr healthResp
+			if err := json.NewDecoder(resp.Body).Decode(&hr); err == nil {
+				out["serviceReachable"] = true
+				out["embedDim"] = hr.EmbedDimension
+				out["embedderReady"] = hr.EmbedderReady
+				if hr.EmbedModel != "" {
+					out["embedModel"] = hr.EmbedModel
+				}
+				if hr.EmbedProvider != "" {
+					out["embedProvider"] = hr.EmbedProvider
+				}
+			}
+		}()
 	}
 
-	// 读取 sync_enabled 开关
+	if h.milvus != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := h.milvus.Ping(3 * time.Second); err == nil {
+				out["milvusReachable"] = true
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				exists, _ := h.milvus.HasCollection(ctx)
+				out["collectionExists"] = exists
+			} else {
+				out["milvusError"] = err.Error()
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// sync_enabled + embedding 配置（纯 DB 读，极快）
 	if ss, err := h.rag.GetSyncEnabledSetting(); err == nil && ss != nil {
 		out["syncEnabled"] = strings.ToLower(strings.TrimSpace(ss.Value)) == "true"
 	} else {
 		out["syncEnabled"] = true
 	}
-
-	// RAG 不可达时仍从数据库展示当前配置，便于后台修复错误配置
-	if !out["serviceReachable"].(bool) {
-		if cfg, err := h.rag.GetRagConfig(); err == nil {
-			if out["embedModel"] == "" {
-				out["embedModel"] = cfg.EmbedModel
-			}
-			if out["embedProvider"] == nil || out["embedProvider"] == "" {
-				out["embedProvider"] = cfg.EmbedProvider
-			}
-			out["syncIntervalSecondsHint"] = cfg.SyncIntervalSec
+	if cfg, err := h.rag.GetRagConfig(); err == nil {
+		if out["embedModel"] == "" || out["embedModel"] == nil {
+			out["embedModel"] = cfg.EmbedModel
 		}
+		if out["embedProvider"] == nil || out["embedProvider"] == "" {
+			out["embedProvider"] = cfg.EmbedProvider
+		}
+		out["syncIntervalSecondsHint"] = cfg.SyncIntervalSec
 	}
 
 	response.OK(c, out)
@@ -243,16 +165,8 @@ func (h *RAGHandler) ListRuns(c *gin.Context) {
 	response.OKPage(c, total, logs)
 }
 
+// TriggerSync POST /api/admin/rag/sync — 在 goroutine 中执行一次同步并立即返回 syncLogId。
 func (h *RAGHandler) TriggerSync(c *gin.Context) {
-	if config.Cfg == nil {
-		response.Fail(c, 500, "配置未加载")
-		return
-	}
-	url := strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
-	if url == "" {
-		response.Fail(c, 400, "未配置 rag.embedding_service_url")
-		return
-	}
 	logRow := model.RagSyncLog{
 		Status:    "running",
 		Progress:  0,
@@ -263,222 +177,69 @@ func (h *RAGHandler) TriggerSync(c *gin.Context) {
 		response.ServerError(c)
 		return
 	}
-
-	payload, _ := json.Marshal(map[string]any{"sync_log_id": logRow.ID, "async": true})
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequestWithContext(
-		c.Request.Context(),
-		http.MethodPost,
-		strings.TrimRight(url, "/")+"/v1/sync",
-		bytes.NewReader(payload),
-	)
-	if err != nil {
-		_ = h.rag.FailSyncLog(&logRow, err.Error())
-		response.Fail(c, 502, "发起同步失败: "+err.Error())
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		_ = h.rag.FailSyncLog(&logRow, err.Error())
-		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == 409 {
-		msg := extractRagErrorDetail(body)
-		_ = h.rag.FailSyncLog(&logRow, msg)
-		response.Fail(c, 409, msg)
-		return
-	}
-	if resp.StatusCode/100 != 2 {
-		_ = h.rag.FailSyncLog(&logRow, string(body))
-		response.Fail(c, 502, "RAG 服务拒绝: "+extractRagErrorDetail(body))
-		return
-	}
-
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		if _, err := h.syncer.RunOnce(ctx, logRow.ID); err != nil {
+			_ = h.rag.FailSyncLog(&logRow, err.Error())
+		}
+	}()
 	response.OK(c, gin.H{
 		"syncLogId": logRow.ID,
 		"message":   "已提交同步任务，请在下方列表查看进度",
-		"raw":       json.RawMessage(body),
 	})
 }
 
-// GetConfig GET /api/admin/rag/config — 从数据库读取；RAG 可达时合并 env_overrides。
+// GetConfig GET /api/admin/rag/config
 func (h *RAGHandler) GetConfig(c *gin.Context) {
 	cfg, err := h.rag.GetRagConfig()
 	if err != nil {
 		response.Fail(c, 500, "读取配置失败: "+err.Error())
 		return
 	}
-	envOverrides := tryRagEnvOverrides()
-	resp := repository.BuildRagConfigResponse(cfg, envOverrides, false, "")
-	response.OK(c, resp)
+	response.OK(c, repository.BuildRagConfigResponse(cfg, nil, false, ""))
 }
 
-type updateRagConfigReq struct {
-	SyncEnabled      *bool   `json:"sync_enabled"`
-	EmbedProvider    *string `json:"embed_provider"`
-	EmbedModel       *string `json:"embed_model"`
-	EmbedAPIBase     *string `json:"embed_api_base"`
-	EmbedAPIKey      *string `json:"embed_api_key"`
-	ChunkMaxChars    *int    `json:"chunk_max_chars"`
-	ChunkOverlap     *int    `json:"chunk_overlap"`
-	SyncIntervalSec  *int    `json:"sync_interval_sec"`
-	SyncBatch        *int    `json:"sync_batch"`
-}
-
-func pickString(raw map[string]json.RawMessage, keys ...string) (string, bool) {
-	for _, k := range keys {
-		if v, ok := raw[k]; ok {
-			var s string
-			if err := json.Unmarshal(v, &s); err == nil {
-				return s, true
-			}
-		}
-	}
-	return "", false
-}
-
-func pickBool(raw map[string]json.RawMessage, keys ...string) (*bool, bool) {
-	for _, k := range keys {
-		if v, ok := raw[k]; ok {
-			var b bool
-			if err := json.Unmarshal(v, &b); err == nil {
-				return &b, true
-			}
-		}
-	}
-	return nil, false
-}
-
-func pickInt(raw map[string]json.RawMessage, keys ...string) (*int, bool) {
-	for _, k := range keys {
-		if v, ok := raw[k]; ok {
-			var n int
-			if err := json.Unmarshal(v, &n); err == nil {
-				return &n, true
-			}
-			var f float64
-			if err := json.Unmarshal(v, &f); err == nil {
-				i := int(f)
-				return &i, true
-			}
-		}
-	}
-	return nil, false
-}
-
-func tryRagEnvOverrides() []string {
-	// 与 Python _RAG_SETTING_SPECS 环境变量名一致；Go 进程通常未设置，返回空即可。
-	return nil
-}
-
-func reloadRagService(c *gin.Context) (bool, string, []string) {
-	url := ragServiceURL()
-	if url == "" {
-		return false, "未配置 rag.embedding_service_url，已仅写入数据库", nil
-	}
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost,
-		strings.TrimRight(url, "/")+"/v1/rag-config/reload", nil)
-	if err != nil {
-		return false, "RAG 热更新失败: " + err.Error(), nil
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, "RAG 服务暂不可达，配置已写入数据库，请重启 RAG 服务后生效", nil
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode/100 != 2 {
-		return false, "RAG 热更新失败: " + string(body), nil
-	}
-	var remote map[string]any
-	_ = json.Unmarshal(body, &remote)
-	var warnings []string
-	if ws, ok := remote["warnings"].([]any); ok {
-		for _, w := range ws {
-			if s, ok := w.(string); ok && s != "" {
-				warnings = append(warnings, s)
-			}
-		}
-	}
-	return true, "", warnings
-}
-
-// UpdateConfig PUT /api/admin/rag/config — 写入数据库并尽力热更新 RAG 服务。
+// UpdateConfig PUT /api/admin/rag/config
 func (h *RAGHandler) UpdateConfig(c *gin.Context) {
-	payload, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		response.Fail(c, 400, "读请求体失败")
+	var req updateRagConfigReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, 400, "请求体解析失败: "+err.Error())
 		return
 	}
-	var req updateRagConfigReq
-	_ = json.Unmarshal(payload, &req)
-	var raw map[string]json.RawMessage
-	_ = json.Unmarshal(payload, &raw)
-
 	cur, err := h.rag.GetRagConfig()
 	if err != nil {
 		response.Fail(c, 500, "读取当前配置失败: "+err.Error())
 		return
 	}
 	merged := cur
-
 	if req.SyncEnabled != nil {
 		merged.SyncEnabled = *req.SyncEnabled
-	} else if v, ok := pickBool(raw, "syncEnabled"); ok && v != nil {
-		merged.SyncEnabled = *v
 	}
 	if req.EmbedProvider != nil {
 		merged.EmbedProvider = strings.TrimSpace(*req.EmbedProvider)
-	} else if s, ok := pickString(raw, "embedProvider"); ok {
-		merged.EmbedProvider = strings.TrimSpace(s)
 	}
 	if req.EmbedModel != nil {
 		merged.EmbedModel = strings.TrimSpace(*req.EmbedModel)
-	} else if s, ok := pickString(raw, "embedModel"); ok {
-		merged.EmbedModel = strings.TrimSpace(s)
 	}
 	if req.EmbedAPIBase != nil {
 		merged.EmbedAPIBase = strings.TrimSpace(*req.EmbedAPIBase)
-	} else if s, ok := pickString(raw, "embedApiBase"); ok {
-		merged.EmbedAPIBase = strings.TrimSpace(s)
 	}
-	if v, ok := raw["embed_api_key"]; ok {
-		var s string
-		if err := json.Unmarshal(v, &s); err == nil {
-			merged.EmbedAPIKey = strings.TrimSpace(s)
-		}
-	} else if v, ok := raw["embedApiKey"]; ok {
-		var s string
-		if err := json.Unmarshal(v, &s); err == nil {
-			merged.EmbedAPIKey = strings.TrimSpace(s)
-		}
+	if req.EmbedAPIKey != nil && *req.EmbedAPIKey != "" {
+		merged.EmbedAPIKey = strings.TrimSpace(*req.EmbedAPIKey)
 	}
 	if req.ChunkMaxChars != nil {
 		merged.ChunkMaxChars = *req.ChunkMaxChars
-	} else if v, ok := pickInt(raw, "chunkMaxChars"); ok && v != nil {
-		merged.ChunkMaxChars = *v
 	}
 	if req.ChunkOverlap != nil {
 		merged.ChunkOverlap = *req.ChunkOverlap
-	} else if v, ok := pickInt(raw, "chunkOverlap"); ok && v != nil {
-		merged.ChunkOverlap = *v
 	}
 	if req.SyncIntervalSec != nil {
 		merged.SyncIntervalSec = *req.SyncIntervalSec
-	} else if v, ok := pickInt(raw, "syncIntervalSec"); ok && v != nil {
-		merged.SyncIntervalSec = *v
 	}
 	if req.SyncBatch != nil {
 		merged.SyncBatch = *req.SyncBatch
-	} else if v, ok := pickInt(raw, "syncBatch"); ok && v != nil {
-		merged.SyncBatch = *v
 	}
-
 	p := strings.ToLower(strings.TrimSpace(merged.EmbedProvider))
 	if p == "" {
 		p = "local"
@@ -492,25 +253,8 @@ func (h *RAGHandler) UpdateConfig(c *gin.Context) {
 		response.Fail(c, 400, "embed_model 不能为空")
 		return
 	}
-	if p == "api" {
-		if merged.EmbedAPIBase == "" {
-			response.Fail(c, 400, "使用 API 模式时必须填写 embed_api_base")
-			return
-		}
-		if strings.TrimSpace(merged.EmbedAPIKey) == "" && strings.TrimSpace(cur.EmbedAPIKey) == "" {
-			response.Fail(c, 400, "使用 API 模式时必须填写 embed_api_key")
-			return
-		}
-		if strings.TrimSpace(merged.EmbedAPIKey) == "" {
-			merged.EmbedAPIKey = cur.EmbedAPIKey
-		}
-	}
 	if merged.ChunkMaxChars < 128 || merged.ChunkMaxChars > 2000 {
 		response.Fail(c, 400, "chunk_max_chars 应在 128~2000")
-		return
-	}
-	if merged.ChunkOverlap < 0 || merged.ChunkOverlap > 500 {
-		response.Fail(c, 400, "chunk_overlap 应在 0~500")
 		return
 	}
 	if merged.SyncIntervalSec < 30 || merged.SyncIntervalSec > 86400 {
@@ -524,51 +268,81 @@ func (h *RAGHandler) UpdateConfig(c *gin.Context) {
 
 	var cu uint
 	if uid, ok := c.Get("userID"); ok {
-		if id, ok := uid.(uint); ok {
+		if id, ok2 := uid.(uint); ok2 {
 			cu = id
 		}
 	}
 	actorName := ""
 	if uname, ok := c.Get("username"); ok {
-		if name, ok := uname.(string); ok {
+		if name, ok2 := uname.(string); ok2 {
 			actorName = name
 		}
 	}
-
 	if err := h.rag.SaveRagConfig(merged, cu, actorName); err != nil {
 		response.Fail(c, 500, "持久化失败: "+err.Error())
 		return
 	}
 
-	applied, warn, pyWarnings := reloadRagService(c)
-	if len(pyWarnings) > 0 {
-		warn = strings.Join(pyWarnings, "；")
+	// 热更新 syncer 配置
+	if h.syncer != nil {
+		h.syncer.UpdateConfig(milvus.SyncConfig{
+			Enabled:         merged.SyncEnabled,
+			ChunkMaxChars:   merged.ChunkMaxChars,
+			ChunkOverlap:    merged.ChunkOverlap,
+			SyncIntervalSec: merged.SyncIntervalSec,
+			SyncBatch:       merged.SyncBatch,
+		})
 	}
-	resp := repository.BuildRagConfigResponse(merged, tryRagEnvOverrides(), applied, warn)
-	resp.Warnings = pyWarnings
-	response.OK(c, resp)
+	response.OK(c, repository.BuildRagConfigResponse(merged, nil, true, ""))
 }
 
-// RebuildMilvus POST /api/admin/rag/milvus/rebuild — 重建 Milvus 集合并清空同步标记。
+type updateRagConfigReq struct {
+	SyncEnabled     *bool   `json:"sync_enabled"`
+	EmbedProvider   *string `json:"embed_provider"`
+	EmbedModel      *string `json:"embed_model"`
+	EmbedAPIBase    *string `json:"embed_api_base"`
+	EmbedAPIKey     *string `json:"embed_api_key"`
+	ChunkMaxChars   *int    `json:"chunk_max_chars"`
+	ChunkOverlap    *int    `json:"chunk_overlap"`
+	SyncIntervalSec *int    `json:"sync_interval_sec"`
+	SyncBatch       *int    `json:"sync_batch"`
+}
+
+// RebuildMilvus POST /api/admin/rag/milvus/rebuild
 func (h *RAGHandler) RebuildMilvus(c *gin.Context) {
-	status, body, err := proxyRagPost(c, "/v1/milvus/rebuild", nil, 120*time.Second)
+	ctx := c.Request.Context()
+
+	// 1. Drop 并重建集合
+	if err := h.milvus.DropCollection(ctx); err != nil {
+		response.Fail(c, 500, "删除集合失败: "+err.Error())
+		return
+	}
+	dim, err := h.embed.Dim()
 	if err != nil {
-		response.Fail(c, 502, err.Error())
+		response.Fail(c, 502, "获取 embedding 维度失败: "+err.Error())
 		return
 	}
-	if status/100 != 2 {
-		response.Fail(c, status, extractRagErrorDetail(body))
+	if err := h.milvus.EnsureCollection(ctx, dim); err != nil {
+		response.Fail(c, 500, "重建集合失败: "+err.Error())
 		return
 	}
-	var result map[string]any
-	if err := json.Unmarshal(body, &result); err != nil {
-		response.Fail(c, 502, "RAG 服务返回非法 JSON")
+
+	// 2. 重置 MySQL 同步标记
+	n, err := h.rag.ResetAllEmbeddingSync()
+	if err != nil {
+		response.Fail(c, 500, "重置同步标记失败: "+err.Error())
 		return
 	}
-	response.OK(c, result)
+
+	response.OK(c, gin.H{
+		"ok":                       true,
+		"collection":               h.milvus.CollectionName(),
+		"embed_dimension":          dim,
+		"articles_reset_for_resync": n,
+	})
 }
 
-// RestartService POST /api/admin/rag/restart — 杀旧进程并拉起 RAG 子进程（快速返回，前端轮询 status）。
+// RestartService POST /api/admin/rag/restart — 重启 Python embedding 子进程 + Go syncer。
 func (h *RAGHandler) RestartService(c *gin.Context) {
 	if h.proc == nil || !h.proc.ManagedEnabled() {
 		response.Fail(c, 400, "RAG 进程托管未启用，请在 config.yaml 设置 rag.managed: true")
@@ -576,6 +350,7 @@ func (h *RAGHandler) RestartService(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
 	defer cancel()
+
 	result, err := h.proc.Restart(ctx)
 	if err != nil {
 		if result.Message != "" {
@@ -585,164 +360,254 @@ func (h *RAGHandler) RestartService(c *gin.Context) {
 		response.Fail(c, 502, err.Error())
 		return
 	}
+
+	// 重启 Go syncer goroutine
+	if h.syncer != nil {
+		h.syncer.Restart(context.Background())
+	}
 	response.OK(c, result)
 }
 
-// ListKBArticles GET /api/admin/rag/articles — 列出文章向量同步状态（代理到 Python 服务）。
+// ListKBArticles GET /api/admin/rag/articles — 直接查 MySQL
 func (h *RAGHandler) ListKBArticles(c *gin.Context) {
-	url := ragServiceURL()
-	if url == "" {
-		response.Fail(c, 400, "未配置 rag.embedding_service_url")
-		return
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	platform := strings.TrimSpace(c.Query("platform"))
+	syncedFilter := c.Query("synced") // "yes" | "no" | ""
+	if page < 1 {
+		page = 1
 	}
-	// 透传查询参数
-	params := c.Request.URL.Query()
-	target := strings.TrimRight(url, "/") + "/v1/articles?" + params.Encode()
-	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target, nil)
-	if err != nil {
-		response.Fail(c, 502, err.Error())
-		return
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 20
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
-		return
+
+	db := h.rag.DB()
+	q := db.Model(&model.Article{}).Where("deleted_at IS NULL")
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		q = q.Where("title LIKE ? OR content LIKE ?", like, like)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode/100 != 2 {
-		response.Fail(c, 502, string(body))
-		return
+	if platform != "" {
+		q = q.Where("platform = ?", platform)
 	}
-	var result any
-	if err := json.Unmarshal(body, &result); err != nil {
-		response.Fail(c, 502, "RAG 服务返回非法 JSON")
-		return
+	switch syncedFilter {
+	case "yes":
+		q = q.Where("embedding_synced_at IS NOT NULL")
+	case "no":
+		q = q.Where("embedding_synced_at IS NULL")
 	}
-	response.OK(c, result)
+
+	var total int64
+	q.Count(&total)
+
+	var arts []model.Article
+	offset := (page - 1) * pageSize
+	q.Select("id, title, platform, published_at, embedding_content_hash, embedding_synced_at").
+		Order("id DESC").Offset(offset).Limit(pageSize).Find(&arts)
+
+	type item struct {
+		ID               uint    `json:"id"`
+		Title            string  `json:"title"`
+		Platform         string  `json:"platform"`
+		PublishedAt      *string `json:"publishedAt"`
+		EmbeddingHash    *string `json:"embeddingHash"`
+		EmbeddingSyncedAt *string `json:"embeddingSyncedAt"`
+		Synced           bool    `json:"synced"`
+	}
+	list := make([]item, len(arts))
+	for i, a := range arts {
+		it := item{
+			ID:       a.ID,
+			Title:    a.Title,
+			Platform: a.Platform,
+			Synced:   a.EmbeddingSyncedAt != nil,
+		}
+		if !a.PublishedAt.IsZero() {
+			s := a.PublishedAt.Format(time.RFC3339)
+			it.PublishedAt = &s
+		}
+		if a.EmbeddingContentHash != nil {
+			it.EmbeddingHash = a.EmbeddingContentHash
+		}
+		if a.EmbeddingSyncedAt != nil {
+			s := a.EmbeddingSyncedAt.Format(time.RFC3339)
+			it.EmbeddingSyncedAt = &s
+		}
+		list[i] = it
+	}
+	response.OKPage(c, total, list)
 }
 
-// GetKBArticleDetail GET /api/admin/rag/articles/:id — 获取单篇文章详情（正文、评论、Milvus chunks）。
+// GetKBArticleDetail GET /api/admin/rag/articles/:id — MySQL 元数据 + Milvus chunks
 func (h *RAGHandler) GetKBArticleDetail(c *gin.Context) {
-	id := c.Param("id")
-	url := ragServiceURL()
-	if url == "" {
-		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		response.Fail(c, 400, "无效的文章 ID")
 		return
 	}
-	client := &http.Client{Timeout: 20 * time.Second}
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet,
-		strings.TrimRight(url, "/")+"/v1/articles/"+id, nil)
-	if err != nil {
-		response.Fail(c, 502, err.Error())
-		return
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == 404 {
+
+	var art model.Article
+	if err := h.rag.DB().Where("id = ? AND deleted_at IS NULL", id).First(&art).Error; err != nil {
 		response.Fail(c, 404, "文章不存在")
 		return
 	}
-	if resp.StatusCode/100 != 2 {
-		response.Fail(c, 502, string(body))
-		return
+
+	// 查 Milvus chunks
+	type chunkItem struct {
+		ChunkPK   string `json:"chunkPk"`
+		ChunkIdx  int64  `json:"chunkIdx"`
+		Snippet   string `json:"snippet"`
+		ChunkType string `json:"chunkType"`
 	}
-	var result any
-	if err := json.Unmarshal(body, &result); err != nil {
-		response.Fail(c, 502, "RAG 服务返回非法 JSON")
-		return
+	var chunks []chunkItem
+	if h.milvus != nil {
+		hits, _ := h.milvus.QueryByArticle(c.Request.Context(), int64(art.ID))
+		for _, hit := range hits {
+			chunks = append(chunks, chunkItem{
+				ChunkPK:   hit.ChunkPK,
+				ChunkIdx:  hit.ChunkIdx,
+				Snippet:   hit.Snippet,
+				ChunkType: hit.ChunkType,
+			})
+		}
 	}
-	response.OK(c, result)
+	if chunks == nil {
+		chunks = []chunkItem{}
+	}
+
+	type artDetail struct {
+		ID                uint    `json:"id"`
+		Title             string  `json:"title"`
+		Platform          string  `json:"platform"`
+		Author            string  `json:"author"`
+		OriginURL         string  `json:"originUrl"`
+		Sentiment         string  `json:"sentiment"`
+		SentScore         float64 `json:"sentScore"`
+		AITags            *string `json:"aiTags"`
+		PublishedAt       *string `json:"publishedAt"`
+		EmbeddingSyncedAt *string `json:"embeddingSyncedAt"`
+		Synced            bool    `json:"synced"`
+	}
+	detail := artDetail{
+		ID:        art.ID,
+		Title:     art.Title,
+		Platform:  art.Platform,
+		Author:    art.Author,
+		OriginURL: art.OriginURL,
+		Sentiment: art.Sentiment,
+		SentScore: art.SentScore,
+		AITags:    art.AITags,
+		Synced:    art.EmbeddingSyncedAt != nil,
+	}
+	if !art.PublishedAt.IsZero() {
+		s := art.PublishedAt.Format(time.RFC3339)
+		detail.PublishedAt = &s
+	}
+	if art.EmbeddingSyncedAt != nil {
+		s := art.EmbeddingSyncedAt.Format(time.RFC3339)
+		detail.EmbeddingSyncedAt = &s
+	}
+
+	response.OK(c, gin.H{"article": detail, "chunks": chunks})
 }
 
-// DeleteArticleEmbedding DELETE /api/admin/rag/articles/:id/embedding — 删除单篇文章的向量。
+// DeleteArticleEmbedding DELETE /api/admin/rag/articles/:id/embedding
 func (h *RAGHandler) DeleteArticleEmbedding(c *gin.Context) {
-	id := c.Param("id")
-	proxyDelete(c, fmt.Sprintf("/v1/articles/%s/embedding", id))
+	idStr := c.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		response.Fail(c, 400, "无效的文章 ID")
+		return
+	}
+	if h.milvus != nil {
+		if err := h.milvus.DeleteByArticle(c.Request.Context(), int64(id)); err != nil {
+			response.Fail(c, 502, "Milvus 删除失败: "+err.Error())
+			return
+		}
+	}
+	if err := h.rag.ResetArticleEmbeddingSync(uint(id)); err != nil {
+		response.Fail(c, 500, "重置同步标记失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{"ok": true})
 }
 
-// DeleteChunk DELETE /api/admin/rag/chunks?pk=... — 从 Milvus 删除单条 chunk（代理到 RAG 服务）。
+// DeleteChunk DELETE /api/admin/rag/chunks?pk=...
 func (h *RAGHandler) DeleteChunk(c *gin.Context) {
 	pk := c.Query("pk")
 	if pk == "" {
 		response.Fail(c, 400, "缺少 pk 参数")
 		return
 	}
-	url := ragServiceURL()
-	if url == "" {
-		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+	if h.milvus == nil {
+		response.Fail(c, 503, "Milvus 服务未初始化")
 		return
 	}
-	target := strings.TrimRight(url, "/") + "/v1/chunks?pk=" + pk
-	client := &http.Client{Timeout: 8 * time.Second}
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete, target, nil)
-	if err != nil {
-		response.Fail(c, 502, err.Error())
+	if err := h.milvus.DeleteByPK(c.Request.Context(), pk); err != nil {
+		response.Fail(c, 502, "删除 chunk 失败: "+err.Error())
 		return
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode/100 != 2 {
-		response.Fail(c, 502, string(body))
-		return
-	}
-	var result any
-	_ = json.Unmarshal(body, &result)
-	response.OK(c, result)
+	response.OK(c, gin.H{"ok": true})
 }
 
-// UpdateChunk PUT /api/admin/rag/chunks?pk=... — 修改 chunk snippet 并重新向量化后写回 Milvus。
+// UpdateChunk PUT /api/admin/rag/chunks?pk=... — 修改 snippet 并重新向量化后写回 Milvus。
 func (h *RAGHandler) UpdateChunk(c *gin.Context) {
 	pk := c.Query("pk")
 	if pk == "" {
 		response.Fail(c, 400, "缺少 pk 参数")
 		return
 	}
-	url := ragServiceURL()
-	if url == "" {
-		response.Fail(c, 400, "未配置 rag.embedding_service_url")
+	var body struct {
+		Snippet string `json:"snippet"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.Snippet) == "" {
+		response.Fail(c, 400, "snippet 不能为空")
 		return
 	}
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		response.Fail(c, 400, "读请求体失败")
+	if h.milvus == nil || h.embed == nil {
+		response.Fail(c, 503, "Milvus/Embedding 服务未初始化")
 		return
 	}
-	target := strings.TrimRight(url, "/") + "/v1/chunks?pk=" + pk
-	client := &http.Client{Timeout: 60 * time.Second} // embedder 冷启动可能较慢
-	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPut, target, bytes.NewReader(body))
-	if err != nil {
-		response.Fail(c, 502, err.Error())
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		response.Fail(c, 502, "RAG 服务不可达: "+err.Error())
-		return
-	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode == 404 {
+
+	// 查旧 chunk 获取 title / articleId 等元数据
+	old, err := h.milvus.QueryByPK(c.Request.Context(), pk)
+	if err != nil || old == nil {
 		response.Fail(c, 404, "chunk 不存在")
 		return
 	}
-	if resp.StatusCode/100 != 2 {
-		response.Fail(c, 502, extractRagErrorDetail(respBody))
+
+	newSnippet := strings.TrimSpace(body.Snippet)
+	embedText := old.Title + "\n" + newSnippet
+	vecs, err := h.embed.Encode([]string{embedText})
+	if err != nil {
+		response.Fail(c, 502, "向量化失败: "+err.Error())
 		return
 	}
-	var result any
-	_ = json.Unmarshal(respBody, &result)
-	response.OK(c, result)
+
+	// 删旧、插新（相同 pk）
+	if err := h.milvus.DeleteByPK(c.Request.Context(), pk); err != nil {
+		response.Fail(c, 502, "删除旧 chunk 失败: "+err.Error())
+		return
+	}
+	newRow := milvus.ChunkRow{
+		ChunkPK:   pk,
+		ArticleID: old.ArticleID,
+		ChunkIdx:  old.ChunkIdx,
+		Embedding: vecs[0],
+		Title:     old.Title,
+		Snippet:   newSnippet,
+		Platform:  old.Platform,
+		ChunkType: old.ChunkType,
+	}
+	if err := h.milvus.Insert(c.Request.Context(), []milvus.ChunkRow{newRow}); err != nil {
+		response.Fail(c, 502, "写入 Milvus 失败: "+err.Error())
+		return
+	}
+	response.OK(c, gin.H{"ok": true, "snippet": newSnippet})
 }
+
+// GetConfig / SaveConfig helpers — keep rag_config.go methods available
+var _ = json.Marshal // keep import
+var _ = fmt.Sprintf  // keep import

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"opinion-analysis/config"
 	"opinion-analysis/pkg/response"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
@@ -24,12 +23,8 @@ type ChatSessionHandler struct {
 	ragClient *rag.Client
 }
 
-func NewChatSessionHandler(store *repository.Store, taggerSvc *tagger.Service) *ChatSessionHandler {
-	h := &ChatSessionHandler{chat: store.Chat, taggerSvc: taggerSvc}
-	if config.Cfg != nil && config.Cfg.RAG.Enabled && strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL) != "" {
-		h.ragClient = &rag.Client{BaseURL: strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)}
-	}
-	return h
+func NewChatSessionHandler(store *repository.Store, taggerSvc *tagger.Service, ragClient *rag.Client) *ChatSessionHandler {
+	return &ChatSessionHandler{chat: store.Chat, taggerSvc: taggerSvc, ragClient: ragClient}
 }
 
 func (h *ChatSessionHandler) CreateSession(c *gin.Context) {

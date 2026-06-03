@@ -18,6 +18,7 @@ import {
   CloseCircleOutlined,
   DatabaseOutlined,
   KeyOutlined,
+  LoadingOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
@@ -210,6 +211,22 @@ const SystemPage: React.FC = () => {
                   ? <Tag color="blue">已启用检索</Tag>
                   : <Tag>未启用</Tag>}
               </Descriptions.Item>
+              <Descriptions.Item label="Embedding 服务">
+                {ragStatus?.serviceReachable
+                  ? (ragStatus as any)?.embedderReady
+                    ? <Tag icon={<CheckCircleOutlined />} color="success">可达（模型已加载）</Tag>
+                    : <Tag icon={<LoadingOutlined spin />} color="processing">可达（模型加载中）</Tag>
+                  : <Tag icon={<CloseCircleOutlined />} color="warning">不可达</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="Milvus">
+                {(ragStatus as any)?.milvusReachable
+                  ? <Tag icon={<CheckCircleOutlined />} color="success">
+                      {(ragStatus as any)?.collectionExists ? '可达（集合已创建）' : '可达（集合未初始化）'}
+                    </Tag>
+                  : <Tag icon={<CloseCircleOutlined />} color="warning">
+                      {(ragStatus as any)?.milvusError ? `不可达: ${(ragStatus as any).milvusError}` : '不可达'}
+                    </Tag>}
+              </Descriptions.Item>
               <Descriptions.Item label="句向量来源">
                 {ragStatus?.embedProvider === 'api'
                   ? <Tag color="purple">第三方 API</Tag>
@@ -218,19 +235,19 @@ const SystemPage: React.FC = () => {
               <Descriptions.Item label="句向量模型">
                 {ragStatus?.embedModel ? <Text code>{ragStatus.embedModel}</Text> : <Text type="secondary">-</Text>}
               </Descriptions.Item>
-              <Descriptions.Item label="模型向量维度">{ragStatus?.embedDim ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="Milvus 集合维度">
-                {ragStatus?.collectionDim != null ? (
-                  ragStatus.dimensionMismatch
-                    ? <Text type="danger">{ragStatus.collectionDim}</Text>
-                    : ragStatus.collectionDim
-                ) : '-'}
+              <Descriptions.Item label="模型向量维度">
+                {ragStatus?.embedDim
+                  ? ragStatus.embedDim
+                  : <Text type="secondary">未加载</Text>}
               </Descriptions.Item>
               <Descriptions.Item label="Milvus 集合">{ragStatus?.collection || '-'}</Descriptions.Item>
-              <Descriptions.Item label="RAG 服务">
-                {ragStatus?.serviceReachable
-                  ? <Tag icon={<CheckCircleOutlined />} color="success">可达</Tag>
-                  : <Tag icon={<CloseCircleOutlined />} color="warning">不可达或未配置</Tag>}
+              <Descriptions.Item label="同步周期（参考）">
+                {ragStatus?.syncIntervalSecondsHint != null ? `${ragStatus.syncIntervalSecondsHint}s` : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="服务地址" span={2}>
+                <Text type="secondary" style={{ fontSize: 12, wordBreak: 'break-all' }}>
+                  {ragStatus?.embeddingServiceUrl || '未配置 config.rag.embedding_service_url'}
+                </Text>
               </Descriptions.Item>
               {ragStatus?.processManaged && (
                 <Descriptions.Item label="进程托管">
@@ -242,21 +259,8 @@ const SystemPage: React.FC = () => {
                   </Space>
                 </Descriptions.Item>
               )}
-              <Descriptions.Item label="同步周期（参考）">
-                {ragStatus?.syncIntervalSecondsHint != null ? `${ragStatus.syncIntervalSecondsHint}s` : '-'}
-              </Descriptions.Item>
-              <Descriptions.Item label="服务地址" span={3}>
-                <Text type="secondary" style={{ fontSize: 12, wordBreak: 'break-all' }}>
-                  {ragStatus?.embeddingServiceUrl || '未配置 config.rag.embedding_service_url'}
-                </Text>
-              </Descriptions.Item>
-              {ragStatus?.embedderError && (
-                <Descriptions.Item label="嵌入模型" span={3}>
-                  <Text type="warning" style={{ fontSize: 12 }}>{ragStatus.embedderError}</Text>
-                </Descriptions.Item>
-              )}
               {ragStatus?.serviceError && (
-                <Descriptions.Item label="健康检查" span={3}>
+                <Descriptions.Item label="错误" span={3}>
                   <Text type="danger" style={{ fontSize: 12 }}>{ragStatus.serviceError}</Text>
                 </Descriptions.Item>
               )}

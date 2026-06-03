@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -160,68 +161,85 @@ type healthProbe struct {
 	Latency int64  `json:"latencyMs"`
 }
 
-// Health 探测 DB / DeepSeek / 待打标条数 / 最近一次爬虫记录。
+// Health 并发探测 DB / LLM / 待打标条数 / 最近一次爬虫记录。
 func (h *SystemHandler) Health(c *gin.Context) {
-	out := gin.H{}
-
-	// DB ping
-	dbProbe := healthProbe{}
-	t := time.Now()
-	if sqlDB, err := h.db.DB(); err != nil {
-		dbProbe.Message = err.Error()
-	} else {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
-		defer cancel()
-		if err := sqlDB.PingContext(ctx); err != nil {
-			dbProbe.Message = err.Error()
-		} else {
-			dbProbe.OK = true
-		}
+	type result struct {
+		db  healthProbe
+		llm healthProbe
 	}
-	dbProbe.Latency = time.Since(t).Milliseconds()
-	out["database"] = dbProbe
+	ch := make(chan result, 1)
 
-	// LLM ping：读取 tagger 服务当前生效配置（含热更新后的 key）
-	dsProbe := healthProbe{}
-	t = time.Now()
-	cfg, keySet := h.taggerSvc.GetConfig()
-	dsURL := cfg.LLMBaseURL
-	if dsURL == "" {
-		dsURL = "https://api.deepseek.com"
-	}
-	if !keySet {
-		dsProbe.Message = "no api key configured"
-	} else {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 4*time.Second)
-		defer cancel()
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, dsURL+"/v1/models", nil)
-		req.Header.Set("Authorization", "Bearer "+cfg.LLMApiKey)
-		client := &http.Client{Timeout: 4 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			dsProbe.Message = err.Error()
-		} else {
-			defer resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-				dsProbe.OK = true
+	go func() {
+		var r result
+
+		// DB 和 LLM 并发
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			t := time.Now()
+			if sqlDB, err := h.db.DB(); err != nil {
+				r.db.Message = err.Error()
 			} else {
-				dsProbe.Message = "http " + http.StatusText(resp.StatusCode)
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				if err := sqlDB.PingContext(ctx); err != nil {
+					r.db.Message = err.Error()
+				} else {
+					r.db.OK = true
+				}
 			}
-		}
-	}
-	dsProbe.Latency = time.Since(t).Milliseconds()
-	out["llm"] = dsProbe
+			r.db.Latency = time.Since(t).Milliseconds()
+		}()
 
-	// 业务指标
+		go func() {
+			defer wg.Done()
+			t := time.Now()
+			cfg, keySet := h.taggerSvc.GetConfig()
+			dsURL := cfg.LLMBaseURL
+			if dsURL == "" {
+				dsURL = "https://api.deepseek.com"
+			}
+			if !keySet {
+				r.llm.Message = "no api key configured"
+			} else {
+				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+				defer cancel()
+				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, dsURL+"/v1/models", nil)
+				req.Header.Set("Authorization", "Bearer "+cfg.LLMApiKey)
+				client := &http.Client{Timeout: 4 * time.Second}
+				resp, err := client.Do(req)
+				if err != nil {
+					r.llm.Message = err.Error()
+				} else {
+					defer resp.Body.Close()
+					if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+						r.llm.OK = true
+					} else {
+						r.llm.Message = "http " + http.StatusText(resp.StatusCode)
+					}
+				}
+			}
+			r.llm.Latency = time.Since(t).Milliseconds()
+		}()
+
+		wg.Wait()
+		ch <- r
+	}()
+
+	r := <-ch
+
 	pendingTag, _ := h.articles.CountPendingTagging()
-
 	last, _ := h.crawler.LastRun()
 
-	out["pendingTagging"] = pendingTag
-	out["lastCrawlerRun"] = last
-	out["timestamp"] = time.Now()
-
-	response.OK(c, out)
+	response.OK(c, gin.H{
+		"database":      r.db,
+		"llm":           r.llm,
+		"pendingTagging": pendingTag,
+		"lastCrawlerRun": last,
+		"timestamp":     time.Now(),
+	})
 }
 
 // ListSettingHistory GET /api/admin/system/settings/history — 配置快照列表（domain=rag|tagger）。
@@ -320,7 +338,7 @@ func (h *SystemHandler) ReapplySettingHistory(c *gin.Context) {
 			response.Fail(c, 500, "应用失败: "+err.Error())
 			return
 		}
-		_, warn, pyWarnings = reloadRagService(c)
+		warn, pyWarnings = "", nil
 	case "tagger":
 		if h.taggerSvc == nil {
 			response.Fail(c, 500, "tagger 服务不可用")

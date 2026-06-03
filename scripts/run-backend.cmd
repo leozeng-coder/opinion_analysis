@@ -17,6 +17,9 @@ where go 2>nul
 if errorlevel 1 goto :ERR_GO
 go version
 
+REM milvus-sdk-go requires 64-bit; force amd64 for this process only.
+set GOARCH=amd64
+
 echo [backend] ensuring database (go run ./cmd/createdb) ...
 go run ./cmd/createdb
 if errorlevel 1 echo [WARN] createdb failed. Check MySQL and backend\config\config.yaml DSN.

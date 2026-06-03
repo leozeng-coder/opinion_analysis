@@ -15,15 +15,51 @@ import (
 	adminhandler "opinion-analysis/src/api/handler/admin"
 	userhandler "opinion-analysis/src/api/handler/user"
 	"opinion-analysis/src/middleware"
+	milvussvc "opinion-analysis/src/service/milvus"
+	"opinion-analysis/src/service/rag"
 	"opinion-analysis/src/repository"
 	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
 	"opinion-analysis/src/service/workflow"
+	"strings"
 )
 
 func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager, alertEngine *alertengine.Engine) *gin.Engine {
 	store := repository.NewStore(db, repository.NewDigestRepository(rdb))
+
+	// Milvus + embedding 服务初始化
+	var milvusService *milvussvc.Service
+	var embedClient *milvussvc.EmbedderClient
+	var syncerSvc *milvussvc.Syncer
+	var ragClient *rag.Client
+	if config.Cfg != nil && config.Cfg.RAG.Enabled {
+		milvusURI := strings.TrimSpace(config.Cfg.RAG.MilvusURI)
+		if milvusURI == "" {
+			milvusURI = "http://localhost:19530"
+		}
+		milvusCollection := strings.TrimSpace(config.Cfg.RAG.MilvusCollection)
+		milvusService = milvussvc.NewService(milvusURI, milvusCollection)
+
+		embedURL := strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
+		embedClient = milvussvc.NewEmbedderClient(embedURL)
+
+		syncerSvc = milvussvc.NewSyncer(db, milvusService, embedClient, store.RAG)
+		// 从 DB 加载当前配置，覆盖写死的默认值
+		if ragCfg, err := store.RAG.GetRagConfig(); err == nil {
+			syncerSvc.UpdateConfig(milvussvc.SyncConfig{
+				Enabled:         ragCfg.SyncEnabled,
+				ChunkMaxChars:   ragCfg.ChunkMaxChars,
+				ChunkOverlap:    ragCfg.ChunkOverlap,
+				SyncIntervalSec: ragCfg.SyncIntervalSec,
+				SyncBatch:       ragCfg.SyncBatch,
+			})
+		}
+		syncerSvc.Start(context.Background())
+
+		ragClient = rag.NewClient(embedURL, embedClient, milvusService, db)
+		logger.Info("RAG enabled", zap.String("milvus", milvusURI), zap.String("embed", embedURL))
+	}
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -44,8 +80,8 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	topicH := userhandler.NewTopicHandler(store)
 	alertH := userhandler.NewAlertHandler(store, alertEngine)
 	// crawlerH := userhandler.NewCrawlerHandler(store, alertEngine) // 已废弃，改用 MediaCrawler
-	aiChatH := userhandler.NewAIChatHandler(taggerSvc)
-	chatSessionH := userhandler.NewChatSessionHandler(store, taggerSvc)
+	aiChatH := userhandler.NewAIChatHandler(taggerSvc, ragClient)
+	chatSessionH := userhandler.NewChatSessionHandler(store, taggerSvc, ragClient)
 	dashboardH := userhandler.NewDashboardHandler(store)
 
 	// MediaCrawler 代理处理器
@@ -62,7 +98,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	adminUserH := adminhandler.NewUserHandler(store)
 	adminSettingH := adminhandler.NewSettingHandler(store)
 	adminSystemH := adminhandler.NewSystemHandler(db, store, taggerSvc)
-	adminRagH := adminhandler.NewRAGHandler(store, ragProc)
+	adminRagH := adminhandler.NewRAGHandler(store, ragProc, milvusService, embedClient, syncerSvc)
 	adminDSH := adminhandler.NewDataSourceHandler(store)
 	adminAuditH := adminhandler.NewAuditHandler(store)
 

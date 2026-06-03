@@ -1,11 +1,6 @@
-# RAG / Milvus Lite (separate from crawler requirements; large deps)
+# RAG Embedding service — local sentence-transformers only
 fastapi>=0.115.0,<0.116
 uvicorn>=0.29.0,<0.35
-# Local milvus_lite.db needs pymilvus + milvus-lite on PyPI
-pymilvus>=2.4.0
-milvus-lite>=2.4.0
-pymysql>=1.1.0
 sentence-transformers>=3.0.0
 torch>=2.1.0
-apscheduler>=3.10.0
 pydantic>=2.5.0

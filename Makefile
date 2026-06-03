@@ -2,7 +2,7 @@
 
 # 本地开发
 dev-backend:
-	cd backend && go run ./cmd/server
+	cd backend && GOARCH=amd64 go run ./cmd/server
 
 dev-frontend:
 	cd frontend && npm run dev
@@ -37,7 +37,7 @@ docker-down:
 
 # 构建
 build-backend:
-	cd backend && go build -o bin/server ./cmd/server
+	cd backend && GOARCH=amd64 go build -o bin/server ./cmd/server
 
 build-frontend:
 	cd frontend && npm run build

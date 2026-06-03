@@ -16,17 +16,20 @@ type Config struct {
 	RAG      RAGConfig     `mapstructure:"rag"`
 }
 
-// RAGConfig 智能对话混合检索（由独立 Python 服务写入 Milvus Lite + MySQL 增量同步）。
+// RAGConfig 智能对话混合检索（Go 直连 Milvus standalone + Python embedding 服务）。
 type RAGConfig struct {
 	Enabled bool `mapstructure:"enabled"`
-	// 本机 RAG/embedding 服务地址，例如 http://127.0.0.1:5055
+	// 本机 Python embedding 服务地址，例如 http://127.0.0.1:5055
 	EmbeddingServiceURL string `mapstructure:"embedding_service_url"`
-	// Managed 为 true 时由 Go 后端在本机拉起/重启 RAG 子进程（仅本地开发，Docker 请 false）。
+	// MilvusURI standalone Milvus 地址，例如 http://localhost:19530
+	MilvusURI        string `mapstructure:"milvus_uri"`
+	MilvusCollection string `mapstructure:"milvus_collection"`
+	// Managed 为 true 时由 Go 后端在本机拉起/重启 Python embedding 子进程。
 	Managed bool `mapstructure:"managed"`
-	// AutoStart 在 Go 启动且 health 不可达时自动拉起 RAG（需 managed: true）。
-	AutoStart bool `mapstructure:"auto_start"`
-	Root      string `mapstructure:"root"`          // 相对 backend 工作目录，默认 ../rag
-	Python    string `mapstructure:"python"`        // 空则使用 root/.venv
+	// AutoStart 在 Go 启动且 health 不可达时自动拉起（需 managed: true）。
+	AutoStart    bool   `mapstructure:"auto_start"`
+	Root         string `mapstructure:"root"`          // 相对 backend 工作目录，默认 ../rag
+	Python       string `mapstructure:"python"`        // 空则使用 root/.venv
 	ServerScript string `mapstructure:"server_script"` // 相对 root，默认 server.py
 }
 
@@ -92,6 +95,8 @@ func Load(path string) {
 	viper.SetDefault("tagger.maxPerTick", 200)
 	viper.SetDefault("rag.enabled", false)
 	viper.SetDefault("rag.embedding_service_url", "http://127.0.0.1:5055")
+	viper.SetDefault("rag.milvus_uri", "http://localhost:19530")
+	viper.SetDefault("rag.milvus_collection", "opinion_chunks_kb")
 	viper.SetDefault("rag.managed", false)
 	viper.SetDefault("rag.auto_start", true)
 	viper.SetDefault("rag.root", "../rag")
