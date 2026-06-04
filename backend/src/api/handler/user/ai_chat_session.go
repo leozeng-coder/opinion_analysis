@@ -126,12 +126,35 @@ func (h *ChatSessionHandler) RenameSession(c *gin.Context) {
 	response.OK(c, nil)
 }
 
+func (h *ChatSessionHandler) RegenerateLastMessage(c *gin.Context) {
+	uid, ok := CurrentUserID(c)
+	if !ok {
+		response.ServerError(c)
+		return
+	}
+	sessionID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	session, err := h.chat.FindSessionForUser(uint(sessionID), uid)
+	if err != nil {
+		response.Fail(c, 404, "会话不存在")
+		return
+	}
+
+	// 删除最后一条 assistant 消息
+	if err := h.chat.DeleteLastAssistantMessage(session.ID); err != nil {
+		response.ServerError(c)
+		return
+	}
+
+	response.OK(c, nil)
+}
+
 type sessionChatReq struct {
-	SessionID *uint    `json:"sessionId"`
-	Content   string   `json:"content"`
-	PageHint  string   `json:"pageHint"`
-	UseRAG    *bool    `json:"useRag"`
-	Topics    []string `json:"topics"`
+	SessionID  *uint    `json:"sessionId"`
+	Content    string   `json:"content"`
+	PageHint   string   `json:"pageHint"`
+	UseRAG     *bool    `json:"useRag"`
+	Topics     []string `json:"topics"`
+	IsRegenerate bool   `json:"isRegenerate"` // 是否是重新生成（不保存用户消息）
 }
 
 func sessionTitle(content string) string {
@@ -276,7 +299,10 @@ func (h *ChatSessionHandler) Chat(c *gin.Context) {
 StreamEnd:
 	// 保存消息到数据库
 	reply := fullReply.String()
-	_ = h.chat.CreateMessage(&model.ChatMessage{SessionID: session.ID, Role: "user", Content: content})
+	// 只有非重新生成时才保存用户消息
+	if !req.IsRegenerate {
+		_ = h.chat.CreateMessage(&model.ChatMessage{SessionID: session.ID, Role: "user", Content: content})
+	}
 	_ = h.chat.CreateMessage(&model.ChatMessage{SessionID: session.ID, Role: "assistant", Content: reply})
 
 	// 更新会话

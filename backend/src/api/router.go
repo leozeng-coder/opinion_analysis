@@ -222,6 +222,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				aiSessions.GET("/:id", chatSessionH.GetSession)
 				aiSessions.DELETE("/:id", chatSessionH.DeleteSession)
 				aiSessions.PATCH("/:id", chatSessionH.RenameSession)
+				aiSessions.POST("/:id/regenerate", chatSessionH.RegenerateLastMessage)
 			}
 
 			taggerGroup := authorized2.Group("/tagger")

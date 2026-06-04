@@ -65,3 +65,10 @@ func (r *ChatRepository) CreateMessage(msg *model.ChatMessage) error {
 func (r *ChatRepository) UpdateSession(sessionID uint, updates map[string]interface{}) error {
 	return r.db.Model(&model.ChatSession{}).Where("id = ?", sessionID).Updates(updates).Error
 }
+
+func (r *ChatRepository) DeleteLastAssistantMessage(sessionID uint) error {
+	return r.db.Where("session_id = ? AND role = ?", sessionID, "assistant").
+		Order("created_at DESC").
+		Limit(1).
+		Delete(&model.ChatMessage{}).Error
+}

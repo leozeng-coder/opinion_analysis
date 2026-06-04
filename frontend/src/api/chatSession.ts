@@ -27,6 +27,7 @@ export interface ChatRequest {
   pageHint?: string
   useRag?: boolean
   topics?: string[]
+  isRegenerate?: boolean
 }
 
 export interface ChatResponse {
@@ -40,6 +41,7 @@ export interface StreamChatCallbacks {
   onContent: (chunk: string) => void
   onDone?: (data: { done: boolean; title?: string }) => void
   onError?: (error: string) => void
+  signal?: AbortSignal
 }
 
 function buildChatBody(data: ChatRequest): Record<string, unknown> {
@@ -49,6 +51,7 @@ function buildChatBody(data: ChatRequest): Record<string, unknown> {
     body.pageHint = data.pageHint
   if (data.useRag != null) body.useRag = data.useRag
   if (data.topics != null && data.topics.length > 0) body.topics = data.topics
+  if (data.isRegenerate != null) body.isRegenerate = data.isRegenerate
   return body
 }
 
@@ -71,6 +74,10 @@ export const chatSessionApi = {
 
   rename: async (id: number, title: string) => {
     await request.patch(`/ai/sessions/${id}`, { title })
+  },
+
+  regenerate: async (id: number) => {
+    await request.post(`/ai/sessions/${id}/regenerate`, {})
   },
 
   chat: async (data: ChatRequest) =>
@@ -99,6 +106,11 @@ export const chatSessionApi = {
 
     const controller = new AbortController()
     const timeoutId = setTimeout(() => controller.abort(), 120000) // 2分钟超时
+
+    // 如果外部传入了 signal，监听它的 abort 事件
+    if (callbacks.signal) {
+      callbacks.signal.addEventListener('abort', () => controller.abort())
+    }
 
     try {
       const response = await fetch(url, {
