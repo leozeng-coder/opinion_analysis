@@ -44,7 +44,7 @@ func (s *PlatformSyncService) advanceOffset(platform, sourceTable string, id uin
 // 两种模式都依赖 syncer 内部的 origin_url 去重，天然幂等；即使重复扫描也不会重复写入。
 // 偏移量推进策略：扫描前先捕获源表 max(id) 作为目标位置，本次处理区间 (minSourceID, maxID]，
 // 此后新插入的行 id 必然 > maxID，会在下次同步被捕获，因此不会漏行。
-func (s *PlatformSyncService) syncPlatformScan(ctx context.Context, platform string, minSourceID uint, enableSentiment bool) (*SyncResult, error) {
+func (s *PlatformSyncService) syncPlatformScan(ctx context.Context, platform string, minSourceID uint, topic string, enableSentiment bool) (*SyncResult, error) {
 	syncer, err := s.factory.GetSyncer(platform)
 	if err != nil {
 		return nil, err
@@ -62,6 +62,7 @@ func (s *PlatformSyncService) syncPlatformScan(ctx context.Context, platform str
 		SourceID:        s.getOrCreateDefaultSource(),
 		EnableSentiment: enableSentiment,
 		MinSourceID:     minSourceID,
+		Topic:           topic,
 	}
 
 	progress := s.progressTracker.StartProgress(platform, 0)
@@ -86,18 +87,37 @@ func (s *PlatformSyncService) syncPlatformScan(ctx context.Context, platform str
 
 // SyncPlatformByOffset 基于持久化偏移量的增量同步（推荐路径，gap-free 且 O(新增行数)）。
 func (s *PlatformSyncService) SyncPlatformByOffset(ctx context.Context, platform string, enableSentiment bool) (*SyncResult, error) {
-	return s.syncPlatformScan(ctx, platform, s.getOffset(platform), enableSentiment)
+	return s.syncPlatformScan(ctx, platform, s.getOffset(platform), "", enableSentiment)
+}
+
+// SyncPlatformByOffsetWithTopic 基于偏移量的增量同步，支持设置 topic 字段。
+func (s *PlatformSyncService) SyncPlatformByOffsetWithTopic(ctx context.Context, platform string, topic string, enableSentiment bool) (*SyncResult, error) {
+	return s.syncPlatformScan(ctx, platform, s.getOffset(platform), topic, enableSentiment)
 }
 
 // SyncPlatformFull 真正的全表扫描同步（用于全量对账 / 首次导入），并对齐偏移量。
 // 修复了旧 SyncSinglePlatform 在 syncMode=full 下仍按 LastSyncTime 过滤、无法补回老数据的问题。
 func (s *PlatformSyncService) SyncPlatformFull(ctx context.Context, platform string, enableSentiment bool) (*SyncResult, error) {
-	return s.syncPlatformScan(ctx, platform, 0, enableSentiment)
+	return s.syncPlatformScan(ctx, platform, 0, "", enableSentiment)
+}
+
+// SyncPlatformFullWithTopic 全表扫描同步，支持设置 topic 字段。
+func (s *PlatformSyncService) SyncPlatformFullWithTopic(ctx context.Context, platform string, topic string, enableSentiment bool) (*SyncResult, error) {
+	return s.syncPlatformScan(ctx, platform, 0, topic, enableSentiment)
 }
 
 // SyncPlatformBySourceIDs 只同步指定源表 ID 列表中的数据（用于数据过滤节点场景）。
 // 这是一个独立的同步逻辑，不依赖偏移量，只处理传入的 ID 列表。
 func (s *PlatformSyncService) SyncPlatformBySourceIDs(ctx context.Context, platform string, sourceIDs []uint, enableSentiment bool) (*SyncResult, error) {
+	return s.syncPlatformBySourceIDsWithTopic(ctx, platform, sourceIDs, "", enableSentiment)
+}
+
+// SyncPlatformBySourceIDsWithTopic 只同步指定源表 ID 列表，支持设置 topic 字段。
+func (s *PlatformSyncService) SyncPlatformBySourceIDsWithTopic(ctx context.Context, platform string, sourceIDs []uint, topic string, enableSentiment bool) (*SyncResult, error) {
+	return s.syncPlatformBySourceIDsWithTopic(ctx, platform, sourceIDs, topic, enableSentiment)
+}
+
+func (s *PlatformSyncService) syncPlatformBySourceIDsWithTopic(ctx context.Context, platform string, sourceIDs []uint, topic string, enableSentiment bool) (*SyncResult, error) {
 	if len(sourceIDs) == 0 {
 		// 没有要同步的 ID，返回空结果
 		return &SyncResult{
@@ -119,6 +139,7 @@ func (s *PlatformSyncService) SyncPlatformBySourceIDs(ctx context.Context, platf
 		SourceID:         s.getOrCreateDefaultSource(),
 		EnableSentiment:  enableSentiment,
 		IncludeSourceIDs: sourceIDs, // 只同步这些源表 ID
+		Topic:            topic,
 	}
 
 	progress := s.progressTracker.StartProgress(platform, len(sourceIDs))

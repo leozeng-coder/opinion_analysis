@@ -56,14 +56,20 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 	// 从上游获取过滤后的源表 ID 列表（数据过滤节点传递）
 	includeSourceIDs := n.extractIncludeSourceIDs(input)
 
+	// 从上游获取 topics 列表（爬虫节点传递），取第一个作为 topic
+	var topic string
+	if topics := nodes.GetStringSliceFromInput(input, "topics"); len(topics) > 0 {
+		topic = topics[0]
+	}
+
 	articlePlatforms := platformSync.ResolveArticlePlatforms(syncCodes)
 	maxArticleIDBefore, err := n.maxArticleID(ctx, articlePlatforms)
 	if err != nil {
 		return nil, n.WrapError("query max article id failed", err)
 	}
 
-	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v includeSourceIDs=%d maxArticleIdBefore=%d",
-		syncMode, syncCodes, len(includeSourceIDs), maxArticleIDBefore)
+	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v topic=%s includeSourceIDs=%d maxArticleIdBefore=%d",
+		syncMode, syncCodes, topic, len(includeSourceIDs), maxArticleIDBefore)
 
 	syncSvc := platformSync.NewPlatformSyncService(n.db)
 	results := make(map[string]interface{})
@@ -79,20 +85,20 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		case len(includeSourceIDs) > 0:
 			// 优先级最高：如果上游传递了过滤后的源表 ID 列表，只同步这些 ID
 			strategy = "filtered"
-			result, syncErr = syncSvc.SyncPlatformBySourceIDs(ctx, code, includeSourceIDs, enableSentiment)
+			result, syncErr = syncSvc.SyncPlatformBySourceIDsWithTopic(ctx, code, includeSourceIDs, topic, enableSentiment)
 		case syncMode == "full":
 			// 真正的全表扫描对账（按 origin_url 去重，幂等），并对齐偏移量
 			strategy = "full"
-			result, syncErr = syncSvc.SyncPlatformFull(ctx, code, enableSentiment)
+			result, syncErr = syncSvc.SyncPlatformFullWithTopic(ctx, code, topic, enableSentiment)
 		case syncSinceMinutes > 0:
 			// 显式时间窗口覆盖：按「最近 N 分钟发帖」同步（不走偏移量）
 			since := time.Now().Add(-time.Duration(syncSinceMinutes) * time.Minute)
 			strategy = fmt.Sprintf("since=%dm", syncSinceMinutes)
-			result, syncErr = syncSvc.SyncPlatformSince(ctx, code, since, enableSentiment)
+			result, syncErr = syncSvc.SyncPlatformSinceWithTopic(ctx, code, since, topic, enableSentiment)
 		default:
 			// 推荐路径：基于持久化偏移量的主键增量，gap-free 且 O(新增)
 			strategy = "offset"
-			result, syncErr = syncSvc.SyncPlatformByOffset(ctx, code, enableSentiment)
+			result, syncErr = syncSvc.SyncPlatformByOffsetWithTopic(ctx, code, topic, enableSentiment)
 		}
 		if syncErr != nil {
 			return nil, n.WrapError(fmt.Sprintf("sync platform %s failed", code), syncErr)

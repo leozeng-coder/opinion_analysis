@@ -10,18 +10,21 @@ import (
 	"opinion-analysis/pkg/response"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
+	"opinion-analysis/src/service/milvus"
 	"opinion-analysis/src/service/workflow"
 )
 
 type WorkflowHandler struct {
-	store  *repository.Store
-	engine *workflow.Engine
+	store        *repository.Store
+	engine       *workflow.Engine
+	milvusService *milvus.Service
 }
 
-func NewWorkflowHandler(store *repository.Store, engine *workflow.Engine) *WorkflowHandler {
+func NewWorkflowHandler(store *repository.Store, engine *workflow.Engine, milvusSvc *milvus.Service) *WorkflowHandler {
 	return &WorkflowHandler{
-		store:  store,
-		engine: engine,
+		store:         store,
+		engine:        engine,
+		milvusService: milvusSvc,
 	}
 }
 
@@ -250,4 +253,18 @@ func (h *WorkflowHandler) ExecutionLogs(c *gin.Context) {
 	}
 
 	response.OK(c, logs)
+}
+
+// ListTopics 获取 Milvus 中所有已存在的 topic 列表（去重）
+func (h *WorkflowHandler) ListTopics(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	topics, err := h.milvusService.ListTopics(ctx)
+	if err != nil {
+		// Milvus 查询失败时返回空列表（可能集合不存在或无数据）
+		response.OK(c, gin.H{"topics": []string{}})
+		return
+	}
+
+	response.OK(c, gin.H{"topics": topics})
 }

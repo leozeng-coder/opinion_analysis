@@ -71,6 +71,7 @@ type Workflow struct {
 	ID            int64          `gorm:"primarykey" json:"id"`
 	Name          string         `gorm:"size:255;not null" json:"name"`
 	Description   string         `gorm:"type:text" json:"description"`
+	Topic         string         `gorm:"size:64;index" json:"topic"`
 	Status        int            `gorm:"default:1;comment:1=启用,0=禁用" json:"status"`
 	TriggerType   string         `gorm:"size:50;comment:触发类型:schedule,manual,webhook" json:"triggerType"`
 	TriggerConfig JSON           `gorm:"type:json;comment:触发配置" json:"triggerConfig"`

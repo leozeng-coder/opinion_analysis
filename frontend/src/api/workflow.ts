@@ -37,4 +37,8 @@ export const workflowApi = {
   // 取消执行
   cancelExecution: (execId: number) =>
     request.post<{ message: string }>(`/workflows/executions/${execId}/cancel`),
+
+  // 获取所有话题列表
+  listTopics: () =>
+    request.get<{ topics: string[] }>('/workflows/topics'),
 }

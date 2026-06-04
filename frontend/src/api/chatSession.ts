@@ -26,6 +26,7 @@ export interface ChatRequest {
   content: string
   pageHint?: string
   useRag?: boolean
+  topics?: string[]
 }
 
 export interface ChatResponse {
@@ -47,6 +48,7 @@ function buildChatBody(data: ChatRequest): Record<string, unknown> {
   if (data.pageHint != null && data.pageHint !== '')
     body.pageHint = data.pageHint
   if (data.useRag != null) body.useRag = data.useRag
+  if (data.topics != null && data.topics.length > 0) body.topics = data.topics
   return body
 }
 

@@ -72,6 +72,7 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 			Keywords:       extractKeywords(note.TagList),
 			Sentiment:      "neutral",
 			SentScore:      0.5,
+			Topic:          config.Topic,
 		}
 
 		if config.EnableSentiment {
@@ -146,6 +147,7 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 			Keywords:       "[]",
 			Sentiment:      "neutral",
 			SentScore:      0.5,
+			Topic:          config.Topic,
 		}
 
 		if config.EnableSentiment {
@@ -220,6 +222,7 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 			Keywords:       "[]",
 			Sentiment:      "neutral",
 			SentScore:      0.5,
+			Topic:          config.Topic,
 		}
 
 		if config.EnableSentiment {
@@ -299,6 +302,7 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			Keywords:       "[]",
 			Sentiment:      "neutral",
 			SentScore:      0.5,
+			Topic:          config.Topic,
 		}
 
 		if config.EnableSentiment {
@@ -373,6 +377,7 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 			Keywords:       "[]",
 			Sentiment:      "neutral",
 			SentScore:      0.5,
+			Topic:          config.Topic,
 		}
 
 		if config.EnableSentiment {
@@ -456,6 +461,7 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			Keywords:       "[]",
 			Sentiment:      "neutral",
 			SentScore:      0.5,
+			Topic:          config.Topic,
 		}
 
 		if config.EnableSentiment {
@@ -548,6 +554,7 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			Keywords:       "[]",
 			Sentiment:      "neutral",
 			SentScore:      0.5,
+			Topic:          config.Topic,
 		}
 
 		if config.EnableSentiment {

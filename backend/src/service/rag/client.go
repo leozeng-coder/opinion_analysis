@@ -41,7 +41,8 @@ func NewClient(baseURL string, embed *milvus.EmbedderClient, milvusSvc *milvus.S
 }
 
 // Search 混合检索；embed 或 milvus 未就绪时返回 (nil, nil)。
-func (c *Client) Search(ctx context.Context, query string, topK int) ([]Chunk, error) {
+// topics 为空时搜索全部话题，非空时只搜索指定话题。
+func (c *Client) Search(ctx context.Context, query string, topK int, topics []string) ([]Chunk, error) {
 	q := strings.TrimSpace(query)
 	if c == nil || q == "" {
 		return nil, nil
@@ -65,9 +66,9 @@ func (c *Client) Search(ctx context.Context, query string, topK int) ([]Chunk, e
 		return nil, nil
 	}
 
-	// 2. Milvus 向量检索（取 top-k*5 供去重/重排）
+	// 2. Milvus 向量检索（取 top-k*5 供去重/重排），带 topic 过滤
 	limit := min(40, max(topK*5, topK))
-	hits, err := c.milvus.Search(ctx, vecs[0], limit)
+	hits, err := c.milvus.Search(ctx, vecs[0], limit, topics)
 	if err != nil {
 		return nil, fmt.Errorf("rag milvus search: %w", err)
 	}

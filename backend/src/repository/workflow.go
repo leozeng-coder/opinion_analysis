@@ -60,6 +60,7 @@ func (r *WorkflowRepository) FindActiveScheduledWorkflows() ([]model.Workflow, e
 	return workflows, err
 }
 
+
 // WorkflowExecutionRepository 工作流执行记录仓储
 type WorkflowExecutionRepository struct {
 	db *gorm.DB

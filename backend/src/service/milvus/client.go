@@ -12,14 +12,17 @@ import (
 )
 
 const (
-	fieldChunkPK    = "chunk_pk"
-	fieldArticleID  = "article_id"
-	fieldChunkIdx   = "chunk_idx"
-	fieldEmbedding  = "embedding"
-	fieldTitle      = "title"
-	fieldSnippet    = "snippet"
-	fieldPlatform   = "platform"
-	fieldChunkType  = "chunk_type"
+	fieldChunkPK   = "chunk_pk"
+	fieldArticleID = "article_id"
+	fieldChunkIdx  = "chunk_idx"
+	fieldEmbedding = "embedding"
+	fieldTitle     = "title"
+	fieldSnippet   = "snippet"
+	fieldPlatform  = "platform"
+	fieldChunkType = "chunk_type"
+	fieldTopic     = "topic"
+
+	defaultPartition = "default"
 )
 
 // ChunkRow 单条 chunk 数据（insert 用）。
@@ -32,6 +35,7 @@ type ChunkRow struct {
 	Snippet   string
 	Platform  string
 	ChunkType string // "content" | "comment"
+	Topic     string
 }
 
 // SearchHit 单条向量检索结果。
@@ -43,6 +47,7 @@ type SearchHit struct {
 	Snippet   string
 	Platform  string
 	ChunkType string
+	Topic     string
 	Score     float32
 }
 
@@ -97,6 +102,7 @@ func (s *Service) EnsureCollection(ctx context.Context, dim int) error {
 				{Name: fieldSnippet, DataType: entity.FieldTypeVarChar, TypeParams: map[string]string{"max_length": "4096"}},
 				{Name: fieldPlatform, DataType: entity.FieldTypeVarChar, TypeParams: map[string]string{"max_length": "32"}},
 				{Name: fieldChunkType, DataType: entity.FieldTypeVarChar, TypeParams: map[string]string{"max_length": "16"}},
+				{Name: fieldTopic, DataType: entity.FieldTypeVarChar, TypeParams: map[string]string{"max_length": "64"}},
 			},
 		}
 		idx, err := entity.NewIndexAUTOINDEX(entity.COSINE)
@@ -134,6 +140,7 @@ func (s *Service) Insert(ctx context.Context, rows []ChunkRow) error {
 	snippets := make([]string, len(rows))
 	platforms := make([]string, len(rows))
 	types := make([]string, len(rows))
+	topics := make([]string, len(rows))
 
 	for i, r := range rows {
 		pks[i] = r.ChunkPK
@@ -144,6 +151,11 @@ func (s *Service) Insert(ctx context.Context, rows []ChunkRow) error {
 		snippets[i] = clip(r.Snippet, 4000)
 		platforms[i] = clip(r.Platform, 30)
 		types[i] = r.ChunkType
+		t := r.Topic
+		if t == "" {
+			t = defaultPartition
+		}
+		topics[i] = clip(t, 60)
 	}
 
 	cols := []entity.Column{
@@ -155,6 +167,7 @@ func (s *Service) Insert(ctx context.Context, rows []ChunkRow) error {
 		entity.NewColumnVarChar(fieldSnippet, snippets),
 		entity.NewColumnVarChar(fieldPlatform, platforms),
 		entity.NewColumnVarChar(fieldChunkType, types),
+		entity.NewColumnVarChar(fieldTopic, topics),
 	}
 	_, err = cli.Insert(ctx, s.collection, "", cols...)
 	return err
@@ -179,18 +192,30 @@ func (s *Service) DeleteByPK(ctx context.Context, pk string) error {
 }
 
 // Search 向量相似度检索，返回 top-k 结果。
-func (s *Service) Search(ctx context.Context, vec []float32, topK int) ([]SearchHit, error) {
+// topics 为空时搜索全部，非空时仅搜索指定话题对应数据（通过 filter 实现）。
+func (s *Service) Search(ctx context.Context, vec []float32, topK int, topics []string) ([]SearchHit, error) {
 	cli, err := s.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
 	sp, _ := entity.NewIndexAUTOINDEXSearchParam(1)
+
+	// 通过 topic 字段过滤（scalar filter，效率高于全集合扫描）
+	filterExpr := ""
+	if len(topics) > 0 {
+		quoted := make([]string, len(topics))
+		for i, t := range topics {
+			quoted[i] = fmt.Sprintf("%q", t)
+		}
+		filterExpr = fmt.Sprintf("%s in [%s]", fieldTopic, strings.Join(quoted, ","))
+	}
+
 	results, err := cli.Search(
 		ctx,
 		s.collection,
 		nil,
-		"",
-		[]string{fieldArticleID, fieldTitle, fieldSnippet, fieldPlatform, fieldChunkIdx, fieldChunkType},
+		filterExpr,
+		[]string{fieldArticleID, fieldTitle, fieldSnippet, fieldPlatform, fieldChunkIdx, fieldChunkType, fieldTopic},
 		[]entity.Vector{entity.FloatVector(vec)},
 		fieldEmbedding,
 		entity.COSINE,
@@ -234,6 +259,10 @@ func (s *Service) Search(ctx context.Context, vec []float32, topK int) ([]Search
 				if v, e := col.GetAsString(i); e == nil {
 					hit.ChunkType = v
 				}
+			case fieldTopic:
+				if v, e := col.GetAsString(i); e == nil {
+					hit.Topic = v
+				}
 			}
 		}
 		hits = append(hits, hit)
@@ -252,7 +281,7 @@ func (s *Service) QueryByArticle(ctx context.Context, articleID int64) ([]Search
 		s.collection,
 		nil,
 		fmt.Sprintf("article_id == %d", articleID),
-		[]string{fieldChunkPK, fieldArticleID, fieldChunkIdx, fieldTitle, fieldSnippet, fieldPlatform, fieldChunkType},
+		[]string{fieldChunkPK, fieldArticleID, fieldChunkIdx, fieldTitle, fieldSnippet, fieldPlatform, fieldChunkType, fieldTopic},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("milvus query: %w", err)
@@ -293,6 +322,10 @@ func (s *Service) QueryByArticle(ctx context.Context, articleID int64) ([]Search
 				if v, e := col.GetAsString(i); e == nil {
 					hits[i].ChunkType = v
 				}
+			case fieldTopic:
+				if v, e := col.GetAsString(i); e == nil {
+					hits[i].Topic = v
+				}
 			}
 		}
 	}
@@ -310,7 +343,7 @@ func (s *Service) QueryByPK(ctx context.Context, pk string) (*SearchHit, error) 
 		s.collection,
 		nil,
 		entity.NewColumnVarChar(fieldChunkPK, []string{pk}),
-		[]string{fieldChunkPK, fieldArticleID, fieldChunkIdx, fieldTitle, fieldSnippet, fieldPlatform, fieldChunkType},
+		[]string{fieldChunkPK, fieldArticleID, fieldChunkIdx, fieldTitle, fieldSnippet, fieldPlatform, fieldChunkType, fieldTopic},
 	)
 	if err != nil {
 		return nil, err
@@ -348,6 +381,10 @@ func (s *Service) QueryByPK(ctx context.Context, pk string) (*SearchHit, error) 
 		case fieldChunkType:
 			if v, e := col.GetAsString(0); e == nil {
 				hit.ChunkType = v
+			}
+		case fieldTopic:
+			if v, e := col.GetAsString(0); e == nil {
+				hit.Topic = v
 			}
 		}
 	}
@@ -393,6 +430,53 @@ func (s *Service) Ping(timeout time.Duration) error {
 
 // CollectionName 返回当前集合名。
 func (s *Service) CollectionName() string { return s.collection }
+
+// ListTopics 列出集合中所有不同的 topic 值（通过查询去重）。
+func (s *Service) ListTopics(ctx context.Context) ([]string, error) {
+	cli, err := s.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Milvus 不支持 DISTINCT，只能全量查询后去重
+	res, err := cli.Query(ctx, s.collection, nil, "", []string{fieldTopic}, client.WithLimit(10000))
+	if err != nil {
+		return nil, fmt.Errorf("query topics: %w", err)
+	}
+	if len(res) == 0 {
+		return nil, nil
+	}
+	topicSet := make(map[string]struct{})
+	for _, col := range res {
+		if col.Name() == fieldTopic {
+			for i := 0; i < col.Len(); i++ {
+				if v, e := col.GetAsString(i); e == nil && v != "" {
+					topicSet[v] = struct{}{}
+				}
+			}
+		}
+	}
+	topics := make([]string, 0, len(topicSet))
+	for t := range topicSet {
+		topics = append(topics, t)
+	}
+	return topics, nil
+}
+
+// CountByTopic 统计指定 topic 的 chunk 数量。
+func (s *Service) CountByTopic(ctx context.Context, topic string) (int64, error) {
+	cli, err := s.connect(ctx)
+	if err != nil {
+		return 0, err
+	}
+	res, err := cli.Query(ctx, s.collection, nil, fmt.Sprintf("%s == %q", fieldTopic, topic), []string{fieldChunkPK}, client.WithLimit(100000))
+	if err != nil {
+		return 0, err
+	}
+	if len(res) == 0 {
+		return 0, nil
+	}
+	return int64(res[0].Len()), nil
+}
 
 func clip(s string, maxRunes int) string {
 	r := []rune(s)

@@ -13,6 +13,7 @@ import {
   message,
   Modal,
   Form,
+  Select,
 } from 'antd'
 import {
   DeleteOutlined,
@@ -20,7 +21,6 @@ import {
   VerticalAlignBottomOutlined,
   PlusOutlined,
   EditOutlined,
-  StopOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import ReactMarkdown from 'react-markdown'
@@ -30,6 +30,7 @@ import {
   type ChatSession,
   type ChatMessage,
 } from '@/api/chatSession'
+import { workflowApi } from '@/api/workflow'
 import page from '@/styles/page.module.css'
 import styles from './AiAssistantPage.module.css'
 
@@ -60,6 +61,9 @@ const AiAssistantPage: React.FC = () => {
   const [loadingSessions, setLoadingSessions] = useState(true)
   const [creating, setCreating] = useState(false)
   const [showScrollFab, setShowScrollFab] = useState(false)
+  const [topicOptions, setTopicOptions] = useState<string[]>([])
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([])
+  const [loadingTopics, setLoadingTopics] = useState(false)
   const threadRef = useRef<HTMLElement>(null)
   const [renameForm] = Form.useForm<{ title: string }>()
   const [renameTarget, setRenameTarget] = useState<{
@@ -80,7 +84,20 @@ const AiAssistantPage: React.FC = () => {
 
   useEffect(() => {
     void loadSessions()
+    void loadTopics()
   }, [loadSessions])
+
+  const loadTopics = useCallback(async () => {
+    setLoadingTopics(true)
+    try {
+      const res = await workflowApi.listTopics()
+      setTopicOptions(res.topics)
+    } catch {
+      message.error('加载话题列表失败')
+    } finally {
+      setLoadingTopics(false)
+    }
+  }, [])
 
   const loadSession = useCallback(async (id: number) => {
     try {
@@ -133,34 +150,6 @@ const AiAssistantPage: React.FC = () => {
       setCreating(false)
     }
   }, [])
-
-  const handleClearOrEndSession = useCallback(() => {
-    if (!currentSessionId) {
-      setMessages([])
-      setInput('')
-      return
-    }
-    Modal.confirm({
-      title: '结束当前会话？',
-      content: '将删除服务器上本条会话的全部消息，操作不可撤销。',
-      okText: '删除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          const id = currentSessionId
-          await chatSessionApi.delete(id!)
-          setSessions((prev) => prev.filter((s) => s.id !== id))
-          setCurrentSessionId(null)
-          setMessages([])
-          setInput('')
-          message.success('会话已删除')
-        } catch {
-          message.error('删除失败')
-        }
-      },
-    })
-  }, [currentSessionId])
 
   const openRename = useCallback(
     (s: ChatSession, e: React.MouseEvent) => {
@@ -253,6 +242,7 @@ const AiAssistantPage: React.FC = () => {
         {
           sessionId: currentSessionId ?? undefined,
           content: text,
+          topics: selectedTopics.length > 0 ? selectedTopics : undefined,
         },
         {
           onSession: (data) => {
@@ -301,7 +291,7 @@ const AiAssistantPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [input, loading, currentSessionId, loadSessions])
+  }, [input, loading, currentSessionId, loadSessions, selectedTopics])
 
   const currentSession = sessions.find((s) => s.id === currentSessionId)
   const titleBar = currentSession?.title ?? '舆情分析助手'
@@ -385,14 +375,20 @@ const AiAssistantPage: React.FC = () => {
               </div>
               <h1 className={styles.sessionTitle}>{titleBar}</h1>
               <div className={`${styles.topBarSide} ${styles.topBarSideEnd}`}>
-                <Button
-                  type="text"
-                  className={styles.clearBtn}
-                  icon={<StopOutlined />}
-                  onClick={handleClearOrEndSession}
-                >
-                  {currentSessionId ? '结束会话' : '重置'}
-                </Button>
+                {topicOptions.length > 0 && (
+                  <Select
+                    mode="multiple"
+                    placeholder="选择话题筛选"
+                    value={selectedTopics}
+                    onChange={setSelectedTopics}
+                    options={topicOptions.map(t => ({ label: t, value: t }))}
+                    loading={loadingTopics}
+                    allowClear
+                    maxTagCount="responsive"
+                    style={{ width: 280 }}
+                    size="middle"
+                  />
+                )}
               </div>
             </div>
           </header>

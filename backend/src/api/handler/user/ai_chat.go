@@ -27,8 +27,9 @@ type aiChatReq struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	} `json:"messages"`
-	PageHint string `json:"pageHint"`
-	UseRAG   *bool  `json:"useRag"`
+	PageHint string   `json:"pageHint"`
+	UseRAG   *bool    `json:"useRag"`
+	Topics   []string `json:"topics"`
 }
 
 func lastUserQuestion(hist []tagger.ChatMessage) string {
@@ -73,7 +74,7 @@ func (h *AIChatHandler) Chat(c *gin.Context) {
 	if useRAG && h.ragClient != nil {
 		q := lastUserQuestion(hist)
 		if q != "" {
-			chunks, err := h.ragClient.Search(c.Request.Context(), q, 8)
+			chunks, err := h.ragClient.Search(c.Request.Context(), q, 8, req.Topics)
 			if err != nil {
 				log.Printf("[ai-chat] RAG search error: %v", err)
 			} else if len(chunks) == 0 {

@@ -314,6 +314,7 @@ func (s *Syncer) syncArticle(ctx context.Context, art model.Article, comments []
 			Snippet:   piece,
 			Platform:  art.Platform,
 			ChunkType: "content",
+			Topic:     art.Topic,
 		})
 		idx++
 	}
@@ -332,6 +333,7 @@ func (s *Syncer) syncArticle(ctx context.Context, art model.Article, comments []
 			Snippet:   piece,
 			Platform:  art.Platform,
 			ChunkType: "comment",
+			Topic:     art.Topic,
 		})
 		idx++
 	}

@@ -1125,6 +1125,8 @@ const WorkflowEditorPage: React.FC = () => {
   // 告警规则（供「告警评估」节点选择）
   const [alertRules, setAlertRules] = useState<{ id: number; name: string }[]>([])
 
+  // 话题列表（供工作流表单选择）
+
   // ============ 执行 / 控制台状态 ============
   const location = useLocation()
   // 控制台面板模式：console=实时日志，history=历史记录，hidden=收起

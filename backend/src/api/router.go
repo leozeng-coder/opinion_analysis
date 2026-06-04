@@ -103,10 +103,10 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	adminAuditH := adminhandler.NewAuditHandler(store)
 
 	// 工作流引擎和调度器
-	workflowEngine := workflow.NewEngine(db, store, logger, taggerSvc, ragProc, alertEngine)
+	workflowEngine := workflow.NewEngine(db, store, logger, taggerSvc, ragProc, syncerSvc, alertEngine)
 	workflowScheduler := workflow.NewScheduler(store, workflowEngine, logger)
 	workflowScheduler.Start()
-	workflowH := handler.NewWorkflowHandler(store, workflowEngine)
+	workflowH := handler.NewWorkflowHandler(store, workflowEngine, milvusService)
 
 	apiGroup := r.Group("/api")
 	{
@@ -333,6 +333,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 			workflows := authorized2.Group("/workflows")
 			{
 				workflows.GET("", workflowH.List)
+				workflows.GET("/topics", workflowH.ListTopics)
 				workflows.POST("", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "create"), workflowH.Create)
 				workflows.GET("/:id", workflowH.Detail)
 				workflows.PUT("/:id", middleware.RequireRole("admin", "analyst"), middleware.Audit(db, "workflow", "update"), workflowH.Update)

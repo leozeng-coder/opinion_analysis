@@ -14,6 +14,7 @@ import (
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
 	"opinion-analysis/src/service/alertengine"
+	"opinion-analysis/src/service/milvus"
 	"opinion-analysis/src/service/ragprocess"
 	"opinion-analysis/src/service/tagger"
 	"opinion-analysis/src/service/digest"
@@ -35,6 +36,7 @@ type Engine struct {
 	// 依赖的服务
 	taggerSvc   *tagger.Service
 	ragProc     *ragprocess.Manager
+	milvusSyncer *milvus.Syncer
 	alertEngine *alertengine.Engine
 
 	// 运行中执行的取消注册表：executionID → cancel func
@@ -53,17 +55,19 @@ func NewEngine(
 	logger *zap.Logger,
 	taggerSvc *tagger.Service,
 	ragProc *ragprocess.Manager,
+	milvusSyncer *milvus.Syncer,
 	alertEngine *alertengine.Engine,
 ) *Engine {
 	engine := &Engine{
-		db:          db,
-		store:       store,
-		logger:      logger,
-		taggerSvc:   taggerSvc,
-		ragProc:     ragProc,
-		alertEngine: alertEngine,
-		cancelFuncs: make(map[int64]context.CancelFunc),
-		activeNodes: make(map[int64]NodeExecutor),
+		db:           db,
+		store:        store,
+		logger:       logger,
+		taggerSvc:    taggerSvc,
+		ragProc:      ragProc,
+		milvusSyncer: milvusSyncer,
+		alertEngine:  alertEngine,
+		cancelFuncs:  make(map[int64]context.CancelFunc),
+		activeNodes:  make(map[int64]NodeExecutor),
 	}
 
 	// 注册所有节点
@@ -83,7 +87,7 @@ func (e *Engine) registerNodes() {
 	MustRegisterNode(processorNodes.NewPlatformSyncNode(e.db))
 	MustRegisterNode(processorNodes.NewDataFilterNode(e.db))
 	MustRegisterNode(processorNodes.NewAITaggerNode(e.taggerSvc))
-	MustRegisterNode(processorNodes.NewRAGVectorizeNode(e.store.RAG, e.ragProc))
+	MustRegisterNode(processorNodes.NewRAGVectorizeNode(e.store.RAG, e.milvusSyncer))
 	MustRegisterNode(processorNodes.NewAlertEvaluateNode(e.alertEngine))
 	MustRegisterNode(processorNodes.NewDigestGenerateNode(
 		digest.NewGenerator(e.db, e.store.Digest, e.taggerSvc),

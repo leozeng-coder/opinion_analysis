@@ -52,6 +52,9 @@ type SyncConfig struct {
 
 	// IncludeSourceIDs 非空时，仅同步源表中 id 在该集合内的行（用于「数据过滤」节点筛选后只持久化保留项）。
 	IncludeSourceIDs []uint `json:"includeSourceIds,omitempty"`
+
+	// Topic 用于向量数据库分区，从工作流的爬虫节点 config.topics 中提取
+	Topic string `json:"topic,omitempty"`
 }
 
 // SourceFilterRow 源表行用于「数据过滤」的最小字段集（标题 + 正文）。
@@ -118,6 +121,15 @@ func (s *PlatformSyncService) SyncPlatforms(ctx context.Context, platforms []str
 
 // SyncPlatformSince 从指定时间点起增量同步单个平台（按源帖子发帖时间过滤，旧逻辑保留）
 func (s *PlatformSyncService) SyncPlatformSince(ctx context.Context, platform string, since time.Time, enableSentiment bool) (*SyncResult, error) {
+	return s.syncPlatformSince(ctx, platform, since, "", enableSentiment)
+}
+
+// SyncPlatformSinceWithTopic 从指定时间点起增量同步，支持设置 topic 字段。
+func (s *PlatformSyncService) SyncPlatformSinceWithTopic(ctx context.Context, platform string, since time.Time, topic string, enableSentiment bool) (*SyncResult, error) {
+	return s.syncPlatformSince(ctx, platform, since, topic, enableSentiment)
+}
+
+func (s *PlatformSyncService) syncPlatformSince(ctx context.Context, platform string, since time.Time, topic string, enableSentiment bool) (*SyncResult, error) {
 	syncer, err := s.factory.GetSyncer(platform)
 	if err != nil {
 		return nil, err
@@ -130,6 +142,7 @@ func (s *PlatformSyncService) SyncPlatformSince(ctx context.Context, platform st
 		LastSyncTime:    since,
 		SourceID:        sourceID,
 		EnableSentiment: enableSentiment,
+		Topic:           topic,
 	}
 
 	progress := s.progressTracker.StartProgress(platform, 0)

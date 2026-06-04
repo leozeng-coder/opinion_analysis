@@ -1,7 +1,9 @@
 package ragprocess
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -101,7 +103,31 @@ func (m *Manager) Restart(ctx context.Context) (RestartResult, error) {
 	pid := m.pid
 	m.mu.Unlock()
 
-	ready, _ := waitHealth(ctx, serviceURL(), 20*time.Second)
+	// 先等待服务端口可达（HTTP 200）
+	portReady := false
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if portListening(port) {
+			portReady = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			break
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
+	// 如果端口就绪，主动调用一次 /v1/embed 触发模型加载
+	if portReady {
+		log.Printf("[rag-process] 端口就绪，触发模型预热...")
+		if err := warmupEmbedder(ctx, serviceURL()); err != nil {
+			log.Printf("[rag-process] 模型预热失败（可能需要下载模型，请稍候）: %v", err)
+		}
+	}
+
+	// 再等待 embedder_ready = true（首次下载模型可能需要较长时间）
+	ready, _ := waitHealth(ctx, serviceURL(), 120*time.Second)
 	elapsed := time.Since(start).Milliseconds()
 	res := RestartResult{
 		OK:          true,
@@ -281,6 +307,35 @@ func servicePort() (int, error) {
 	return strconv.Atoi(p)
 }
 
+// warmupEmbedder 主动调用一次 /v1/embed 来触发模型加载（Python 服务延迟加载）
+func warmupEmbedder(ctx context.Context, base string) error {
+	if base == "" {
+		return fmt.Errorf("base URL is empty")
+	}
+
+	payload := []byte(`{"texts":["warmup"],"normalize":true}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/v1/embed", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 120 * time.Second} // 首次加载模型可能需要下载（~100MB+）
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("warmup failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("[rag-process] 模型预热成功")
+	return nil
+}
+
 func healthOK(ctx context.Context, base string) bool {
 	if base == "" {
 		return false
@@ -295,7 +350,20 @@ func healthOK(ctx context.Context, base string) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode/100 == 2
+
+	if resp.StatusCode/100 != 2 {
+		return false
+	}
+
+	// 解析响应，检查 embedder_ready 字段
+	var health struct {
+		EmbedderReady bool `json:"embedder_ready"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		return false
+	}
+
+	return health.EmbedderReady
 }
 
 func waitHealth(ctx context.Context, base string, timeout time.Duration) (bool, error) {

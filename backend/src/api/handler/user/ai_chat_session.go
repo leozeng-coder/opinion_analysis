@@ -127,10 +127,11 @@ func (h *ChatSessionHandler) RenameSession(c *gin.Context) {
 }
 
 type sessionChatReq struct {
-	SessionID *uint  `json:"sessionId"`
-	Content   string `json:"content"`
-	PageHint  string `json:"pageHint"`
-	UseRAG    *bool  `json:"useRag"`
+	SessionID *uint    `json:"sessionId"`
+	Content   string   `json:"content"`
+	PageHint  string   `json:"pageHint"`
+	UseRAG    *bool    `json:"useRag"`
+	Topics    []string `json:"topics"`
 }
 
 func sessionTitle(content string) string {
@@ -198,7 +199,7 @@ func (h *ChatSessionHandler) Chat(c *gin.Context) {
 	var retrievalCtx string
 	var ragUsed bool
 	if useRAG && h.ragClient != nil {
-		chunks, err := h.ragClient.Search(c.Request.Context(), content, 8)
+		chunks, err := h.ragClient.Search(c.Request.Context(), content, 8, req.Topics)
 		if err != nil {
 			log.Printf("[session-chat] RAG error: %v", err)
 		} else if len(chunks) > 0 {

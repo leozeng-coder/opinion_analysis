@@ -17,7 +17,8 @@ type Article struct {
 	OriginURL   string         `gorm:"size:1024" json:"originUrl"`
 	Platform       string         `gorm:"size:32;index" json:"platform"`
 	PlatformItemID string         `gorm:"size:255;index" json:"platformItemId"`
-	Sentiment   string         `gorm:"size:16;index" json:"sentiment"`
+	Topic          string         `gorm:"size:64;index" json:"topic"`
+	Sentiment      string         `gorm:"size:16;index" json:"sentiment"`
 	SentScore   float64        `json:"sentScore"`
 	Keywords    string         `gorm:"type:json" json:"keywords"`
 	AITags      *string        `gorm:"column:ai_tags;type:json" json:"aiTags"`
