@@ -260,6 +260,7 @@ export interface RagKBArticle {
   id: number
   title: string
   platform: string
+  topic: string
   publishedAt?: string
   embeddingHash?: string
   embeddingSyncedAt?: string

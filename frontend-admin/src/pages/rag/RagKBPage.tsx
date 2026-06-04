@@ -29,6 +29,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons'
 import { adminRagApi } from '@/api/admin-rag'
+import { workflowApi } from '@/api/workflow'
 import PageHeader from '@/components/common/PageHeader'
 import ui from '@/styles/page.module.css'
 import type { RagKBArticle, RagKBArticleDetail, RagKBChunk } from '@/types'
@@ -134,8 +135,10 @@ const RagKBPage: React.FC = () => {
   const [keyword, setKeyword] = useState('')
   const [inputKw, setInputKw] = useState('')
   const [platform, setPlatform] = useState('')
+  const [topic, setTopic] = useState('')
   const [synced, setSynced] = useState<'yes' | 'no' | ''>('')
   const [deletingIds, setDeletingIds] = useState<Set<number>>(new Set())
+  const [topicOptions, setTopicOptions] = useState<string[]>([])
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -150,13 +153,26 @@ const RagKBPage: React.FC = () => {
         page: pg, page_size: PAGE_SIZE,
         keyword: keyword || undefined,
         platform: platform || undefined,
+        topic: topic || undefined,
         synced: synced || undefined,
       })
       setList(r.list); setTotal(r.total); setPage(pg)
     } finally { setLoading(false) }
-  }, [keyword, platform, synced])
+  }, [keyword, platform, topic, synced])
 
   useEffect(() => { void fetchList(1) }, [fetchList])
+
+  useEffect(() => {
+    const loadTopics = async () => {
+      try {
+        const res = await workflowApi.listTopics()
+        setTopicOptions(res.topics)
+      } catch {
+        // ignore
+      }
+    }
+    void loadTopics()
+  }, [])
 
   const handleSearch = () => setKeyword(inputKw.trim())
 
@@ -219,6 +235,10 @@ const RagKBPage: React.FC = () => {
               { label: 'douyin', value: 'douyin' }, { label: 'tieba', value: 'tieba' },
             ]}
           />
+          <Select style={{ width: 140 }} placeholder="话题筛选" allowClear
+            value={topic || undefined} onChange={v => setTopic(v ?? '')}
+            options={topicOptions.map(t => ({ label: t, value: t }))}
+          />
           <Select style={{ width: 140 }} placeholder="向量状态" allowClear
             value={synced || undefined} onChange={v => setSynced((v as 'yes' | 'no' | '') ?? '')}
             options={[{ label: '已向量化', value: 'yes' }, { label: '未向量化', value: 'no' }]}
@@ -241,6 +261,7 @@ const RagKBPage: React.FC = () => {
               render: (t: string) => <Tooltip title={t}><span>{t || '-'}</span></Tooltip>,
             },
             { title: '平台', dataIndex: 'platform', width: 100 },
+            { title: '话题', dataIndex: 'topic', width: 120, ellipsis: true },
             {
               title: '发布时间', dataIndex: 'publishedAt', width: 128,
               render: (t?: string) => t ? dayjs(t).format('MM-DD HH:mm') : '-',

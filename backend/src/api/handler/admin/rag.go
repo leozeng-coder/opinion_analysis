@@ -374,6 +374,7 @@ func (h *RAGHandler) ListKBArticles(c *gin.Context) {
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
 	keyword := strings.TrimSpace(c.Query("keyword"))
 	platform := strings.TrimSpace(c.Query("platform"))
+	topic := strings.TrimSpace(c.Query("topic"))
 	syncedFilter := c.Query("synced") // "yes" | "no" | ""
 	if page < 1 {
 		page = 1
@@ -391,6 +392,9 @@ func (h *RAGHandler) ListKBArticles(c *gin.Context) {
 	if platform != "" {
 		q = q.Where("platform = ?", platform)
 	}
+	if topic != "" {
+		q = q.Where("topic = ?", topic)
+	}
 	switch syncedFilter {
 	case "yes":
 		q = q.Where("embedding_synced_at IS NOT NULL")
@@ -403,13 +407,14 @@ func (h *RAGHandler) ListKBArticles(c *gin.Context) {
 
 	var arts []model.Article
 	offset := (page - 1) * pageSize
-	q.Select("id, title, platform, published_at, embedding_content_hash, embedding_synced_at").
+	q.Select("id, title, platform, topic, published_at, embedding_content_hash, embedding_synced_at").
 		Order("id DESC").Offset(offset).Limit(pageSize).Find(&arts)
 
 	type item struct {
 		ID               uint    `json:"id"`
 		Title            string  `json:"title"`
 		Platform         string  `json:"platform"`
+		Topic            string  `json:"topic"`
 		PublishedAt      *string `json:"publishedAt"`
 		EmbeddingHash    *string `json:"embeddingHash"`
 		EmbeddingSyncedAt *string `json:"embeddingSyncedAt"`
@@ -421,6 +426,7 @@ func (h *RAGHandler) ListKBArticles(c *gin.Context) {
 			ID:       a.ID,
 			Title:    a.Title,
 			Platform: a.Platform,
+			Topic:    a.Topic,
 			Synced:   a.EmbeddingSyncedAt != nil,
 		}
 		if !a.PublishedAt.IsZero() {

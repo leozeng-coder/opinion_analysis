@@ -32,6 +32,7 @@ export const adminRagApi = {
     page_size?: number
     keyword?: string
     platform?: string
+    topic?: string
     synced?: 'yes' | 'no' | ''
   }) => request.get<never, PageResult<RagKBArticle>>('/admin/rag/articles', { params }),
   getArticleDetail: (id: number) =>
