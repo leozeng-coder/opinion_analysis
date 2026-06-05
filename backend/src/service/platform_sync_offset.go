@@ -106,8 +106,18 @@ func (s *PlatformSyncService) SyncPlatformFullWithTopic(ctx context.Context, pla
 	return s.syncPlatformScan(ctx, platform, 0, topic, enableSentiment)
 }
 
-// SyncPlatformBySourceIDs 只同步指定源表 ID 列表中的数据（用于数据过滤节点场景）。
-// 这是一个独立的同步逻辑，不依赖偏移量，只处理传入的 ID 列表。
+// SyncPlatformFromBaselineWithTopic 以指定 baseline（源表主键）为起点增量同步，
+// 并正常推进 offset。用于工作流中爬虫节点 → 同步节点的场景：
+// baseline 取爬虫启动前的源表 max(id)，确保只同步本次爬取产生的新行。
+func (s *PlatformSyncService) SyncPlatformFromBaselineWithTopic(ctx context.Context, platform string, baseline uint, topic string, enableSentiment bool) (*SyncResult, error) {
+	// 取 baseline 与 storedOffset 中较大值，防止 offset 已推进超过 baseline 时重复同步
+	storedOffset := s.getOffset(platform)
+	minSourceID := baseline
+	if storedOffset > minSourceID {
+		minSourceID = storedOffset
+	}
+	return s.syncPlatformScan(ctx, platform, minSourceID, topic, enableSentiment)
+}
 func (s *PlatformSyncService) SyncPlatformBySourceIDs(ctx context.Context, platform string, sourceIDs []uint, enableSentiment bool) (*SyncResult, error) {
 	return s.syncPlatformBySourceIDsWithTopic(ctx, platform, sourceIDs, "", enableSentiment)
 }

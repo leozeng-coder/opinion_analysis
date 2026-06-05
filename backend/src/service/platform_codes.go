@@ -94,3 +94,20 @@ func SyncCodeToSourceTable(code string) string {
 	}
 	return ""
 }
+
+// SyncCodeToCommentTable 同步器平台代码 → MediaCrawler 评论源表名
+func SyncCodeToCommentTable(code string) string {
+	mapping := map[string]string{
+		"xhs":   "xhs_note_comment",
+		"dy":    "douyin_aweme_comment",
+		"ks":    "kuaishou_video_comment",
+		"bili":  "bilibili_video_comment",
+		"wb":    "weibo_note_comment",
+		"tieba": "tieba_comment",
+		"zhihu": "zhihu_comment",
+	}
+	if t, ok := mapping[code]; ok {
+		return t
+	}
+	return ""
+}

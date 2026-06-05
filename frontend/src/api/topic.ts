@@ -3,8 +3,8 @@ import type { Topic, PageData } from '@/types'
 
 export const topicApi = {
   list: (params?: { page?: number; pageSize?: number }) =>
-    request.get<never, PageData<Topic>>('/topics', { params }),
+    request.get<PageData<Topic>>('/topics', { params }),
 
   detail: (id: number) =>
-    request.get<never, Topic>(`/topics/${id}`),
+    request.get<Topic>(`/topics/${id}`),
 }

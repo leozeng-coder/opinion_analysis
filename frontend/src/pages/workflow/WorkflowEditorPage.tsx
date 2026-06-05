@@ -41,7 +41,8 @@ import PageHeader from '@/components/common/PageHeader'
 import { workflowApi } from '@/api/workflow'
 import { crawlerApi } from '@/api/crawler'
 import { alertApi } from '@/api/alert'
-import { Workflow, WorkflowExecution, WorkflowNodeExecution, CrawlerLog } from '@/types'
+import { topicApi } from '@/api/topic'
+import { Workflow, WorkflowExecution, WorkflowNodeExecution, CrawlerLog, Topic } from '@/types'
 
 const { TextArea } = Input
 
@@ -1126,6 +1127,7 @@ const WorkflowEditorPage: React.FC = () => {
   const [alertRules, setAlertRules] = useState<{ id: number; name: string }[]>([])
 
   // 话题列表（供工作流表单选择）
+  const [topicOptions, setTopicOptions] = useState<{ label: string; value: string }[]>([])
 
   // ============ 执行 / 控制台状态 ============
   const location = useLocation()
@@ -1178,6 +1180,13 @@ const WorkflowEditorPage: React.FC = () => {
       .listRules()
       .then((rules) => setAlertRules(rules || []))
       .catch(() => setAlertRules([]))
+  }, [])
+
+  useEffect(() => {
+    topicApi
+      .list({ pageSize: 200 })
+      .then((res) => setTopicOptions((res.list || []).map((t: Topic) => ({ label: t.name, value: t.name }))))
+      .catch(() => setTopicOptions([]))
   }, [])
 
 
@@ -2484,6 +2493,10 @@ const WorkflowEditorPage: React.FC = () => {
                       style={{ width: '100%' }}
                       placeholder={fieldConfig.placeholder}
                       tokenSeparators={[',']}
+                      options={fieldConfig.name === 'topics' ? topicOptions : undefined}
+                      filterOption={(input, option) =>
+                        (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
+                      }
                     />
                   ) : isSelectMultiple ? (
                     <Select

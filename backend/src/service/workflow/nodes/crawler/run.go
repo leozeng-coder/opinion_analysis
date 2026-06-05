@@ -104,12 +104,20 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 	n.activeRunID.Store(uint64(result.RunID))
 	defer n.activeRunID.Store(0)
 
+	commentMaxIDs := n.captureCommentBaselines(ctx, syncCodes)
+
 	if waitForCompletion {
 		timeout := time.Duration(timeoutMinutes) * time.Minute
 		if err := n.crawlerSvc.WaitForCompletion(ctx, result.RunID, timeout); err != nil {
 			return nil, n.WrapError("crawler execution failed", err)
 		}
 		log.Printf("[CrawlerRunNode] Crawler finished: runId=%d", result.RunID)
+
+		// 统计本次爬取新增的文章数和评论数
+		newArticles := n.countNewRows(ctx, syncCodes, sourceMaxIDs, platformSync.SyncCodeToSourceTable)
+		newComments := n.countNewRows(ctx, syncCodes, commentMaxIDs, platformSync.SyncCodeToCommentTable)
+		log.Printf("[CrawlerRunNode] 本次爬取完成：新增文章 %d 篇，新增评论 %d 条（runId=%d）",
+			newArticles, newComments, result.RunID)
 	}
 
 	status := "triggered"
@@ -166,4 +174,45 @@ func (n *RunNode) captureSourceBaselines(ctx context.Context, syncCodes []string
 		baselines[code] = maxID
 	}
 	return baselines
+}
+
+// captureCommentBaselines 查询每个平台评论表当前的 max(id)
+func (n *RunNode) captureCommentBaselines(ctx context.Context, syncCodes []string) map[string]uint {
+	baselines := make(map[string]uint, len(syncCodes))
+	for _, code := range syncCodes {
+		table := platformSync.SyncCodeToCommentTable(code)
+		if table == "" {
+			baselines[code] = 0
+			continue
+		}
+		var maxID uint
+		if err := n.db.WithContext(ctx).Table(table).
+			Select("COALESCE(MAX(id), 0)").Scan(&maxID).Error; err != nil {
+			log.Printf("[CrawlerRunNode] Query max id of %s failed: %v (treat as 0)", table, err)
+			baselines[code] = 0
+			continue
+		}
+		baselines[code] = maxID
+	}
+	return baselines
+}
+
+// countNewRows 统计各平台表中 id > baseline 的新增行数之和
+func (n *RunNode) countNewRows(ctx context.Context, syncCodes []string, baselines map[string]uint, tableFunc func(string) string) int {
+	total := 0
+	for _, code := range syncCodes {
+		table := tableFunc(code)
+		if table == "" {
+			continue
+		}
+		baseline := baselines[code]
+		var count int64
+		if err := n.db.WithContext(ctx).Table(table).
+			Where("id > ?", baseline).Count(&count).Error; err != nil {
+			log.Printf("[CrawlerRunNode] Count new rows of %s failed: %v", table, err)
+			continue
+		}
+		total += int(count)
+	}
+	return total
 }

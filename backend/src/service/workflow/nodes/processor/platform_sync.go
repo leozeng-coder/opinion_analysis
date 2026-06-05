@@ -56,6 +56,9 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 	// 从上游获取过滤后的源表 ID 列表（数据过滤节点传递）
 	includeSourceIDs := n.extractIncludeSourceIDs(input)
 
+	// 从上游获取爬虫启动前的源表 baseline（爬虫节点传递），用于只同步本次爬取新增行
+	sourceBaselines := n.extractSourceBaselines(input)
+
 	// 从上游获取 topics 列表（爬虫节点传递），取第一个作为 topic
 	var topic string
 	if topics := nodes.GetStringSliceFromInput(input, "topics"); len(topics) > 0 {
@@ -96,9 +99,15 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 			strategy = fmt.Sprintf("since=%dm", syncSinceMinutes)
 			result, syncErr = syncSvc.SyncPlatformSinceWithTopic(ctx, code, since, topic, enableSentiment)
 		default:
-			// 推荐路径：基于持久化偏移量的主键增量，gap-free 且 O(新增)
-			strategy = "offset"
-			result, syncErr = syncSvc.SyncPlatformByOffsetWithTopic(ctx, code, topic, enableSentiment)
+			if baseline, ok := sourceBaselines[code]; ok {
+				// 上游有爬虫节点：以爬虫启动前的源表 max(id) 为起点，只同步本次爬取新增行
+				strategy = fmt.Sprintf("baseline=%d", baseline)
+				result, syncErr = syncSvc.SyncPlatformFromBaselineWithTopic(ctx, code, baseline, topic, enableSentiment)
+			} else {
+				// 无爬虫节点（手动触发同步）：基于持久化偏移量，gap-free 增量
+				strategy = "offset"
+				result, syncErr = syncSvc.SyncPlatformByOffsetWithTopic(ctx, code, topic, enableSentiment)
+			}
 		}
 		if syncErr != nil {
 			return nil, n.WrapError(fmt.Sprintf("sync platform %s failed", code), syncErr)
@@ -165,6 +174,35 @@ func (n *PlatformSyncNode) listNewArticleIDs(ctx context.Context, articlePlatfor
 		Order("id ASC").
 		Pluck("id", &ids).Error
 	return ids, err
+}
+
+// extractSourceBaselines 从上游 crawler_run 节点的输出中提取各平台的源表 baseline（爬虫启动前 max(id)）。
+// crawler_run 节点存为 map[string]uint，经 JSON 往返后值类型变为 float64。
+func (n *PlatformSyncNode) extractSourceBaselines(input map[string]interface{}) map[string]uint {
+	val, ok := input["sourceMaxIdsBefore"]
+	if !ok || val == nil {
+		return nil
+	}
+	switch m := val.(type) {
+	case map[string]uint:
+		return m
+	case map[string]interface{}:
+		result := make(map[string]uint, len(m))
+		for k, v := range m {
+			switch id := v.(type) {
+			case float64:
+				result[k] = uint(id)
+			case int:
+				result[k] = uint(id)
+			case int64:
+				result[k] = uint(id)
+			case uint:
+				result[k] = id
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 // extractIncludeSourceIDs 从上游输入中提取过滤后的源表 ID 列表
