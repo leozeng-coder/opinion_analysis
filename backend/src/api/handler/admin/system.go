@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"opinion-analysis/config"
 	"opinion-analysis/pkg/response"
@@ -21,6 +22,7 @@ import (
 
 type SystemHandler struct {
 	db        *gorm.DB
+	rdb       *redis.Client
 	taggerSvc *tagger.Service
 	articles  *repository.ArticleRepository
 	crawler   *repository.CrawlerRepository
@@ -28,9 +30,10 @@ type SystemHandler struct {
 	rag       *repository.RAGRepository
 }
 
-func NewSystemHandler(db *gorm.DB, store *repository.Store, taggerSvc *tagger.Service) *SystemHandler {
+func NewSystemHandler(db *gorm.DB, store *repository.Store, taggerSvc *tagger.Service, rdb *redis.Client) *SystemHandler {
 	return &SystemHandler{
 		db:        db,
+		rdb:       rdb,
 		taggerSvc: taggerSvc,
 		articles:  store.Article,
 		crawler:   store.Crawler,
@@ -161,84 +164,150 @@ type healthProbe struct {
 	Latency int64  `json:"latencyMs"`
 }
 
-// Health 并发探测 DB / LLM / 待打标条数 / 最近一次爬虫记录。
+type platformEntry struct {
+	code       string
+	table      string
+	artPlatform string
+}
+
+// platformOrder 固定顺序，确保 health 接口返回的 platformDiffs 顺序稳定
+var platformOrder = []platformEntry{
+	{"xhs",   "xhs_note",       "xhs"},
+	{"dy",    "douyin_aweme",   "douyin"},
+	{"ks",    "kuaishou_video", "kuaishou"},
+	{"bili",  "bilibili_video", "bilibili"},
+	{"wb",    "weibo_note",     "weibo"},
+	{"tieba", "tieba_note",     "tieba"},
+	{"zhihu", "zhihu_content",  "zhihu"},
+}
+
+// Health 并发探测 MySQL / Redis / LLM，并返回待处理指标和平台数据差异。
 func (h *SystemHandler) Health(c *gin.Context) {
-	type result struct {
-		db  healthProbe
-		llm healthProbe
-	}
-	ch := make(chan result, 1)
+	var (
+		dbProbe    healthProbe
+		redisProbe healthProbe
+		llmProbe   healthProbe
+	)
 
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// MySQL
 	go func() {
-		var r result
-
-		// DB 和 LLM 并发
-		var wg sync.WaitGroup
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-			t := time.Now()
-			if sqlDB, err := h.db.DB(); err != nil {
-				r.db.Message = err.Error()
+		defer wg.Done()
+		t := time.Now()
+		if sqlDB, err := h.db.DB(); err != nil {
+			dbProbe.Message = err.Error()
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := sqlDB.PingContext(ctx); err != nil {
+				dbProbe.Message = err.Error()
 			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-				defer cancel()
-				if err := sqlDB.PingContext(ctx); err != nil {
-					r.db.Message = err.Error()
-				} else {
-					r.db.OK = true
-				}
+				dbProbe.OK = true
 			}
-			r.db.Latency = time.Since(t).Milliseconds()
-		}()
-
-		go func() {
-			defer wg.Done()
-			t := time.Now()
-			cfg, keySet := h.taggerSvc.GetConfig()
-			dsURL := cfg.LLMBaseURL
-			if dsURL == "" {
-				dsURL = "https://api.deepseek.com"
-			}
-			if !keySet {
-				r.llm.Message = "no api key configured"
-			} else {
-				ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-				defer cancel()
-				req, _ := http.NewRequestWithContext(ctx, http.MethodGet, dsURL+"/v1/models", nil)
-				req.Header.Set("Authorization", "Bearer "+cfg.LLMApiKey)
-				client := &http.Client{Timeout: 4 * time.Second}
-				resp, err := client.Do(req)
-				if err != nil {
-					r.llm.Message = err.Error()
-				} else {
-					defer resp.Body.Close()
-					if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-						r.llm.OK = true
-					} else {
-						r.llm.Message = "http " + http.StatusText(resp.StatusCode)
-					}
-				}
-			}
-			r.llm.Latency = time.Since(t).Milliseconds()
-		}()
-
-		wg.Wait()
-		ch <- r
+		}
+		dbProbe.Latency = time.Since(t).Milliseconds()
 	}()
 
-	r := <-ch
+	// Redis
+	go func() {
+		defer wg.Done()
+		t := time.Now()
+		if h.rdb == nil {
+			redisProbe.Message = "未配置"
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := h.rdb.Ping(ctx).Err(); err != nil {
+				redisProbe.Message = err.Error()
+			} else {
+				redisProbe.OK = true
+			}
+		}
+		redisProbe.Latency = time.Since(t).Milliseconds()
+	}()
+
+	// LLM
+	go func() {
+		defer wg.Done()
+		t := time.Now()
+		cfg, keySet := h.taggerSvc.GetConfig()
+		dsURL := cfg.LLMBaseURL
+		if dsURL == "" {
+			dsURL = "https://api.deepseek.com"
+		}
+		if !keySet {
+			llmProbe.Message = "no api key configured"
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			defer cancel()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, dsURL+"/v1/models", nil)
+			req.Header.Set("Authorization", "Bearer "+cfg.LLMApiKey)
+			client := &http.Client{Timeout: 4 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				llmProbe.Message = err.Error()
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+					llmProbe.OK = true
+				} else {
+					llmProbe.Message = "http " + http.StatusText(resp.StatusCode)
+				}
+			}
+		}
+		llmProbe.Latency = time.Since(t).Milliseconds()
+	}()
+
+	wg.Wait()
 
 	pendingTag, _ := h.articles.CountPendingTagging()
 	last, _ := h.crawler.LastRun()
 
+	// 待向量化（embedding_synced_at 为空的文章）
+	var pendingEmbed int64
+	h.db.Table("articles").Where("embedding_synced_at IS NULL AND deleted_at IS NULL").Count(&pendingEmbed)
+
+	// 总文章数
+	var totalArticles int64
+	h.db.Table("articles").Where("deleted_at IS NULL").Count(&totalArticles)
+
+	// 各平台表行数 vs 中心表行数
+	type platformDiff struct {
+		Code      string `json:"code"`
+		TableName string `json:"table"`
+		Source    int64  `json:"source"`
+		Central   int64  `json:"central"`
+		Diff      int64  `json:"diff"`
+	}
+	var diffs []platformDiff
+	for _, p := range platformOrder {
+		var srcCount int64
+		if err := h.db.Raw("SELECT COUNT(*) FROM `"+p.table+"`").Scan(&srcCount).Error; err != nil {
+			srcCount = -1
+		}
+		var centCount int64
+		h.db.Table("articles").Where("platform = ? AND deleted_at IS NULL", p.artPlatform).Count(&centCount)
+		diffs = append(diffs, platformDiff{
+			Code:      p.code,
+			TableName: p.table,
+			Source:    srcCount,
+			Central:   centCount,
+			Diff:      srcCount - centCount,
+		})
+	}
+
 	response.OK(c, gin.H{
-		"database":      r.db,
-		"llm":           r.llm,
+		"database":       dbProbe,
+		"redis":          redisProbe,
+		"llm":            llmProbe,
 		"pendingTagging": pendingTag,
+		"pendingEmbed":   pendingEmbed,
+		"totalArticles":  totalArticles,
+		"platformDiffs":  diffs,
 		"lastCrawlerRun": last,
-		"timestamp":     time.Now(),
+		"timestamp":      time.Now(),
 	})
 }
 

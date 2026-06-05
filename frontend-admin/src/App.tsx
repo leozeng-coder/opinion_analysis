@@ -8,16 +8,14 @@ const LoginPage = lazy(() => import('@/pages/login/LoginPage'))
 const UsersPage = lazy(() => import('@/pages/users/UsersPage'))
 const SystemPage = lazy(() => import('@/pages/system/SystemPage'))
 const SystemConfigPage = lazy(() => import('@/pages/config/SystemConfigPage'))
-const AIConfigPage = lazy(() => import('@/pages/config/AIConfigPage'))
-const CrawlerConfigPage = lazy(() => import('@/pages/config/CrawlerConfigPage'))
-const TasksPage = lazy(() => import('@/pages/tasks/TasksPage'))
-const DataSourcePage = lazy(() => import('@/pages/datasource/DataSourcePage'))
+const NotifyPage = lazy(() => import('@/pages/config/NotifyPage'))
+const PlatformSyncPage = lazy(() => import('@/pages/platform/PlatformSyncPage'))
+const TaggerPage = lazy(() => import('@/pages/ai/TaggerPage'))
+const RagPage = lazy(() => import('@/pages/ai/RagPage'))
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'))
-const RagKBPage = lazy(() => import('@/pages/rag/RagKBPage'))
 
 const fallback = <Spin size="large" style={{ display: 'block', marginTop: 100, textAlign: 'center' }} />
 
-// isProd 时 BrowserRouter basename 对应 /admin/，dev 用 /
 const basename = typeof import.meta !== 'undefined' && import.meta.env?.PROD ? '/admin' : '/'
 
 const App: React.FC = () => (
@@ -28,19 +26,27 @@ const App: React.FC = () => (
         <Route element={<PrivateAdminRoute />}>
           <Route element={<AdminLayout />}>
             <Route path="/system" element={<SystemPage />} />
-            <Route path="/config/system" element={<SystemConfigPage />} />
-            <Route path="/config/ai" element={<AIConfigPage />} />
-            <Route path="/config/crawler" element={<CrawlerConfigPage />} />
-            <Route path="/tasks" element={<TasksPage />} />
             <Route path="/users" element={<UsersPage />} />
-            <Route path="/rag-kb" element={<RagKBPage />} />
-            <Route path="/datasources" element={<DataSourcePage />} />
+            <Route path="/data/platform-sync" element={<PlatformSyncPage />} />
+            {/* AI 引擎 */}
+            <Route path="/ai/tagger" element={<TaggerPage />} />
+            <Route path="/ai/rag" element={<RagPage />} />
+            {/* 系统设置 */}
+            <Route path="/config/system" element={<SystemConfigPage />} />
+            <Route path="/config/notify" element={<NotifyPage />} />
+            {/* 审计日志 */}
             <Route path="/audit" element={<AuditPage />} />
-            {/* 旧路由重定向 */}
+            {/* 旧路由兼容重定向 */}
+            <Route path="/datasources" element={<Navigate to="/data/platform-sync" replace />} />
+            <Route path="/data/sources" element={<Navigate to="/data/platform-sync" replace />} />
+            <Route path="/rag-kb" element={<Navigate to="/ai/rag" replace />} />
+            <Route path="/tasks" element={<Navigate to="/ai/tagger" replace />} />
+            <Route path="/config/ai" element={<Navigate to="/ai/tagger" replace />} />
+            <Route path="/config/crawler" element={<Navigate to="/data/platform-sync" replace />} />
             <Route path="/config" element={<Navigate to="/config/system" replace />} />
             <Route path="/settings" element={<Navigate to="/config/system" replace />} />
-            <Route path="/tagger" element={<Navigate to="/tasks" replace />} />
-            <Route path="/crawler" element={<Navigate to="/config/crawler" replace />} />
+            <Route path="/tagger" element={<Navigate to="/ai/tagger" replace />} />
+            <Route path="/crawler" element={<Navigate to="/data/platform-sync" replace />} />
             <Route path="/" element={<Navigate to="/system" replace />} />
           </Route>
         </Route>

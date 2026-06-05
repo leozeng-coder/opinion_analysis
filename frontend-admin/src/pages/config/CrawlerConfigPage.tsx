@@ -53,7 +53,7 @@ const CrawlerConfigPage: React.FC = () => {
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
   const [syncProgress, setSyncProgress] = useState<{ [key: string]: PlatformSyncProgress }>({})
   const [syncing, setSyncing] = useState(false)
-  const [progressInterval, setProgressInterval] = useState<NodeJS.Timeout | null>(null)
+  const [progressInterval, setProgressInterval] = useState<ReturnType<typeof setInterval> | null>(null)
 
   const loadSmtpConfig = useCallback(async () => {
     setLoading(true)
@@ -152,7 +152,7 @@ const CrawlerConfigPage: React.FC = () => {
     }
     setTestingMail(true)
     try {
-      await adminSmtpApi.testEmail(testEmail)
+      await adminSmtpApi.test(testEmail)
       message.success('测试邮件已发送，请检查收件箱')
     } catch {
       message.error('发送失败，请检查配置')
@@ -337,7 +337,7 @@ const CrawlerConfigPage: React.FC = () => {
       key: 'progress',
       render: (_: unknown, record: PlatformInfo) => {
         const progress = syncProgress[record.code]
-        if (!progress || progress.status === 'idle') {
+        if (!progress || progress.status === 'pending') {
           return <Text type="secondary">-</Text>
         }
 

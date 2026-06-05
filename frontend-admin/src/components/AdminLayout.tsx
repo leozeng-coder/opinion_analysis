@@ -9,8 +9,8 @@ import {
   SettingOutlined,
   TeamOutlined,
   ThunderboltOutlined,
-  ApiOutlined,
   BellOutlined,
+  CloudSyncOutlined,
 } from '@ant-design/icons'
 import { Avatar, Breadcrumb, Layout, Menu, Space, Typography } from 'antd'
 import type { MenuProps } from 'antd'
@@ -21,33 +21,38 @@ const { Header, Sider, Content } = Layout
 const { Text } = Typography
 
 const menuItems: MenuProps['items'] = [
-  { key: '/system', icon: <ThunderboltOutlined />, label: <Link to="/system">系统状态</Link> },
+  { key: '/system', icon: <ThunderboltOutlined />, label: <Link to="/system">系统概览</Link> },
   { key: '/users', icon: <TeamOutlined />, label: <Link to="/users">用户管理</Link> },
+  { key: '/data/platform-sync', icon: <CloudSyncOutlined />, label: <Link to="/data/platform-sync">平台同步</Link> },
+  {
+    key: '/ai',
+    icon: <RobotOutlined />,
+    label: 'AI 引擎',
+    children: [
+      { key: '/ai/tagger', icon: <RobotOutlined />, label: <Link to="/ai/tagger">打标任务</Link> },
+      { key: '/ai/rag', icon: <DatabaseOutlined />, label: <Link to="/ai/rag">向量知识库</Link> },
+    ],
+  },
   {
     key: '/config',
     icon: <SettingOutlined />,
-    label: '配置中心',
+    label: '系统设置',
     children: [
-      { key: '/config/system', icon: <SettingOutlined />, label: <Link to="/config/system">系统配置</Link> },
-      { key: '/config/ai', icon: <RobotOutlined />, label: <Link to="/config/ai">AI配置</Link> },
-      { key: '/config/crawler', icon: <BellOutlined />, label: <Link to="/config/crawler">爬虫配置</Link> },
+      { key: '/config/system', icon: <SettingOutlined />, label: <Link to="/config/system">基础设置</Link> },
+      { key: '/config/notify', icon: <BellOutlined />, label: <Link to="/config/notify">通知与告警</Link> },
     ],
   },
-  { key: '/tasks', icon: <RobotOutlined />, label: <Link to="/tasks">任务管理</Link> },
-  { key: '/rag-kb', icon: <DatabaseOutlined />, label: <Link to="/rag-kb">知识库管理</Link> },
-  { key: '/datasources', icon: <ApiOutlined />, label: <Link to="/datasources">数据源</Link> },
   { key: '/audit', icon: <AuditOutlined />, label: <Link to="/audit">审计日志</Link> },
 ]
 
 const routeLabels: Record<string, string> = {
-  '/system': '系统状态',
+  '/system': '系统概览',
   '/users': '用户管理',
-  '/config/system': '系统配置',
-  '/config/ai': 'AI配置',
-  '/config/crawler': '爬虫配置',
-  '/tasks': '任务管理',
-  '/rag-kb': '知识库管理',
-  '/datasources': '数据源管理',
+  '/data/platform-sync': '平台同步',
+  '/ai/tagger': '打标任务',
+  '/ai/rag': '向量知识库',
+  '/config/system': '基础设置',
+  '/config/notify': '通知与告警',
   '/audit': '审计日志',
 }
 
@@ -64,9 +69,10 @@ const AdminLayout: React.FC = () => {
 
   const currentLabel = routeLabels[location.pathname] ?? ''
 
-  // 确定当前选中的菜单项和展开的子菜单
   const selectedKeys = [location.pathname]
-  const openKeys = location.pathname.startsWith('/config') ? ['/config'] : []
+  const openKeys = location.pathname.startsWith('/config') ? ['/config']
+    : location.pathname.startsWith('/ai') ? ['/ai']
+    : []
 
   return (
     <Layout className={styles.layout}>

@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
+import threading
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -28,6 +30,18 @@ app = FastAPI(title="RAG Embedding Service")
 
 # 延迟加载：首次 /v1/embed 请求时初始化，避免阻塞启动。
 _embedder: Embedder | None = None
+
+
+@app.on_event("startup")
+def _warmup_embedder() -> None:
+    """服务启动后在后台线程预热模型，不阻塞主线程接受请求。"""
+    def _load() -> None:
+        try:
+            get_embedder()
+        except Exception:
+            log.exception("embedder warmup failed")
+
+    threading.Thread(target=_load, daemon=True, name="embedder-warmup").start()
 
 
 def get_embedder() -> Embedder:

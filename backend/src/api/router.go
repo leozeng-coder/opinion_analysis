@@ -97,7 +97,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 
 	adminUserH := adminhandler.NewUserHandler(store)
 	adminSettingH := adminhandler.NewSettingHandler(store)
-	adminSystemH := adminhandler.NewSystemHandler(db, store, taggerSvc)
+	adminSystemH := adminhandler.NewSystemHandler(db, store, taggerSvc, rdb)
 	adminRagH := adminhandler.NewRAGHandler(store, ragProc, milvusService, embedClient, syncerSvc)
 	adminDSH := adminhandler.NewDataSourceHandler(store)
 	adminAuditH := adminhandler.NewAuditHandler(store)

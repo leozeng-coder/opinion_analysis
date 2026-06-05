@@ -100,10 +100,22 @@ export interface HealthProbe {
   latencyMs: number
 }
 
+export interface PlatformDiff {
+  code: string
+  table: string
+  source: number
+  central: number
+  diff: number
+}
+
 export interface SystemHealth {
   database: HealthProbe
+  redis: HealthProbe
   llm: HealthProbe
   pendingTagging: number
+  pendingEmbed: number
+  totalArticles: number
+  platformDiffs?: PlatformDiff[]
   lastCrawlerRun?: {
     id: number
     spiders: string
