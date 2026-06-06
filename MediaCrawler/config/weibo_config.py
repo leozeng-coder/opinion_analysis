@@ -21,7 +21,7 @@
 # Weibo platform configuration
 
 # Search type, the specific enumeration value is in media_platform/weibo/field.py
-WEIBO_SEARCH_TYPE = "default"
+WEIBO_SEARCH_TYPE = "real_time"
 
 # Specify Weibo ID list
 WEIBO_SPECIFIED_ID_LIST = [

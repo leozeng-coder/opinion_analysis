@@ -45,6 +45,7 @@ from var import crawler_type_var, source_keyword_var
 
 from .client import ZhiHuClient
 from .exception import DataFetchError
+from .field import SearchSort, SearchTime
 from .help import ZhihuExtractor, judge_zhihu_url
 from .login import ZhiHuLogin
 
@@ -176,6 +177,8 @@ class ZhihuCrawler(AbstractCrawler):
                         await self.zhihu_client.get_note_by_keyword(
                             keyword=keyword,
                             page=page,
+                            sort=SearchSort(config.ZHIHU_SORT),
+                            search_time=SearchTime(config.ZHIHU_SEARCH_TIME),
                         )
                     )
                     utils.logger.info(

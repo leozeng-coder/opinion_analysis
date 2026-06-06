@@ -283,6 +283,70 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 rich_help_panel="Performance Configuration",
             ),
         ] = config.MAX_CONCURRENCY_NUM,
+        max_notes_count: Annotated[
+            int,
+            typer.Option(
+                "--max_notes_count",
+                help="Maximum number of posts/videos to crawl per run",
+                rich_help_panel="Performance Configuration",
+            ),
+        ] = config.CRAWLER_MAX_NOTES_COUNT,
+        sleep_sec_min: Annotated[
+            int,
+            typer.Option(
+                "--sleep_sec_min",
+                help="Minimum sleep interval between requests (seconds)",
+                rich_help_panel="Performance Configuration",
+            ),
+        ] = config.CRAWLER_MAX_SLEEP_SEC[0],
+        sleep_sec_max: Annotated[
+            int,
+            typer.Option(
+                "--sleep_sec_max",
+                help="Maximum sleep interval between requests (seconds)",
+                rich_help_panel="Performance Configuration",
+            ),
+        ] = config.CRAWLER_MAX_SLEEP_SEC[1],
+        xhs_sort_type: Annotated[
+            str,
+            typer.Option(
+                "--xhs_sort_type",
+                help="XHS sort type: general | popularity_descending | time_descending",
+                rich_help_panel="Platform Sort Configuration",
+            ),
+        ] = config.SORT_TYPE,
+        weibo_search_type: Annotated[
+            str,
+            typer.Option(
+                "--weibo_search_type",
+                help="Weibo search type: default | real_time | popular | video",
+                rich_help_panel="Platform Sort Configuration",
+            ),
+        ] = config.WEIBO_SEARCH_TYPE,
+        dy_sort_type: Annotated[
+            int,
+            typer.Option(
+                "--dy_sort_type",
+                help="Douyin sort type: 0=comprehensive 1=most_likes 2=latest",
+                rich_help_panel="Platform Sort Configuration",
+            ),
+        ] = config.DY_SORT_TYPE,
+        zhihu_sort: Annotated[
+            str,
+            typer.Option(
+                "--zhihu_sort",
+                help="Zhihu sort: '' = default  created_time = latest  upvoted_count = most upvoted",
+                rich_help_panel="Platform Sort Configuration",
+            ),
+        ] = config.ZHIHU_SORT,
+        zhihu_search_time: Annotated[
+            str,
+            typer.Option(
+                "--zhihu_search_time",
+                help="Zhihu search time range: '' = unlimited  a_day  a_week  a_month",
+                rich_help_panel="Platform Sort Configuration",
+            ),
+        ] = config.ZHIHU_SEARCH_TIME,
         save_data_path: Annotated[
             str,
             typer.Option(
@@ -347,6 +411,13 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         config.ENABLE_IP_PROXY = enable_ip_proxy_value
         config.IP_PROXY_POOL_COUNT = ip_proxy_pool_count
         config.IP_PROXY_PROVIDER_NAME = ip_proxy_provider_name
+        config.CRAWLER_MAX_NOTES_COUNT = max_notes_count
+        config.CRAWLER_MAX_SLEEP_SEC = (sleep_sec_min, sleep_sec_max)
+        config.SORT_TYPE = xhs_sort_type
+        config.WEIBO_SEARCH_TYPE = weibo_search_type
+        config.DY_SORT_TYPE = dy_sort_type
+        config.ZHIHU_SORT = zhihu_sort
+        config.ZHIHU_SEARCH_TIME = zhihu_search_time
 
         # Set platform-specific ID lists for detail/creator mode
         if specified_id_list:

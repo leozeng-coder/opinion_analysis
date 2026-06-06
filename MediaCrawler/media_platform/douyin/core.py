@@ -41,7 +41,7 @@ from var import crawler_type_var, source_keyword_var
 
 from .client import DouYinClient
 from .exception import DataFetchError
-from .field import PublishTimeType
+from .field import PublishTimeType, SearchSortType
 from .help import parse_video_info_from_url, parse_creator_info_from_url
 from .login import DouYinLogin
 
@@ -147,6 +147,7 @@ class DouYinCrawler(AbstractCrawler):
                         keyword=keyword,
                         offset=page * dy_limit_count - dy_limit_count,
                         publish_time=PublishTimeType(config.PUBLISH_TIME_TYPE),
+                        sort_type=SearchSortType(config.DY_SORT_TYPE),
                         search_id=dy_search_id,
                     )
                     if posts_res.get("data") is None or posts_res.get("data") == []:

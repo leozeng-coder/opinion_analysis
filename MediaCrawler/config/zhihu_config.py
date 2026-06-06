@@ -20,6 +20,12 @@
 
 # Zhihu platform configuration
 
+# Sort type: "" = default  "created_time" = latest  "upvoted_count" = most upvoted
+ZHIHU_SORT = "created_time"
+
+# Search time range: "" = unlimited  "a_day" = one day  "a_week" = one week  "a_month" = one month
+ZHIHU_SEARCH_TIME = "a_day"
+
 # Specify Zhihu user URL list
 ZHIHU_CREATOR_URL_LIST = [
     "https://www.zhihu.com/people/yd1234567",

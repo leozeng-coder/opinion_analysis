@@ -211,7 +211,6 @@ class CrawlerManager:
         cmd.extend(["--type", config.crawler_type.value])
         cmd.extend(["--save_data_option", config.save_option.value])
 
-        # Pass different arguments based on crawler type
         if config.crawler_type.value == "search" and config.keywords:
             cmd.extend(["--keywords", config.keywords])
         elif config.crawler_type.value == "detail" and config.specified_ids:
@@ -229,6 +228,24 @@ class CrawlerManager:
             cmd.extend(["--cookies", config.cookies])
 
         cmd.extend(["--headless", "true" if config.headless else "false"])
+
+        # Performance
+        cmd.extend(["--max_notes_count", str(config.max_notes_count)])
+        cmd.extend(["--max_concurrency_num", str(config.max_concurrency_num)])
+        cmd.extend(["--sleep_sec_min", str(config.sleep_sec_min)])
+        cmd.extend(["--sleep_sec_max", str(config.sleep_sec_max)])
+
+        # Platform sort
+        platform = config.platform.value
+        if platform == "xhs":
+            cmd.extend(["--xhs_sort_type", config.xhs_sort_type])
+        elif platform == "wb":
+            cmd.extend(["--weibo_search_type", config.weibo_search_type])
+        elif platform == "dy":
+            cmd.extend(["--dy_sort_type", str(config.dy_sort_type)])
+        elif platform == "zhihu":
+            cmd.extend(["--zhihu_sort", config.zhihu_sort])
+            cmd.extend(["--zhihu_search_time", config.zhihu_search_time])
 
         return cmd
 

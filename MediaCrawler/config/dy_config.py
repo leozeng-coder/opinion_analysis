@@ -18,7 +18,12 @@
 # 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
 
 # Douyin platform configuration
-PUBLISH_TIME_TYPE = 0
+
+# Sort type: 0=comprehensive 1=most likes 2=latest published
+DY_SORT_TYPE = 2
+
+# Publish time filter: 0=unlimited 1=one day 7=one week 180=six months
+PUBLISH_TIME_TYPE = 1
 
 # Specify DY video URL list (supports multiple formats)
 # Supported formats:

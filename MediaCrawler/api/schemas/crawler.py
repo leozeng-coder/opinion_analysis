@@ -55,6 +55,7 @@ class SaveDataOptionEnum(str, Enum):
     SQLITE = "sqlite"
     MONGODB = "mongodb"
     EXCEL = "excel"
+    POSTGRES = "postgres"
 
 
 class CrawlerStartRequest(BaseModel):
@@ -62,15 +63,26 @@ class CrawlerStartRequest(BaseModel):
     platform: PlatformEnum
     login_type: LoginTypeEnum = LoginTypeEnum.QRCODE
     crawler_type: CrawlerTypeEnum = CrawlerTypeEnum.SEARCH
-    keywords: str = ""  # Keywords for search mode
-    specified_ids: str = ""  # Post/video ID list for detail mode, comma-separated
-    creator_ids: str = ""  # Creator ID list for creator mode, comma-separated
+    keywords: str = ""
+    specified_ids: str = ""
+    creator_ids: str = ""
     start_page: int = 1
     enable_comments: bool = True
     enable_sub_comments: bool = False
     save_option: SaveDataOptionEnum = SaveDataOptionEnum.DB
     cookies: str = ""
     headless: bool = False
+    # Performance
+    max_notes_count: int = 50
+    max_concurrency_num: int = 3
+    sleep_sec_min: int = 1
+    sleep_sec_max: int = 3
+    # Platform sort
+    xhs_sort_type: str = "time_descending"
+    weibo_search_type: str = "real_time"
+    dy_sort_type: int = 2
+    zhihu_sort: str = "created_time"
+    zhihu_search_time: str = "a_day"
 
 
 class CrawlerStatusResponse(BaseModel):
