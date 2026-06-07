@@ -13,6 +13,7 @@ const PlatformSyncPage = lazy(() => import('@/pages/platform/PlatformSyncPage'))
 const TaggerPage = lazy(() => import('@/pages/ai/TaggerPage'))
 const RagPage = lazy(() => import('@/pages/ai/RagPage'))
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'))
+const CrawlerConfigPage = lazy(() => import('@/pages/config/CrawlerConfigPage'))
 
 const fallback = <Spin size="large" style={{ display: 'block', marginTop: 100, textAlign: 'center' }} />
 
@@ -34,15 +35,8 @@ const App: React.FC = () => (
             {/* 系统设置 */}
             <Route path="/config/system" element={<SystemConfigPage />} />
             <Route path="/config/notify" element={<NotifyPage />} />
+            <Route path="/config/crawler" element={<CrawlerConfigPage />} />
             {/* 审计日志 */}
-            <Route path="/audit" element={<AuditPage />} />
-            {/* 旧路由兼容重定向 */}
-            <Route path="/datasources" element={<Navigate to="/data/platform-sync" replace />} />
-            <Route path="/data/sources" element={<Navigate to="/data/platform-sync" replace />} />
-            <Route path="/rag-kb" element={<Navigate to="/ai/rag" replace />} />
-            <Route path="/tasks" element={<Navigate to="/ai/tagger" replace />} />
-            <Route path="/config/ai" element={<Navigate to="/ai/tagger" replace />} />
-            <Route path="/config/crawler" element={<Navigate to="/data/platform-sync" replace />} />
             <Route path="/config" element={<Navigate to="/config/system" replace />} />
             <Route path="/settings" element={<Navigate to="/config/system" replace />} />
             <Route path="/tagger" element={<Navigate to="/ai/tagger" replace />} />

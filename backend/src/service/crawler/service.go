@@ -22,13 +22,14 @@ import (
 // Service 爬虫服务
 type Service struct {
 	repo           *repository.CrawlerRepository
+	systemRepo     *repository.SystemRepository
 	httpClient     *http.Client
 	apiBaseURL     string
 	proxySecretKey string
 }
 
 // NewService 创建爬虫服务
-func NewService(repo *repository.CrawlerRepository) *Service {
+func NewService(repo *repository.CrawlerRepository, systemRepo *repository.SystemRepository) *Service {
 	apiURL := config.Cfg.Crawler.ApiURL
 	if apiURL == "" {
 		apiURL = "http://127.0.0.1:8085" // 默认端口
@@ -41,6 +42,7 @@ func NewService(repo *repository.CrawlerRepository) *Service {
 
 	return &Service{
 		repo:           repo,
+		systemRepo:     systemRepo,
 		httpClient:     &http.Client{Timeout: 30 * time.Second},
 		apiBaseURL:     apiURL,
 		proxySecretKey: secretKey,
@@ -65,6 +67,17 @@ type TriggerParams struct {
 	StartAt           string
 	EndAt             string
 	TimeoutMinutes    int
+	// 性能参数
+	MaxNotesCount int // 0 表示使用 Python 侧默认值
+	MaxConcurrency int
+	SleepSecMin   int
+	SleepSecMax   int
+	// 平台排序
+	XhsSortType      string
+	WeiboSearchType  string
+	DySortType       int
+	ZhihuSort        string
+	ZhihuSearchTime  string
 }
 
 type mediaCrawlerStatusResponse struct {
@@ -93,6 +106,27 @@ type MediaCrawlerStartRequest struct {
 	Headless          bool   `json:"headless"`
 	EnableComments    bool   `json:"enable_comments"`
 	EnableSubComments bool   `json:"enable_sub_comments"`
+	// 性能参数（0 表示使用 Python 侧默认值）
+	MaxNotesCount  int `json:"max_notes_count,omitempty"`
+	MaxConcurrency int `json:"max_concurrency_num,omitempty"`
+	SleepSecMin    int `json:"sleep_sec_min,omitempty"`
+	SleepSecMax    int `json:"sleep_sec_max,omitempty"`
+	// 平台排序（空字符串表示使用 Python 侧默认值）
+	XhsSortType     string `json:"xhs_sort_type,omitempty"`
+	WeiboSearchType string `json:"weibo_search_type,omitempty"`
+	DySortType      int    `json:"dy_sort_type,omitempty"`
+	ZhihuSort       string `json:"zhihu_sort,omitempty"`
+	ZhihuSearchTime string `json:"zhihu_search_time,omitempty"`
+	Cookies         string `json:"cookies,omitempty"`
+	// IP 代理
+	EnableIPProxy     bool   `json:"enable_ip_proxy,omitempty"`
+	IPProxyPoolCount  int    `json:"ip_proxy_pool_count,omitempty"`
+	IPProxyProvider   string `json:"ip_proxy_provider,omitempty"`
+	ProxyKdlSecretID  string `json:"proxy_kdl_secret_id,omitempty"`
+	ProxyKdlSignature string `json:"proxy_kdl_signature,omitempty"`
+	ProxyKdlUsername  string `json:"proxy_kdl_username,omitempty"`
+	ProxyKdlPassword  string `json:"proxy_kdl_password,omitempty"`
+	ProxyWandouAppKey string `json:"proxy_wandou_app_key,omitempty"`
 }
 
 // Trigger 触发爬虫任务
@@ -221,6 +255,65 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 	keywords := strings.Join(allTerms, " ")
 
 	// 构建请求
+	// 从 DB 加载动态配置作为基础，TriggerParams 里的非零值会覆盖 DB 默认值
+	dynCfg, _ := s.systemRepo.GetCrawlerConfig()
+
+	maxNotes := dynCfg.MaxNotesCount
+	if params.MaxNotesCount > 0 {
+		maxNotes = params.MaxNotesCount
+	}
+	maxConc := dynCfg.MaxConcurrency
+	if params.MaxConcurrency > 0 {
+		maxConc = params.MaxConcurrency
+	}
+	sleepMin := dynCfg.SleepSecMin
+	if params.SleepSecMin > 0 {
+		sleepMin = params.SleepSecMin
+	}
+	sleepMax := dynCfg.SleepSecMax
+	if params.SleepSecMax > 0 {
+		sleepMax = params.SleepSecMax
+	}
+	xhsSort := dynCfg.XhsSortType
+	if params.XhsSortType != "" {
+		xhsSort = params.XhsSortType
+	}
+	weiboSearch := dynCfg.WeiboSearchType
+	if params.WeiboSearchType != "" {
+		weiboSearch = params.WeiboSearchType
+	}
+	dySort := dynCfg.DySortType
+	if params.DySortType != 0 {
+		dySort = params.DySortType
+	}
+	zhihuSort := dynCfg.ZhihuSort
+	if params.ZhihuSort != "" {
+		zhihuSort = params.ZhihuSort
+	}
+	zhihuTime := dynCfg.ZhihuSearchTime
+	if params.ZhihuSearchTime != "" {
+		zhihuTime = params.ZhihuSearchTime
+	}
+
+	// Cookie：TriggerParams 没有显式 Cookie 时使用 DB 值
+	cookies := ""
+	switch platform {
+	case "xhs":
+		cookies = dynCfg.CookieXhs
+	case "dy":
+		cookies = dynCfg.CookieDy
+	case "ks":
+		cookies = dynCfg.CookieKs
+	case "bili":
+		cookies = dynCfg.CookieBili
+	case "wb":
+		cookies = dynCfg.CookieWb
+	case "tieba":
+		cookies = dynCfg.CookieTieba
+	case "zhihu":
+		cookies = dynCfg.CookieZhihu
+	}
+
 	reqBody := MediaCrawlerStartRequest{
 		Platform:          platform,
 		LoginType:         loginType,
@@ -231,8 +324,27 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 		StartPage:         startPage,
 		SaveOption:        saveOption,
 		Headless:          params.Headless,
-		EnableComments:    params.EnableComments,
-		EnableSubComments: params.EnableSubComments,
+		EnableComments:    params.EnableComments || dynCfg.EnableComments,
+		EnableSubComments: params.EnableSubComments || dynCfg.EnableSubComments,
+		MaxNotesCount:     maxNotes,
+		MaxConcurrency:    maxConc,
+		SleepSecMin:       sleepMin,
+		SleepSecMax:       sleepMax,
+		XhsSortType:       xhsSort,
+		WeiboSearchType:   weiboSearch,
+		DySortType:        dySort,
+		ZhihuSort:         zhihuSort,
+		ZhihuSearchTime:   zhihuTime,
+		Cookies:           cookies,
+		// IP 代理（全部来自 DB 配置，不允许单次 Trigger 覆盖）
+		EnableIPProxy:     dynCfg.EnableIPProxy,
+		IPProxyPoolCount:  dynCfg.IPProxyPoolCount,
+		IPProxyProvider:   dynCfg.IPProxyProvider,
+		ProxyKdlSecretID:  dynCfg.ProxyKdlSecretID,
+		ProxyKdlSignature: dynCfg.ProxyKdlSignature,
+		ProxyKdlUsername:  dynCfg.ProxyKdlUsername,
+		ProxyKdlPassword:  dynCfg.ProxyKdlPassword,
+		ProxyWandouAppKey: dynCfg.ProxyWandouAppKey,
 	}
 
 	jsonData, _ := json.Marshal(reqBody)

@@ -553,3 +553,155 @@ func (h *SystemHandler) TestSmtp(c *gin.Context) {
 	}
 	response.OK(c, gin.H{"message": "测试邮件已发送"})
 }
+
+// GetCrawlerConfig 返回当前爬虫配置（敏感字段脱敏）。
+func (h *SystemHandler) GetCrawlerConfig(c *gin.Context) {
+	cfg, err := h.system.GetCrawlerConfig()
+	if err != nil {
+		response.ServerError(c)
+		return
+	}
+	response.OK(c, repository.BuildCrawlerConfigResponse(cfg))
+}
+
+// updateCrawlerReq 使用指针字段实现部分更新：nil 表示不修改。
+type updateCrawlerReq struct {
+	MaxNotesCount     *int    `json:"maxNotesCount"`
+	MaxConcurrency    *int    `json:"maxConcurrency"`
+	SleepSecMin       *int    `json:"sleepSecMin"`
+	SleepSecMax       *int    `json:"sleepSecMax"`
+	EnableComments    *bool   `json:"enableComments"`
+	EnableSubComments *bool   `json:"enableSubComments"`
+	EnableIPProxy     *bool   `json:"enableIPProxy"`
+	IPProxyPoolCount  *int    `json:"ipProxyPoolCount"`
+	IPProxyProvider   *string `json:"ipProxyProvider"`
+	ProxyKdlSecretID  *string `json:"proxyKdlSecretId"`
+	ProxyKdlSignature *string `json:"proxyKdlSignature"`
+	ProxyKdlUsername  *string `json:"proxyKdlUsername"`
+	ProxyKdlPassword  *string `json:"proxyKdlPassword"`
+	ProxyWandouAppKey *string `json:"proxyWandouAppKey"`
+	XhsSortType       *string `json:"xhsSortType"`
+	WeiboSearchType   *string `json:"weiboSearchType"`
+	DySortType        *int    `json:"dySortType"`
+	ZhihuSort         *string `json:"zhihuSort"`
+	ZhihuSearchTime   *string `json:"zhihuSearchTime"`
+	// Cookie 按平台独立更新；key 为平台代码（xhs/dy/ks/bili/wb/tieba/zhihu）
+	Cookies map[string]string `json:"cookies"`
+}
+
+// UpdateCrawlerConfig 合并并持久化爬虫配置。
+func (h *SystemHandler) UpdateCrawlerConfig(c *gin.Context) {
+	var req updateCrawlerReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, 400, err.Error())
+		return
+	}
+
+	cur, err := h.system.GetCrawlerConfig()
+	if err != nil {
+		response.ServerError(c)
+		return
+	}
+	merged := cur
+
+	if req.MaxNotesCount != nil {
+		if *req.MaxNotesCount < 1 || *req.MaxNotesCount > 500 {
+			response.Fail(c, 400, "maxNotesCount 应在 1~500 之间")
+			return
+		}
+		merged.MaxNotesCount = *req.MaxNotesCount
+	}
+	if req.MaxConcurrency != nil {
+		if *req.MaxConcurrency < 1 || *req.MaxConcurrency > 10 {
+			response.Fail(c, 400, "maxConcurrency 应在 1~10 之间")
+			return
+		}
+		merged.MaxConcurrency = *req.MaxConcurrency
+	}
+	if req.SleepSecMin != nil {
+		merged.SleepSecMin = *req.SleepSecMin
+	}
+	if req.SleepSecMax != nil {
+		if req.SleepSecMin != nil && *req.SleepSecMax < *req.SleepSecMin {
+			response.Fail(c, 400, "sleepSecMax 不能小于 sleepSecMin")
+			return
+		}
+		merged.SleepSecMax = *req.SleepSecMax
+	}
+	if req.EnableComments != nil {
+		merged.EnableComments = *req.EnableComments
+	}
+	if req.EnableSubComments != nil {
+		merged.EnableSubComments = *req.EnableSubComments
+	}
+	if req.EnableIPProxy != nil {
+		merged.EnableIPProxy = *req.EnableIPProxy
+	}
+	if req.IPProxyPoolCount != nil {
+		merged.IPProxyPoolCount = *req.IPProxyPoolCount
+	}
+	if req.IPProxyProvider != nil {
+		merged.IPProxyProvider = strings.TrimSpace(*req.IPProxyProvider)
+	}
+	if req.ProxyKdlSecretID != nil {
+		merged.ProxyKdlSecretID = strings.TrimSpace(*req.ProxyKdlSecretID)
+	}
+	if req.ProxyKdlSignature != nil {
+		merged.ProxyKdlSignature = strings.TrimSpace(*req.ProxyKdlSignature)
+	}
+	if req.ProxyKdlUsername != nil {
+		merged.ProxyKdlUsername = strings.TrimSpace(*req.ProxyKdlUsername)
+	}
+	if req.ProxyKdlPassword != nil {
+		merged.ProxyKdlPassword = strings.TrimSpace(*req.ProxyKdlPassword)
+	}
+	if req.ProxyWandouAppKey != nil {
+		merged.ProxyWandouAppKey = strings.TrimSpace(*req.ProxyWandouAppKey)
+	}
+	if req.XhsSortType != nil {
+		merged.XhsSortType = strings.TrimSpace(*req.XhsSortType)
+	}
+	if req.WeiboSearchType != nil {
+		merged.WeiboSearchType = strings.TrimSpace(*req.WeiboSearchType)
+	}
+	if req.DySortType != nil {
+		merged.DySortType = *req.DySortType
+	}
+	if req.ZhihuSort != nil {
+		merged.ZhihuSort = strings.TrimSpace(*req.ZhihuSort)
+	}
+	if req.ZhihuSearchTime != nil {
+		merged.ZhihuSearchTime = strings.TrimSpace(*req.ZhihuSearchTime)
+	}
+	// Cookie 按 key 单独合并，空字符串意味着清空
+	for platform, cookie := range req.Cookies {
+		switch platform {
+		case "xhs":
+			merged.CookieXhs = cookie
+		case "dy":
+			merged.CookieDy = cookie
+		case "ks":
+			merged.CookieKs = cookie
+		case "bili":
+			merged.CookieBili = cookie
+		case "wb":
+			merged.CookieWb = cookie
+		case "tieba":
+			merged.CookieTieba = cookie
+		case "zhihu":
+			merged.CookieZhihu = cookie
+		}
+	}
+
+	uid := uint(0)
+	if v, ok := c.Get("userID"); ok {
+		if id, ok2 := v.(uint); ok2 {
+			uid = id
+		}
+	}
+	if err := h.system.SaveCrawlerConfig(merged, uid); err != nil {
+		response.Fail(c, 500, "持久化失败: "+err.Error())
+		return
+	}
+	response.OK(c, repository.BuildCrawlerConfigResponse(merged))
+}

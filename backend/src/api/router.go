@@ -288,6 +288,10 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				admin.POST("/system/smtp/test",
 					middleware.Audit(db, "system_config", "test_smtp"),
 					adminSystemH.TestSmtp)
+				admin.GET("/system/crawler", adminSystemH.GetCrawlerConfig)
+				admin.PUT("/system/crawler",
+					middleware.Audit(db, "system_config", "update_crawler"),
+					adminSystemH.UpdateCrawlerConfig)
 
 				admin.GET("/rag/status", adminRagH.Status)
 				admin.GET("/rag/runs", adminRagH.ListRuns)

@@ -79,7 +79,7 @@ func NewEngine(
 // registerNodes 注册所有节点执行器
 func (e *Engine) registerNodes() {
 	// 爬虫类节点
-	MustRegisterNode(crawlerNodes.NewRunNode(e.db, e.store.Crawler))
+	MustRegisterNode(crawlerNodes.NewRunNode(e.db, e.store.Crawler, e.store.System))
 	MustRegisterNode(crawlerNodes.NewScheduleNode(e.store.Crawler))
 	MustRegisterNode(crawlerNodes.NewStatusNode(e.store.Crawler))
 

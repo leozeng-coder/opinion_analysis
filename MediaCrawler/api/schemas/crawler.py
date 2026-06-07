@@ -83,6 +83,15 @@ class CrawlerStartRequest(BaseModel):
     dy_sort_type: int = 2
     zhihu_sort: str = "created_time"
     zhihu_search_time: str = "a_day"
+    # IP proxy
+    enable_ip_proxy: bool = False
+    ip_proxy_pool_count: int = 2
+    ip_proxy_provider: str = "kuaidaili"
+    proxy_kdl_secret_id: str = ""
+    proxy_kdl_signature: str = ""
+    proxy_kdl_username: str = ""
+    proxy_kdl_password: str = ""
+    proxy_wandou_app_key: str = ""
 
 
 class CrawlerStatusResponse(BaseModel):

@@ -5,35 +5,92 @@ import {
   Card,
   Checkbox,
   Col,
+  Divider,
   Form,
   Input,
   InputNumber,
+  Modal,
   Progress,
   Row,
+  Select,
   Space,
+  Spin,
   Switch,
-  Typography,
-  message,
   Table,
   Tag,
-  Spin,
+  Typography,
+  message,
 } from 'antd'
-import { BellOutlined, MailOutlined, SaveOutlined, SyncOutlined } from '@ant-design/icons'
+import {
+  BellOutlined,
+  KeyOutlined,
+  MailOutlined,
+  SaveOutlined,
+  SettingOutlined,
+  SyncOutlined,
+} from '@ant-design/icons'
 import { adminSmtpApi, alertApi } from '@/api/admin-smtp'
+import { adminCrawlerApi, type CrawlerConfigResponse } from '@/api/admin-crawler'
 import { platformSyncApi, type PlatformInfo, type PlatformSyncProgress } from '@/api/crawler'
 import PageHeader from '@/components/common/PageHeader'
 import ui from '@/styles/page.module.css'
 
 const { Text } = Typography
 
+const PLATFORMS = [
+  { code: 'xhs', name: '小红书', color: '#ff2442' },
+  { code: 'dy', name: '抖音', color: '#161823' },
+  { code: 'ks', name: '快手', color: '#ff5500' },
+  { code: 'bili', name: 'B站', color: '#00a1d6' },
+  { code: 'wb', name: '微博', color: '#e6162d' },
+  { code: 'tieba', name: '贴吧', color: '#2468f2' },
+  { code: 'zhihu', name: '知乎', color: '#0066ff' },
+]
+
+const XHS_SORT_OPTIONS = [
+  { value: 'time_descending', label: '最新发布' },
+  { value: 'popularity_descending', label: '最受欢迎' },
+]
+const WB_SEARCH_OPTIONS = [
+  { value: 'real_time', label: '实时' },
+  { value: 'hot', label: '热门' },
+  { value: 'comprehensive', label: '综合' },
+]
+const DY_SORT_OPTIONS = [
+  { value: 0, label: '综合排序' },
+  { value: 1, label: '最多点赞' },
+  { value: 2, label: '最新发布' },
+]
+const ZHIHU_SORT_OPTIONS = [
+  { value: 'created_time', label: '最新' },
+  { value: 'default', label: '默认' },
+]
+const ZHIHU_TIME_OPTIONS = [
+  { value: 'a_day', label: '一天内' },
+  { value: 'a_week', label: '一周内' },
+  { value: 'a_month', label: '一月内' },
+  { value: 'three_months', label: '三月内' },
+  { value: 'half_year', label: '半年内' },
+  { value: 'a_year', label: '一年内' },
+  { value: 'not_limit', label: '不限时间' },
+]
+const IP_PROXY_PROVIDERS = [
+  { value: 'kuaidaili', label: '快代理 (KDL)' },
+  { value: 'wandou', label: '豌豆代理' },
+]
+
 interface SmtpFormValues {
-  host: string
-  port: number
-  username: string
-  password: string
-  from: string
-  useTls: boolean
-  onCrawl: boolean
+  host: string; port: number; username: string; password: string
+  from: string; useTls: boolean; onCrawl: boolean
+}
+interface CrawlerFormValues {
+  maxNotesCount: number; maxConcurrency: number; sleepSecMin: number; sleepSecMax: number
+  enableComments: boolean; enableSubComments: boolean
+  enableIPProxy: boolean; ipProxyPoolCount: number; ipProxyProvider: string
+  proxyKdlSecretId: string; proxyKdlSignature: string
+  proxyKdlUsername: string; proxyKdlPassword: string; proxyWandouAppKey: string
+  xhsSortType: string; weiboSearchType: string; dySortType: number
+  zhihuSort: string; zhihuSearchTime: string
 }
 
 const CrawlerConfigPage: React.FC = () => {
@@ -48,12 +105,24 @@ const CrawlerConfigPage: React.FC = () => {
   const [testingMail, setTestingMail] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  // 平台同步相关状态
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([])
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
   const [syncProgress, setSyncProgress] = useState<{ [key: string]: PlatformSyncProgress }>({})
   const [syncing, setSyncing] = useState(false)
   const [progressInterval, setProgressInterval] = useState<ReturnType<typeof setInterval> | null>(null)
+
+  const [crawlerForm] = Form.useForm<CrawlerFormValues>()
+  const enableIPProxy = Form.useWatch('enableIPProxy', crawlerForm) ?? false
+  const ipProxyProvider = Form.useWatch('ipProxyProvider', crawlerForm) ?? 'kuaidaili'
+  const [crawlerLoading, setCrawlerLoading] = useState(false)
+  const [crawlerSaving, setCrawlerSaving] = useState(false)
+  const [cookies, setCookies] = useState<CrawlerConfigResponse['cookies']>({})
+
+  const [cookieModal, setCookieModal] = useState<{ open: boolean; platform: string; name: string }>({
+    open: false, platform: '', name: '',
+  })
+  const [cookieInput, setCookieInput] = useState('')
+  const [cookieSaving, setCookieSaving] = useState(false)
 
   const loadSmtpConfig = useCallback(async () => {
     setLoading(true)
@@ -62,74 +131,71 @@ const CrawlerConfigPage: React.FC = () => {
       if (!cfg) return
       setSmtpPasswordSet(cfg.passwordSet)
       smtpForm.setFieldsValue({
-        host: cfg.host,
-        port: cfg.port,
-        username: cfg.username,
-        from: cfg.from,
-        useTls: cfg.useTls,
-        onCrawl: cfg.onCrawl,
-        password: '',
+        host: cfg.host, port: cfg.port, username: cfg.username,
+        from: cfg.from, useTls: cfg.useTls, onCrawl: cfg.onCrawl, password: '',
       })
     } finally {
       setLoading(false)
     }
   }, [smtpForm])
 
-  // 加载平台列表
   const loadPlatforms = useCallback(async () => {
     try {
       const list = await platformSyncApi.getPlatformList()
       setPlatforms(list)
-    } catch (error) {
-      console.error('加载平台列表失败:', error)
-    }
+    } catch { /* ignore */ }
   }, [])
 
-  // 加载同步进度
   const loadSyncProgress = useCallback(async () => {
     try {
       const progress = await platformSyncApi.getProgress()
       if (Array.isArray(progress)) {
-        const progressMap: { [key: string]: PlatformSyncProgress } = {}
-        progress.forEach((p) => {
-          progressMap[p.platform] = p
-        })
-        setSyncProgress(progressMap)
+        const map: { [key: string]: PlatformSyncProgress } = {}
+        progress.forEach((p) => { map[p.platform] = p })
+        setSyncProgress(map)
       }
-    } catch (error) {
-      console.error('加载同步进度失败:', error)
-    }
+    } catch { /* ignore */ }
   }, [])
+
+  const loadCrawlerConfig = useCallback(async () => {
+    setCrawlerLoading(true)
+    try {
+      const cfg = await adminCrawlerApi.getConfig()
+      crawlerForm.setFieldsValue({
+        maxNotesCount: cfg.maxNotesCount, maxConcurrency: cfg.maxConcurrency,
+        sleepSecMin: cfg.sleepSecMin, sleepSecMax: cfg.sleepSecMax,
+        enableComments: cfg.enableComments, enableSubComments: cfg.enableSubComments,
+        enableIPProxy: cfg.enableIPProxy, ipProxyPoolCount: cfg.ipProxyPoolCount,
+        ipProxyProvider: cfg.ipProxyProvider || 'kuaidaili',
+        proxyKdlSecretId: cfg.proxyKdlSecretId, proxyKdlSignature: cfg.proxyKdlSignature,
+        proxyKdlUsername: cfg.proxyKdlUsername, proxyKdlPassword: cfg.proxyKdlPassword,
+        proxyWandouAppKey: cfg.proxyWandouAppKey,
+        xhsSortType: cfg.xhsSortType, weiboSearchType: cfg.weiboSearchType,
+        dySortType: cfg.dySortType, zhihuSort: cfg.zhihuSort, zhihuSearchTime: cfg.zhihuSearchTime,
+      })
+      setCookies(cfg.cookies ?? {})
+    } catch { message.error('加载爬虫配置失败') }
+    finally { setCrawlerLoading(false) }
+  }, [crawlerForm])
 
   useEffect(() => {
     void loadSmtpConfig()
     void loadPlatforms()
-  }, [loadSmtpConfig, loadPlatforms])
+    void loadCrawlerConfig()
+  }, [loadSmtpConfig, loadPlatforms, loadCrawlerConfig])
 
-  // 开始轮询进度
   const startProgressPolling = useCallback(() => {
     if (progressInterval) return
-    const interval = setInterval(() => {
-      void loadSyncProgress()
-    }, 1000) // 每秒更新一次
+    const interval = setInterval(() => { void loadSyncProgress() }, 1000)
     setProgressInterval(interval)
   }, [progressInterval, loadSyncProgress])
 
-  // 停止轮询进度
   const stopProgressPolling = useCallback(() => {
-    if (progressInterval) {
-      clearInterval(progressInterval)
-      setProgressInterval(null)
-    }
+    if (progressInterval) { clearInterval(progressInterval); setProgressInterval(null) }
   }, [progressInterval])
 
-  // 清理定时器
   useEffect(() => {
-    return () => {
-      if (progressInterval) {
-        clearInterval(progressInterval)
-      }
-    }
+    return () => { if (progressInterval) clearInterval(progressInterval) }
   }, [progressInterval])
 
   const handleSaveSmtp = async (values: SmtpFormValues) => {
@@ -138,27 +204,18 @@ const CrawlerConfigPage: React.FC = () => {
       await adminSmtpApi.updateConfig(values)
       message.success('SMTP 配置已保存')
       void loadSmtpConfig()
-    } catch {
-      message.error('保存失败')
-    } finally {
-      setSmtpSaving(false)
-    }
+    } catch { message.error('保存失败') }
+    finally { setSmtpSaving(false) }
   }
 
   const handleTestMail = async () => {
-    if (!testEmail) {
-      message.warning('请输入测试邮箱地址')
-      return
-    }
+    if (!testEmail) { message.warning('请输入测试邮箱地址'); return }
     setTestingMail(true)
     try {
       await adminSmtpApi.test(testEmail)
       message.success('测试邮件已发送，请检查收件箱')
-    } catch {
-      message.error('发送失败，请检查配置')
-    } finally {
-      setTestingMail(false)
-    }
+    } catch { message.error('发送失败，请检查配置') }
+    finally { setTestingMail(false) }
   }
 
   const handleEvaluate = async () => {
@@ -166,128 +223,97 @@ const CrawlerConfigPage: React.FC = () => {
     try {
       await alertApi.evaluate()
       message.success('规则评估已触发')
-    } catch {
-      message.error('评估失败')
-    } finally {
-      setEvaluating(false)
-    }
+    } catch { message.error('评估失败') }
+    finally { setEvaluating(false) }
   }
 
-  // 手动触发同步（支持多选）
+  const handleSaveCrawlerParams = async (values: CrawlerFormValues) => {
+    setCrawlerSaving(true)
+    try {
+      const updated = await adminCrawlerApi.updateConfig(values)
+      message.success('爬虫参数已保存')
+      setCookies(updated.cookies ?? {})
+    } catch { message.error('保存失败') }
+    finally { setCrawlerSaving(false) }
+  }
+
+  const handleOpenCookieModal = (code: string, name: string) => {
+    setCookieModal({ open: true, platform: code, name })
+    setCookieInput('')
+  }
+
+  const handleSaveCookie = async () => {
+    if (!cookieInput.trim()) { message.warning('Cookie 不能为空'); return }
+    setCookieSaving(true)
+    try {
+      const updated = await adminCrawlerApi.updateConfig({ cookies: { [cookieModal.platform]: cookieInput.trim() } })
+      message.success(`${cookieModal.name} Cookie 已更新`)
+      setCookies(updated.cookies ?? {})
+      setCookieModal({ open: false, platform: '', name: '' })
+    } catch { message.error('更新失败') }
+    finally { setCookieSaving(false) }
+  }
+
+  const handleClearCookie = async (code: string, name: string) => {
+    try {
+      const updated = await adminCrawlerApi.updateConfig({ cookies: { [code]: '' } })
+      message.success(`${name} Cookie 已清除`)
+      setCookies(updated.cookies ?? {})
+    } catch { message.error('清除失败') }
+  }
+
   const handleSyncSelected = async () => {
-    if (selectedPlatforms.length === 0) {
-      message.warning('请至少选择一个平台')
-      return
-    }
-
-    setSyncing(true)
-    startProgressPolling()
-
+    if (selectedPlatforms.length === 0) { message.warning('请至少选择一个平台'); return }
+    setSyncing(true); startProgressPolling()
     try {
       const results = await platformSyncApi.syncPlatforms(selectedPlatforms)
-
-      // 等待一段时间让进度更新
       await new Promise(resolve => setTimeout(resolve, 1000))
-
-      const summary = Object.entries(results).map(([platform, result]) => {
-        const platformInfo = platforms.find(p => p.code === platform)
-        return {
-          platform: platformInfo?.name || platform,
-          newCount: result.newCount,
-          status: result.status,
-        }
-      })
-
-      const totalNew = summary.reduce((sum, item) => sum + item.newCount, 0)
-      const failed = summary.filter(item => item.status === 'failed').length
-
-      if (failed > 0) {
-        message.warning(`同步完成：新增 ${totalNew} 条数据，${failed} 个平台失败`)
-      } else {
-        message.success(`同步完成：新增 ${totalNew} 条数据`)
-      }
-
+      const totalNew = Object.values(results).reduce((s, r) => s + r.newCount, 0)
+      const failed = Object.values(results).filter(r => r.status === 'failed').length
+      if (failed > 0) message.warning(`同步完成：新增 ${totalNew} 条，${failed} 个平台失败`)
+      else message.success(`同步完成：新增 ${totalNew} 条数据`)
       void loadPlatforms()
-    } catch (error) {
-      message.error('同步失败')
-    } finally {
+    } catch { message.error('同步失败') }
+    finally {
       setSyncing(false)
-      setTimeout(() => {
-        stopProgressPolling()
-        setSyncProgress({})
-      }, 2000)
+      setTimeout(() => { stopProgressPolling(); setSyncProgress({}) }, 2000)
     }
   }
 
-  // 同步所有平台
   const handleSyncAll = async () => {
-    setSyncing(true)
-    startProgressPolling()
-
+    setSyncing(true); startProgressPolling()
     try {
       const results = await platformSyncApi.syncAll()
-
       await new Promise(resolve => setTimeout(resolve, 1000))
-
-      const summary = Object.entries(results).map(([platform, result]) => {
-        const platformInfo = platforms.find(p => p.code === platform)
-        return {
-          platform: platformInfo?.name || platform,
-          newCount: result.newCount,
-        }
-      })
-
-      const totalNew = summary.reduce((sum, item) => sum + item.newCount, 0)
+      const totalNew = Object.values(results).reduce((s, r) => s + r.newCount, 0)
       message.success(`批量同步完成：共新增 ${totalNew} 条数据`)
-
       void loadPlatforms()
-    } catch (error) {
-      message.error('批量同步失败')
-    } finally {
+    } catch { message.error('批量同步失败') }
+    finally {
       setSyncing(false)
-      setTimeout(() => {
-        stopProgressPolling()
-        setSyncProgress({})
-      }, 2000)
+      setTimeout(() => { stopProgressPolling(); setSyncProgress({}) }, 2000)
     }
   }
 
-  // 全选/取消全选
   const handleSelectAll = (checked: boolean) => {
-    if (checked) {
-      setSelectedPlatforms(platforms.map(p => p.code))
-    } else {
-      setSelectedPlatforms([])
-    }
+    setSelectedPlatforms(checked ? platforms.map(p => p.code) : [])
   }
-
-  // 单选平台
   const handleSelectPlatform = (code: string, checked: boolean) => {
-    if (checked) {
-      setSelectedPlatforms([...selectedPlatforms, code])
-    } else {
-      setSelectedPlatforms(selectedPlatforms.filter(p => p !== code))
-    }
+    setSelectedPlatforms(checked ? [...selectedPlatforms, code] : selectedPlatforms.filter(p => p !== code))
   }
-
-  // 获取进度百分比
-  const getProgressPercent = (platform: string): number => {
-    const progress = syncProgress[platform]
-    if (!progress || progress.totalCount === 0) return 0
-    return Math.round((progress.processedCount / progress.totalCount) * 100)
+  const getProgressPercent = (platform: string) => {
+    const p = syncProgress[platform]
+    return (!p || p.totalCount === 0) ? 0 : Math.round((p.processedCount / p.totalCount) * 100)
   }
-
-  // 获取进度状态
   const getProgressStatus = (platform: string): 'success' | 'exception' | 'active' | 'normal' => {
-    const progress = syncProgress[platform]
-    if (!progress) return 'normal'
-    if (progress.status === 'completed') return 'success'
-    if (progress.status === 'failed') return 'exception'
-    if (progress.status === 'running') return 'active'
+    const p = syncProgress[platform]
+    if (!p) return 'normal'
+    if (p.status === 'completed') return 'success'
+    if (p.status === 'failed') return 'exception'
+    if (p.status === 'running') return 'active'
     return 'normal'
   }
 
-  // 平台同步表格列
   const syncColumns = [
     {
       title: (
@@ -295,63 +321,39 @@ const CrawlerConfigPage: React.FC = () => {
           checked={selectedPlatforms.length === platforms.length && platforms.length > 0}
           indeterminate={selectedPlatforms.length > 0 && selectedPlatforms.length < platforms.length}
           onChange={(e) => handleSelectAll(e.target.checked)}
-        >
-          平台
-        </Checkbox>
+        >平台</Checkbox>
       ),
-      dataIndex: 'name',
-      key: 'name',
+      dataIndex: 'name', key: 'name',
       render: (name: string, record: PlatformInfo) => (
-        <Checkbox
-          checked={selectedPlatforms.includes(record.code)}
-          onChange={(e) => handleSelectPlatform(record.code, e.target.checked)}
-        >
-          {name}
-        </Checkbox>
+        <Checkbox checked={selectedPlatforms.includes(record.code)}
+          onChange={(e) => handleSelectPlatform(record.code, e.target.checked)}>{name}</Checkbox>
       ),
     },
+    { title: '数据表', dataIndex: 'table', key: 'table' },
     {
-      title: '数据表',
-      dataIndex: 'table',
-      key: 'table',
-    },
-    {
-      title: '最后同步时间',
-      dataIndex: 'lastSyncTime',
-      key: 'lastSyncTime',
+      title: '最后同步时间', dataIndex: 'lastSyncTime', key: 'lastSyncTime',
       render: (time: string) => {
         if (!time) return <Text type="secondary">从未同步</Text>
-        const date = new Date(time)
-        const now = new Date()
-        const diff = now.getTime() - date.getTime()
-        const minutes = Math.floor(diff / 60000)
-
-        if (minutes < 1) return '刚刚'
-        if (minutes < 60) return `${minutes} 分钟前`
-        if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前`
-        return date.toLocaleString('zh-CN')
+        const diff = Date.now() - new Date(time).getTime()
+        const mins = Math.floor(diff / 60000)
+        if (mins < 1) return '刚刚'
+        if (mins < 60) return `${mins} 分钟前`
+        if (mins < 1440) return `${Math.floor(mins / 60)} 小时前`
+        return new Date(time).toLocaleString('zh-CN')
       },
     },
     {
-      title: '同步进度',
-      key: 'progress',
+      title: '同步进度', key: 'progress',
       render: (_: unknown, record: PlatformInfo) => {
-        const progress = syncProgress[record.code]
-        if (!progress || progress.status === 'pending') {
-          return <Text type="secondary">-</Text>
-        }
-
+        const p = syncProgress[record.code]
+        if (!p || p.status === 'pending') return <Text type="secondary">-</Text>
         return (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <Progress
-              percent={getProgressPercent(record.code)}
-              status={getProgressStatus(record.code)}
-              size="small"
-            />
+            <Progress percent={getProgressPercent(record.code)} status={getProgressStatus(record.code)} size="small" />
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {progress.status === 'running' && `处理中: ${progress.processedCount}/${progress.totalCount}`}
-              {progress.status === 'completed' && `完成: 新增 ${progress.newCount}, 跳过 ${progress.skippedCount}`}
-              {progress.status === 'failed' && `失败: ${progress.errorMessage}`}
+              {p.status === 'running' && `处理中: ${p.processedCount}/${p.totalCount}`}
+              {p.status === 'completed' && `完成: 新增 ${p.newCount}, 跳过 ${p.skippedCount}`}
+              {p.status === 'failed' && `失败: ${p.errorMessage}`}
             </Text>
           </Space>
         )
@@ -366,50 +368,216 @@ const CrawlerConfigPage: React.FC = () => {
       <Row gutter={[16, 16]}>
         {/* 平台数据同步 */}
         <Col span={24}>
-          <Card
-            title="🔄 平台数据同步"
-            extra={
-              <Space>
-                <Button
-                  type="primary"
-                  icon={<SyncOutlined />}
-                  onClick={handleSyncSelected}
-                  loading={syncing}
-                  disabled={selectedPlatforms.length === 0}
-                >
-                  同步选中平台
-                </Button>
-                <Button
-                  icon={<SyncOutlined />}
-                  onClick={handleSyncAll}
-                  loading={syncing}
-                >
-                  同步所有平台
-                </Button>
-              </Space>
-            }
+          <Card className={ui.panelCard} title="🔄 平台数据同步"
+            extra={<Space>
+              <Button type="primary" icon={<SyncOutlined />} onClick={handleSyncSelected}
+                loading={syncing} disabled={selectedPlatforms.length === 0}>同步选中平台</Button>
+              <Button icon={<SyncOutlined />} onClick={handleSyncAll} loading={syncing}>同步所有平台</Button>
+            </Space>}
           >
-            <Alert
-              message="自动同步说明"
-              description="MediaCrawler 爬虫完成后会自动触发数据同步，无需手动配置。此处提供手动同步功能用于紧急情况。支持多选平台批量同步，实时查看同步进度。"
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
+            <Alert className={ui.infoBanner} message="自动同步说明"
+              description="MediaCrawler 爬虫完成后会自动触发数据同步。此处提供手动同步功能用于紧急情况，支持多平台批量同步。"
+              type="info" showIcon style={{ marginBottom: 16 }} />
+            <Table columns={syncColumns} dataSource={platforms} rowKey="code"
+              pagination={false} loading={loading} />
+          </Card>
+        </Col>
 
-            <Table
-              columns={syncColumns}
-              dataSource={platforms}
-              rowKey="code"
-              pagination={false}
-              loading={loading}
-            />
+        {/* 爬虫参数配置 */}
+        <Col span={24}>
+          <Card className={ui.panelCard} title={<><SettingOutlined style={{ marginRight: 6 }} />爬虫参数配置</>}>
+            <Spin spinning={crawlerLoading}>
+              <Form form={crawlerForm} layout="vertical" onFinish={handleSaveCrawlerParams}>
+
+                <Divider orientation="left" plain style={{ marginTop: 0, color: '#888', fontSize: 12 }}>爬取行为</Divider>
+                <Row gutter={16}>
+                  <Col span={6}>
+                    <Form.Item label="最大爬取数量" name="maxNotesCount" tooltip="每次任务最多爬取的内容条数">
+                      <InputNumber min={1} max={500} style={{ width: '100%' }} addonAfter="条" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="最大并发数" name="maxConcurrency" tooltip="同时运行的爬取协程数，建议 1~5">
+                      <InputNumber min={1} max={10} style={{ width: '100%' }} addonAfter="个" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="请求间隔最小值" name="sleepSecMin">
+                      <InputNumber min={0} max={60} style={{ width: '100%' }} addonAfter="秒" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="请求间隔最大值" name="sleepSecMax">
+                      <InputNumber min={0} max={120} style={{ width: '100%' }} addonAfter="秒" />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Row gutter={16}>
+                  <Col span={6}>
+                    <Form.Item label="爬取评论" name="enableComments" valuePropName="checked">
+                      <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="爬取子评论" name="enableSubComments" valuePropName="checked"
+                      tooltip="开启后会爬取评论的回复，数据量较大">
+                      <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                    </Form.Item>
+                  </Col>
+                </Row>
+
+                {/* IP 代理 */}
+                <Divider orientation="left" plain style={{ color: '#888', fontSize: 12 }}>IP 代理池</Divider>
+                <Row gutter={16}>
+                  <Col span={4}>
+                    <Form.Item label="启用 IP 代理" name="enableIPProxy" valuePropName="checked">
+                      <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                    </Form.Item>
+                  </Col>
+                  {enableIPProxy && (<>
+                    <Col span={6}>
+                      <Form.Item label="代理服务商" name="ipProxyProvider">
+                        <Select options={IP_PROXY_PROVIDERS} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
+                      <Form.Item label="代理池数量" name="ipProxyPoolCount">
+                        <InputNumber min={1} max={200} style={{ width: '100%' }} addonAfter="个" />
+                      </Form.Item>
+                    </Col>
+                  </>)}
+                </Row>
+                {enableIPProxy && ipProxyProvider === 'kuaidaili' && (
+                  <Row gutter={16}>
+                    <Col span={6}>
+                      <Form.Item label="KDL Secret ID" name="proxyKdlSecretId">
+                        <Input.Password placeholder="已设置则留空不变" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item label="KDL Signature" name="proxyKdlSignature">
+                        <Input.Password placeholder="已设置则留空不变" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item label="KDL 用户名" name="proxyKdlUsername">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item label="KDL 密码" name="proxyKdlPassword">
+                        <Input.Password placeholder="已设置则留空不变" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                )}
+                {enableIPProxy && ipProxyProvider === 'wandou' && (
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item label="豌豆 App Key" name="proxyWandouAppKey">
+                        <Input.Password placeholder="已设置则留空不变" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                )}
+
+                {/* 平台排序策略 */}
+                <Divider orientation="left" plain style={{ color: '#888', fontSize: 12 }}>平台排序策略</Divider>
+                <Row gutter={16}>
+                  <Col span={6}>
+                    <Form.Item label="小红书排序" name="xhsSortType">
+                      <Select options={XHS_SORT_OPTIONS} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="微博搜索类型" name="weiboSearchType">
+                      <Select options={WB_SEARCH_OPTIONS} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="抖音排序" name="dySortType">
+                      <Select options={DY_SORT_OPTIONS} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Row gutter={16}>
+                  <Col span={6}>
+                    <Form.Item label="知乎排序" name="zhihuSort">
+                      <Select options={ZHIHU_SORT_OPTIONS} />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="知乎时间范围" name="zhihuSearchTime">
+                      <Select options={ZHIHU_TIME_OPTIONS} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+
+                <div style={{ paddingTop: 8 }}>
+                  <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={crawlerSaving}>
+                    保存参数配置
+                  </Button>
+                </div>
+              </Form>
+            </Spin>
+          </Card>
+        </Col>
+
+        {/* 平台 Cookie 管理 */}
+        <Col span={24}>
+          <Card className={ui.panelCard} title={<><KeyOutlined style={{ marginRight: 6 }} />平台 Cookie 管理</>}
+            extra={<Text type="secondary" style={{ fontSize: 12 }}>Cookie 用于已登录身份访问，定期更新以防失效</Text>}
+          >
+            <Alert className={ui.infoBanner} message="Cookie 安全说明"
+              description="Cookie 以加密方式存储于数据库，展示时已脱敏。更新后立即对下次爬虫任务生效，无需重启服务。"
+              type="info" showIcon style={{ marginBottom: 16 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {PLATFORMS.map(({ code, name, color }) => {
+                const info = cookies[code]
+                const isSet = info?.set ?? false
+                return (
+                  <div key={code} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 14px', borderRadius: 8,
+                    background: 'rgba(0,0,0,0.02)', border: '1px solid #f0f0f0',
+                  }}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: color, flexShrink: 0,
+                    }} />
+                    <Text strong style={{ width: 72, flexShrink: 0 }}>{name}</Text>
+                    {isSet ? (
+                      <>
+                        <Tag className={ui.softTagSage} style={{ fontFamily: 'monospace', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {info.masked}
+                        </Tag>
+                        <Tag className={ui.softTagBlue} style={{ flexShrink: 0 }}>已设置</Tag>
+                      </>
+                    ) : (
+                      <Tag className={ui.softTagNeutral} style={{ flexShrink: 0 }}>未设置</Tag>
+                    )}
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                      <Button size="small" type="primary" ghost
+                        onClick={() => handleOpenCookieModal(code, name)}>
+                        {isSet ? '更新' : '设置'} Cookie
+                      </Button>
+                      {isSet && (
+                        <Button size="small" danger ghost
+                          onClick={() => void handleClearCookie(code, name)}>
+                          清除
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </Card>
         </Col>
 
         {/* SMTP 配置 */}
         <Col span={24}>
-          <Card title={<><MailOutlined /> SMTP 邮件配置</>}>
+          <Card className={ui.panelCard} title={<><MailOutlined style={{ marginRight: 6 }} />SMTP 邮件配置</>}>
             <Spin spinning={loading}>
               <Form form={smtpForm} layout="vertical" onFinish={handleSaveSmtp}>
                 <Row gutter={16}>
@@ -424,7 +592,6 @@ const CrawlerConfigPage: React.FC = () => {
                     </Form.Item>
                   </Col>
                 </Row>
-
                 <Row gutter={16}>
                   <Col span={12}>
                     <Form.Item label="用户名" name="username" rules={[{ required: true }]}>
@@ -432,29 +599,22 @@ const CrawlerConfigPage: React.FC = () => {
                     </Form.Item>
                   </Col>
                   <Col span={12}>
-                    <Form.Item
-                      label={smtpPasswordSet ? '密码（留空保持不变）' : '密码'}
-                      name="password"
-                      rules={[{ required: !smtpPasswordSet }]}
-                    >
+                    <Form.Item label={smtpPasswordSet ? '密码（留空保持不变）' : '密码'} name="password"
+                      rules={[{ required: !smtpPasswordSet }]}>
                       <Input.Password placeholder={smtpPasswordSet ? '••••••••' : '请输入密码'} />
                     </Form.Item>
                   </Col>
                 </Row>
-
                 <Form.Item label="发件人地址" name="from" rules={[{ required: true, type: 'email' }]}>
                   <Input placeholder="noreply@example.com" />
                 </Form.Item>
-
                 <Row gutter={16}>
                   <Col span={12}>
                     <Form.Item label="启用 TLS" name="useTls" valuePropName="checked">
                       <Switch />
                     </Form.Item>
                     {smtpPort === 465 && (
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        端口 465 通常使用 SSL/TLS
-                      </Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>端口 465 通常使用 SSL/TLS</Text>
                     )}
                   </Col>
                   <Col span={12}>
@@ -463,26 +623,18 @@ const CrawlerConfigPage: React.FC = () => {
                     </Form.Item>
                   </Col>
                 </Row>
-
                 <Space>
                   <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={smtpSaving}>
                     保存配置
                   </Button>
                 </Space>
               </Form>
-
               <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #f0f0f0' }}>
                 <Space>
-                  <Input
-                    placeholder="输入测试邮箱"
-                    value={testEmail}
-                    onChange={(e) => setTestEmail(e.target.value)}
-                    style={{ width: 300 }}
-                    defaultValue={smtpUsername || smtpFrom}
-                  />
-                  <Button onClick={handleTestMail} loading={testingMail}>
-                    发送测试邮件
-                  </Button>
+                  <Input placeholder="输入测试邮箱" value={testEmail}
+                    onChange={(e) => setTestEmail(e.target.value)} style={{ width: 300 }}
+                    defaultValue={smtpUsername || smtpFrom} />
+                  <Button onClick={handleTestMail} loading={testingMail}>发送测试邮件</Button>
                 </Space>
               </div>
             </Spin>
@@ -491,20 +643,41 @@ const CrawlerConfigPage: React.FC = () => {
 
         {/* 告警规则评估 */}
         <Col span={24}>
-          <Card title={<><BellOutlined /> 告警规则评估</>}>
-            <Alert
-              message="手动触发告警规则评估"
+          <Card className={ui.panelCard} title={<><BellOutlined style={{ marginRight: 6 }} />告警规则评估</>}>
+            <Alert className={ui.infoBanner} message="手动触发告警规则评估"
               description="点击下方按钮可立即对所有文章执行告警规则评估，无需等待定时任务。"
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
+              type="info" showIcon style={{ marginBottom: 16 }} />
             <Button type="primary" icon={<BellOutlined />} onClick={handleEvaluate} loading={evaluating}>
               立即评估
             </Button>
           </Card>
         </Col>
       </Row>
+
+      {/* Cookie 编辑弹窗 */}
+      <Modal
+        title={`更新 ${cookieModal.name} Cookie`}
+        open={cookieModal.open}
+        onCancel={() => setCookieModal({ open: false, platform: '', name: '' })}
+        onOk={() => void handleSaveCookie()}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={cookieSaving}
+        width={600}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            请粘贴完整的 Cookie 字符串（通常从浏览器开发者工具 Network 面板复制）
+          </Text>
+        </div>
+        <Input.TextArea
+          value={cookieInput}
+          onChange={(e) => setCookieInput(e.target.value)}
+          placeholder="粘贴 Cookie 字符串..."
+          rows={5}
+          style={{ fontFamily: 'monospace', fontSize: 12 }}
+        />
+      </Modal>
     </div>
   )
 }

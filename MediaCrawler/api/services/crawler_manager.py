@@ -127,7 +127,7 @@ class CrawlerManager:
                     encoding='utf-8',
                     bufsize=1,
                     cwd=str(self._project_root),
-                    env={**os.environ, "PYTHONUNBUFFERED": "1"}
+                    env=self._build_env(config)
                 )
 
                 self.status = "running"
@@ -202,6 +202,26 @@ class CrawlerManager:
             "error_message": None
         }
 
+    def _build_env(self, config: CrawlerStartRequest) -> dict:
+        """Build environment variables for proxy credentials"""
+        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+        if not config.enable_ip_proxy:
+            return env
+        provider = config.ip_proxy_provider.lower()
+        if provider == "kuaidaili":
+            if config.proxy_kdl_secret_id:
+                env["KDL_SECERT_ID"] = config.proxy_kdl_secret_id
+            if config.proxy_kdl_signature:
+                env["KDL_SIGNATURE"] = config.proxy_kdl_signature
+            if config.proxy_kdl_username:
+                env["KDL_USER_NAME"] = config.proxy_kdl_username
+            if config.proxy_kdl_password:
+                env["KDL_USER_PWD"] = config.proxy_kdl_password
+        elif provider == "wandouhttp":
+            if config.proxy_wandou_app_key:
+                env["WANDOU_APP_KEY"] = config.proxy_wandou_app_key
+        return env
+
     def _build_command(self, config: CrawlerStartRequest) -> list:
         """Build main.py command line arguments"""
         cmd = ["uv", "run", "python", "main.py"]
@@ -246,6 +266,12 @@ class CrawlerManager:
         elif platform == "zhihu":
             cmd.extend(["--zhihu_sort", config.zhihu_sort])
             cmd.extend(["--zhihu_search_time", config.zhihu_search_time])
+
+        # IP proxy
+        cmd.extend(["--enable_ip_proxy", "true" if config.enable_ip_proxy else "false"])
+        if config.enable_ip_proxy:
+            cmd.extend(["--ip_proxy_pool_count", str(config.ip_proxy_pool_count)])
+            cmd.extend(["--ip_proxy_provider_name", config.ip_proxy_provider])
 
         return cmd
 

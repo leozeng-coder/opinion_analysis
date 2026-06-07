@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   ApartmentOutlined,
   AuditOutlined,
+  CloudServerOutlined,
   DatabaseOutlined,
   LogoutOutlined,
   RobotOutlined,
@@ -40,6 +41,7 @@ const menuItems: MenuProps['items'] = [
     children: [
       { key: '/config/system', icon: <SettingOutlined />, label: <Link to="/config/system">基础设置</Link> },
       { key: '/config/notify', icon: <BellOutlined />, label: <Link to="/config/notify">通知与告警</Link> },
+      { key: '/config/crawler', icon: <CloudServerOutlined />, label: <Link to="/config/crawler">爬虫配置</Link> },
     ],
   },
   { key: '/audit', icon: <AuditOutlined />, label: <Link to="/audit">审计日志</Link> },
@@ -53,6 +55,7 @@ const routeLabels: Record<string, string> = {
   '/ai/rag': '向量知识库',
   '/config/system': '基础设置',
   '/config/notify': '通知与告警',
+  '/config/crawler': '爬虫配置',
   '/audit': '审计日志',
 }
 

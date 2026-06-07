@@ -26,12 +26,12 @@ type RunNode struct {
 	activeRunID atomic.Uint64
 }
 
-func NewRunNode(db *gorm.DB, crawlerRepo *repository.CrawlerRepository) *RunNode {
+func NewRunNode(db *gorm.DB, crawlerRepo *repository.CrawlerRepository, systemRepo *repository.SystemRepository) *RunNode {
 	return &RunNode{
 		BaseNode:    nodes.NewBaseNode("crawler_run"),
 		db:          db,
 		crawlerRepo: crawlerRepo,
-		crawlerSvc:  crawlerSvc.NewService(crawlerRepo),
+		crawlerSvc:  crawlerSvc.NewService(crawlerRepo, systemRepo),
 	}
 }
 
