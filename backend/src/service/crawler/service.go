@@ -254,13 +254,18 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 	allTerms = append(allTerms, params.Topics...)
 	keywords := strings.Join(allTerms, " ")
 
-	// 构建请求
 	// 从 DB 加载动态配置作为基础，TriggerParams 里的非零值会覆盖 DB 默认值
 	dynCfg, _ := s.systemRepo.GetCrawlerConfig()
 
+	// maxNotes 优先级：工作流值（被后台上限 clamp）> 后台默认值
 	maxNotes := dynCfg.MaxNotesCount
 	if params.MaxNotesCount > 0 {
 		maxNotes = params.MaxNotesCount
+		if dynCfg.MaxNotesCount > 0 && maxNotes > dynCfg.MaxNotesCount {
+			log.Printf("[CrawlerService] 工作流请求 maxNotesCount=%d 超过后台上限 %d，已限制",
+				params.MaxNotesCount, dynCfg.MaxNotesCount)
+			maxNotes = dynCfg.MaxNotesCount
+		}
 	}
 	maxConc := dynCfg.MaxConcurrency
 	if params.MaxConcurrency > 0 {
@@ -324,8 +329,8 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 		StartPage:         startPage,
 		SaveOption:        saveOption,
 		Headless:          params.Headless,
-		EnableComments:    params.EnableComments || dynCfg.EnableComments,
-		EnableSubComments: params.EnableSubComments || dynCfg.EnableSubComments,
+		EnableComments:    params.EnableComments,
+		EnableSubComments: params.EnableSubComments,
 		MaxNotesCount:     maxNotes,
 		MaxConcurrency:    maxConc,
 		SleepSecMin:       sleepMin,

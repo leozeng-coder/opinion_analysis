@@ -225,6 +225,7 @@ export const NODE_REGISTRY = {
         placeholder: '留空默认 db',
       },
       { name: 'startPage', label: '起始页', type: 'number', required: false, default: 1, min: 1, max: 100 },
+      { name: 'maxNotesCount', label: '爬取数量', type: 'number', required: false, min: 1, placeholder: '留空则使用后台管理的默认值' },
       {
         type: 'boolean-pair',
         name: '_bp_crawl1',
@@ -1129,6 +1130,9 @@ const WorkflowEditorPage: React.FC = () => {
   // 话题列表（供工作流表单选择）
   const [topicOptions, setTopicOptions] = useState<{ label: string; value: string }[]>([])
 
+  // 爬取数量上限（从后台管理配置读取）
+  const [crawlerMaxLimit, setCrawlerMaxLimit] = useState<number>(500)
+
   // ============ 执行 / 控制台状态 ============
   const location = useLocation()
   // 控制台面板模式：console=实时日志，history=历史记录，hidden=收起
@@ -1187,6 +1191,13 @@ const WorkflowEditorPage: React.FC = () => {
       .list({ pageSize: 200 })
       .then((res) => setTopicOptions((res.list || []).map((t: Topic) => ({ label: t.name, value: t.name }))))
       .catch(() => setTopicOptions([]))
+  }, [])
+
+  useEffect(() => {
+    workflowApi
+      .getCrawlerLimits()
+      .then((res) => setCrawlerMaxLimit(res.maxNotesCount || 500))
+      .catch(() => setCrawlerMaxLimit(500))
   }, [])
 
 
@@ -2477,12 +2488,16 @@ const WorkflowEditorPage: React.FC = () => {
                   name={field.name}
                   rules={[{ required: field.required, message: `请输入${field.label}` }]}
                   valuePropName={isBooleanField ? 'checked' : 'value'}
+                  tooltip={field.name === 'maxNotesCount' ? `当前后台配置的最大爬取上限为 ${crawlerMaxLimit} 篇` : undefined}
+                  extra={field.name === 'maxNotesCount' && nodeConfigForm.getFieldValue('maxNotesCount') > crawlerMaxLimit ? (
+                    <span style={{ color: '#ff4d4f' }}>⚠️ 超出后台管理配置的最大上限（{crawlerMaxLimit} 篇），将被限制为 {crawlerMaxLimit} 篇</span>
+                  ) : undefined}
                 >
                   {isNumberField ? (
                     <InputNumber
                       min={fieldConfig.min}
-                      max={fieldConfig.max}
-                      placeholder={fieldConfig.placeholder}
+                      max={field.name === 'maxNotesCount' ? crawlerMaxLimit : fieldConfig.max}
+                      placeholder={field.name === 'maxNotesCount' ? `留空则使用后台管理的默认值（上限 ${crawlerMaxLimit} 篇）` : fieldConfig.placeholder}
                       style={{ width: '100%' }}
                     />
                   ) : isBooleanField ? (

@@ -41,4 +41,8 @@ export const workflowApi = {
   // 获取所有话题列表
   listTopics: () =>
     request.get<{ topics: string[] }>('/workflows/topics'),
+
+  // 获取爬虫配置上限（供工作流编辑器动态限制用）
+  getCrawlerLimits: () =>
+    request.get<{ maxNotesCount: number }>('/admin/system/crawler/limits'),
 }

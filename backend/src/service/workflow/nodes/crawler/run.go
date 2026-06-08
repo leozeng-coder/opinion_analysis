@@ -70,6 +70,7 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 	topics            := n.GetStringSlice(config, "topics")
 	waitForCompletion := n.GetBool(config, "waitForCompletion", true)
 	timeoutMinutes    := n.GetInt(config, "timeoutMinutes", 10)
+	maxNotesCount     := n.GetInt(config, "maxNotesCount", 0)  // 0 = 使用后台管理配置的默认值
 
 	syncCodes := platformSync.ResolveSyncCodes(platforms)
 
@@ -95,6 +96,7 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 		Headless:          headless,
 		Topics:            topics,
 		TimeoutMinutes:    timeoutMinutes,
+		MaxNotesCount:     maxNotesCount, // 新增：工作流可覆盖爬取数量
 	})
 	if err != nil {
 		return nil, n.WrapError("failed to trigger crawler", err)

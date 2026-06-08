@@ -564,14 +564,24 @@ func (h *SystemHandler) GetCrawlerConfig(c *gin.Context) {
 	response.OK(c, repository.BuildCrawlerConfigResponse(cfg))
 }
 
+// GetCrawlerLimits 返回爬虫配置上限（供工作流编辑器动态限制用）。
+func (h *SystemHandler) GetCrawlerLimits(c *gin.Context) {
+	cfg, err := h.system.GetCrawlerConfig()
+	if err != nil {
+		response.ServerError(c)
+		return
+	}
+	response.OK(c, gin.H{
+		"maxNotesCount": cfg.MaxNotesCount,
+	})
+}
+
 // updateCrawlerReq 使用指针字段实现部分更新：nil 表示不修改。
 type updateCrawlerReq struct {
 	MaxNotesCount     *int    `json:"maxNotesCount"`
 	MaxConcurrency    *int    `json:"maxConcurrency"`
 	SleepSecMin       *int    `json:"sleepSecMin"`
 	SleepSecMax       *int    `json:"sleepSecMax"`
-	EnableComments    *bool   `json:"enableComments"`
-	EnableSubComments *bool   `json:"enableSubComments"`
 	EnableIPProxy     *bool   `json:"enableIPProxy"`
 	IPProxyPoolCount  *int    `json:"ipProxyPoolCount"`
 	IPProxyProvider   *string `json:"ipProxyProvider"`
@@ -627,12 +637,6 @@ func (h *SystemHandler) UpdateCrawlerConfig(c *gin.Context) {
 			return
 		}
 		merged.SleepSecMax = *req.SleepSecMax
-	}
-	if req.EnableComments != nil {
-		merged.EnableComments = *req.EnableComments
-	}
-	if req.EnableSubComments != nil {
-		merged.EnableSubComments = *req.EnableSubComments
 	}
 	if req.EnableIPProxy != nil {
 		merged.EnableIPProxy = *req.EnableIPProxy

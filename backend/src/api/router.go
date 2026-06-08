@@ -133,7 +133,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					userhandler.GetPlatformComments(c)
 				})
 
-				// 平台数据同步接口（重构版）
+				// 平台数据同步接口
 				platform.POST("/sync", func(c *gin.Context) {
 					c.Set("db", db)
 					c.Set("redis", rdb)
@@ -289,6 +289,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					middleware.Audit(db, "system_config", "test_smtp"),
 					adminSystemH.TestSmtp)
 				admin.GET("/system/crawler", adminSystemH.GetCrawlerConfig)
+				admin.GET("/system/crawler/limits", adminSystemH.GetCrawlerLimits)
 				admin.PUT("/system/crawler",
 					middleware.Audit(db, "system_config", "update_crawler"),
 					adminSystemH.UpdateCrawlerConfig)

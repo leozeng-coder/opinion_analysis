@@ -16,8 +16,6 @@ type CrawlerConfigData struct {
 	MaxConcurrency int
 	SleepSecMin    int
 	SleepSecMax    int
-	EnableComments    bool
-	EnableSubComments bool
 	// IP 代理
 	EnableIPProxy    bool
 	IPProxyPoolCount int
@@ -48,8 +46,6 @@ var crawlerConfigKeys = []string{
 	"crawler.max_concurrency_num",
 	"crawler.sleep_sec_min",
 	"crawler.sleep_sec_max",
-	"crawler.enable_comments",
-	"crawler.enable_sub_comments",
 	"crawler.enable_ip_proxy",
 	"crawler.ip_proxy_pool_count",
 	"crawler.ip_proxy_provider",
@@ -78,8 +74,6 @@ func crawlerConfigDefaults() map[string]string {
 		"crawler.max_concurrency_num": "3",
 		"crawler.sleep_sec_min":      "1",
 		"crawler.sleep_sec_max":      "3",
-		"crawler.enable_comments":    "false",
-		"crawler.enable_sub_comments": "false",
 		"crawler.enable_ip_proxy":    "false",
 		"crawler.ip_proxy_pool_count": "10",
 		"crawler.ip_proxy_provider":  "kuaidaili",
@@ -92,7 +86,7 @@ func crawlerConfigDefaults() map[string]string {
 		"crawler.wb.search_type":     "real_time",
 		"crawler.dy.sort_type":       "2",
 		"crawler.zhihu.sort":         "created_time",
-		"crawler.zhihu.search_time":  "a_day",
+		"crawler.zhihu.search_time":  "",
 		"crawler.cookie.xhs":   "",
 		"crawler.cookie.dy":    "",
 		"crawler.cookie.ks":    "",
@@ -137,8 +131,6 @@ func mapToCrawlerConfigData(m map[string]string) CrawlerConfigData {
 		MaxConcurrency:    parseIntSetting(d["crawler.max_concurrency_num"], 3),
 		SleepSecMin:       parseIntSetting(d["crawler.sleep_sec_min"], 1),
 		SleepSecMax:       parseIntSetting(d["crawler.sleep_sec_max"], 3),
-		EnableComments:    parseBoolSetting(d["crawler.enable_comments"]),
-		EnableSubComments: parseBoolSetting(d["crawler.enable_sub_comments"]),
 		EnableIPProxy:     parseBoolSetting(d["crawler.enable_ip_proxy"]),
 		IPProxyPoolCount:  parseIntSetting(d["crawler.ip_proxy_pool_count"], 10),
 		IPProxyProvider:   strings.TrimSpace(d["crawler.ip_proxy_provider"]),
@@ -178,8 +170,6 @@ func (r *SystemRepository) SaveCrawlerConfig(cfg CrawlerConfigData, updatedBy ui
 		"crawler.max_concurrency_num": strconv.Itoa(cfg.MaxConcurrency),
 		"crawler.sleep_sec_min":       strconv.Itoa(cfg.SleepSecMin),
 		"crawler.sleep_sec_max":       strconv.Itoa(cfg.SleepSecMax),
-		"crawler.enable_comments":     boolToSetting(cfg.EnableComments),
-		"crawler.enable_sub_comments": boolToSetting(cfg.EnableSubComments),
 		"crawler.enable_ip_proxy":     boolToSetting(cfg.EnableIPProxy),
 		"crawler.ip_proxy_pool_count": strconv.Itoa(cfg.IPProxyPoolCount),
 		"crawler.ip_proxy_provider":   cfg.IPProxyProvider,
@@ -236,8 +226,6 @@ type CrawlerConfigResponse struct {
 	MaxConcurrency    int    `json:"maxConcurrency"`
 	SleepSecMin       int    `json:"sleepSecMin"`
 	SleepSecMax       int    `json:"sleepSecMax"`
-	EnableComments    bool   `json:"enableComments"`
-	EnableSubComments bool   `json:"enableSubComments"`
 	EnableIPProxy     bool   `json:"enableIPProxy"`
 	IPProxyPoolCount  int    `json:"ipProxyPoolCount"`
 	IPProxyProvider   string `json:"ipProxyProvider"`
@@ -278,8 +266,6 @@ func BuildCrawlerConfigResponse(cfg CrawlerConfigData) CrawlerConfigResponse {
 		MaxConcurrency:    cfg.MaxConcurrency,
 		SleepSecMin:       cfg.SleepSecMin,
 		SleepSecMax:       cfg.SleepSecMax,
-		EnableComments:    cfg.EnableComments,
-		EnableSubComments: cfg.EnableSubComments,
 		EnableIPProxy:     cfg.EnableIPProxy,
 		IPProxyPoolCount:  cfg.IPProxyPoolCount,
 		IPProxyProvider:   cfg.IPProxyProvider,

@@ -81,8 +81,11 @@ const AiAssistantPage: React.FC = () => {
     try {
       const res = await chatSessionApi.list()
       setSessions(res.list ?? [])
+      // 确保初始化时清除加载状态
+      setLoadingSessionId(null)
     } catch {
       message.error('加载会话列表失败')
+      setLoadingSessionId(null)
     } finally {
       setLoadingSessions(false)
     }
@@ -541,9 +544,8 @@ const AiAssistantPage: React.FC = () => {
             </div>
           ) : (
             sessions.map((s) => (
-              <button
+              <div
                 key={s.id}
-                type="button"
                 className={
                   s.id === currentSessionId
                     ? `${styles.sessionItem} ${styles.sessionItemActive}`
@@ -574,7 +576,7 @@ const AiAssistantPage: React.FC = () => {
                     onClick={(e) => handleDeleteSession(s.id, e)}
                   />
                 </div>
-              </button>
+              </div>
             ))
           )}
         </div>

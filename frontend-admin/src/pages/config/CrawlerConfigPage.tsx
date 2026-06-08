@@ -24,12 +24,10 @@ import {
 import {
   BellOutlined,
   KeyOutlined,
-  MailOutlined,
   SaveOutlined,
   SettingOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
-import { adminSmtpApi, alertApi } from '@/api/admin-smtp'
 import { adminCrawlerApi, type CrawlerConfigResponse } from '@/api/admin-crawler'
 import { platformSyncApi, type PlatformInfo, type PlatformSyncProgress } from '@/api/crawler'
 import PageHeader from '@/components/common/PageHeader'
@@ -66,26 +64,21 @@ const ZHIHU_SORT_OPTIONS = [
   { value: 'default', label: '默认' },
 ]
 const ZHIHU_TIME_OPTIONS = [
+  { value: '', label: '不限时间' },
   { value: 'a_day', label: '一天内' },
   { value: 'a_week', label: '一周内' },
   { value: 'a_month', label: '一月内' },
   { value: 'three_months', label: '三月内' },
-  { value: 'half_year', label: '半年内' },
+  { value: 'half_a_year', label: '半年内' },
   { value: 'a_year', label: '一年内' },
-  { value: 'not_limit', label: '不限时间' },
 ]
 const IP_PROXY_PROVIDERS = [
   { value: 'kuaidaili', label: '快代理 (KDL)' },
   { value: 'wandou', label: '豌豆代理' },
 ]
 
-interface SmtpFormValues {
-  host: string; port: number; username: string; password: string
-  from: string; useTls: boolean; onCrawl: boolean
-}
 interface CrawlerFormValues {
   maxNotesCount: number; maxConcurrency: number; sleepSecMin: number; sleepSecMax: number
-  enableComments: boolean; enableSubComments: boolean
   enableIPProxy: boolean; ipProxyPoolCount: number; ipProxyProvider: string
   proxyKdlSecretId: string; proxyKdlSignature: string
   proxyKdlUsername: string; proxyKdlPassword: string; proxyWandouAppKey: string
@@ -94,17 +87,6 @@ interface CrawlerFormValues {
 }
 
 const CrawlerConfigPage: React.FC = () => {
-  const [smtpForm] = Form.useForm<SmtpFormValues>()
-  const smtpPort = Form.useWatch('port', smtpForm) ?? 465
-  const smtpUsername = Form.useWatch('username', smtpForm) ?? ''
-  const smtpFrom = Form.useWatch('from', smtpForm) ?? ''
-  const [smtpSaving, setSmtpSaving] = useState(false)
-  const [smtpPasswordSet, setSmtpPasswordSet] = useState(false)
-  const [evaluating, setEvaluating] = useState(false)
-  const [testEmail, setTestEmail] = useState('')
-  const [testingMail, setTestingMail] = useState(false)
-  const [loading, setLoading] = useState(false)
-
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([])
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([])
   const [syncProgress, setSyncProgress] = useState<{ [key: string]: PlatformSyncProgress }>({})
@@ -123,21 +105,6 @@ const CrawlerConfigPage: React.FC = () => {
   })
   const [cookieInput, setCookieInput] = useState('')
   const [cookieSaving, setCookieSaving] = useState(false)
-
-  const loadSmtpConfig = useCallback(async () => {
-    setLoading(true)
-    try {
-      const cfg = await adminSmtpApi.getConfig().catch(() => null)
-      if (!cfg) return
-      setSmtpPasswordSet(cfg.passwordSet)
-      smtpForm.setFieldsValue({
-        host: cfg.host, port: cfg.port, username: cfg.username,
-        from: cfg.from, useTls: cfg.useTls, onCrawl: cfg.onCrawl, password: '',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [smtpForm])
 
   const loadPlatforms = useCallback(async () => {
     try {
@@ -164,7 +131,6 @@ const CrawlerConfigPage: React.FC = () => {
       crawlerForm.setFieldsValue({
         maxNotesCount: cfg.maxNotesCount, maxConcurrency: cfg.maxConcurrency,
         sleepSecMin: cfg.sleepSecMin, sleepSecMax: cfg.sleepSecMax,
-        enableComments: cfg.enableComments, enableSubComments: cfg.enableSubComments,
         enableIPProxy: cfg.enableIPProxy, ipProxyPoolCount: cfg.ipProxyPoolCount,
         ipProxyProvider: cfg.ipProxyProvider || 'kuaidaili',
         proxyKdlSecretId: cfg.proxyKdlSecretId, proxyKdlSignature: cfg.proxyKdlSignature,
@@ -179,10 +145,9 @@ const CrawlerConfigPage: React.FC = () => {
   }, [crawlerForm])
 
   useEffect(() => {
-    void loadSmtpConfig()
     void loadPlatforms()
     void loadCrawlerConfig()
-  }, [loadSmtpConfig, loadPlatforms, loadCrawlerConfig])
+  }, [loadPlatforms, loadCrawlerConfig])
 
   const startProgressPolling = useCallback(() => {
     if (progressInterval) return
@@ -197,35 +162,6 @@ const CrawlerConfigPage: React.FC = () => {
   useEffect(() => {
     return () => { if (progressInterval) clearInterval(progressInterval) }
   }, [progressInterval])
-
-  const handleSaveSmtp = async (values: SmtpFormValues) => {
-    setSmtpSaving(true)
-    try {
-      await adminSmtpApi.updateConfig(values)
-      message.success('SMTP 配置已保存')
-      void loadSmtpConfig()
-    } catch { message.error('保存失败') }
-    finally { setSmtpSaving(false) }
-  }
-
-  const handleTestMail = async () => {
-    if (!testEmail) { message.warning('请输入测试邮箱地址'); return }
-    setTestingMail(true)
-    try {
-      await adminSmtpApi.test(testEmail)
-      message.success('测试邮件已发送，请检查收件箱')
-    } catch { message.error('发送失败，请检查配置') }
-    finally { setTestingMail(false) }
-  }
-
-  const handleEvaluate = async () => {
-    setEvaluating(true)
-    try {
-      await alertApi.evaluate()
-      message.success('规则评估已触发')
-    } catch { message.error('评估失败') }
-    finally { setEvaluating(false) }
-  }
 
   const handleSaveCrawlerParams = async (values: CrawlerFormValues) => {
     setCrawlerSaving(true)
@@ -379,7 +315,7 @@ const CrawlerConfigPage: React.FC = () => {
               description="MediaCrawler 爬虫完成后会自动触发数据同步。此处提供手动同步功能用于紧急情况，支持多平台批量同步。"
               type="info" showIcon style={{ marginBottom: 16 }} />
             <Table columns={syncColumns} dataSource={platforms} rowKey="code"
-              pagination={false} loading={loading} />
+              pagination={false} />
           </Card>
         </Col>
 
@@ -409,19 +345,6 @@ const CrawlerConfigPage: React.FC = () => {
                   <Col span={6}>
                     <Form.Item label="请求间隔最大值" name="sleepSecMax">
                       <InputNumber min={0} max={120} style={{ width: '100%' }} addonAfter="秒" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col span={6}>
-                    <Form.Item label="爬取评论" name="enableComments" valuePropName="checked">
-                      <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                    </Form.Item>
-                  </Col>
-                  <Col span={6}>
-                    <Form.Item label="爬取子评论" name="enableSubComments" valuePropName="checked"
-                      tooltip="开启后会爬取评论的回复，数据量较大">
-                      <Switch checkedChildren="开启" unCheckedChildren="关闭" />
                     </Form.Item>
                   </Col>
                 </Row>
@@ -572,84 +495,6 @@ const CrawlerConfigPage: React.FC = () => {
                 )
               })}
             </div>
-          </Card>
-        </Col>
-
-        {/* SMTP 配置 */}
-        <Col span={24}>
-          <Card className={ui.panelCard} title={<><MailOutlined style={{ marginRight: 6 }} />SMTP 邮件配置</>}>
-            <Spin spinning={loading}>
-              <Form form={smtpForm} layout="vertical" onFinish={handleSaveSmtp}>
-                <Row gutter={16}>
-                  <Col span={12}>
-                    <Form.Item label="SMTP 服务器" name="host" rules={[{ required: true }]}>
-                      <Input placeholder="smtp.example.com" />
-                    </Form.Item>
-                  </Col>
-                  <Col span={12}>
-                    <Form.Item label="端口" name="port" rules={[{ required: true }]}>
-                      <InputNumber min={1} max={65535} style={{ width: '100%' }} />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col span={12}>
-                    <Form.Item label="用户名" name="username" rules={[{ required: true }]}>
-                      <Input placeholder="user@example.com" />
-                    </Form.Item>
-                  </Col>
-                  <Col span={12}>
-                    <Form.Item label={smtpPasswordSet ? '密码（留空保持不变）' : '密码'} name="password"
-                      rules={[{ required: !smtpPasswordSet }]}>
-                      <Input.Password placeholder={smtpPasswordSet ? '••••••••' : '请输入密码'} />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Form.Item label="发件人地址" name="from" rules={[{ required: true, type: 'email' }]}>
-                  <Input placeholder="noreply@example.com" />
-                </Form.Item>
-                <Row gutter={16}>
-                  <Col span={12}>
-                    <Form.Item label="启用 TLS" name="useTls" valuePropName="checked">
-                      <Switch />
-                    </Form.Item>
-                    {smtpPort === 465 && (
-                      <Text type="secondary" style={{ fontSize: 12 }}>端口 465 通常使用 SSL/TLS</Text>
-                    )}
-                  </Col>
-                  <Col span={12}>
-                    <Form.Item label="爬虫完成后发送邮件" name="onCrawl" valuePropName="checked">
-                      <Switch />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Space>
-                  <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={smtpSaving}>
-                    保存配置
-                  </Button>
-                </Space>
-              </Form>
-              <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid #f0f0f0' }}>
-                <Space>
-                  <Input placeholder="输入测试邮箱" value={testEmail}
-                    onChange={(e) => setTestEmail(e.target.value)} style={{ width: 300 }}
-                    defaultValue={smtpUsername || smtpFrom} />
-                  <Button onClick={handleTestMail} loading={testingMail}>发送测试邮件</Button>
-                </Space>
-              </div>
-            </Spin>
-          </Card>
-        </Col>
-
-        {/* 告警规则评估 */}
-        <Col span={24}>
-          <Card className={ui.panelCard} title={<><BellOutlined style={{ marginRight: 6 }} />告警规则评估</>}>
-            <Alert className={ui.infoBanner} message="手动触发告警规则评估"
-              description="点击下方按钮可立即对所有文章执行告警规则评估，无需等待定时任务。"
-              type="info" showIcon style={{ marginBottom: 16 }} />
-            <Button type="primary" icon={<BellOutlined />} onClick={handleEvaluate} loading={evaluating}>
-              立即评估
-            </Button>
           </Card>
         </Col>
       </Row>
