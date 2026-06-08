@@ -17,6 +17,7 @@ import (
 	"opinion-analysis/src/middleware"
 	milvussvc "opinion-analysis/src/service/milvus"
 	"opinion-analysis/src/service/rag"
+	"opinion-analysis/src/service/report"
 	"opinion-analysis/src/repository"
 	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/ragprocess"
@@ -27,6 +28,9 @@ import (
 
 func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *tagger.Service, ragProc *ragprocess.Manager, alertEngine *alertengine.Engine) *gin.Engine {
 	store := repository.NewStore(db, repository.NewDigestRepository(rdb))
+
+	// report service（分析报告，存 Redis）
+	reportSvc := report.NewService(db, rdb, taggerSvc)
 
 	// Milvus + embedding 服务初始化
 	var milvusService *milvussvc.Service
@@ -83,6 +87,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	aiChatH := userhandler.NewAIChatHandler(taggerSvc, ragClient)
 	chatSessionH := userhandler.NewChatSessionHandler(store, taggerSvc, ragClient)
 	dashboardH := userhandler.NewDashboardHandler(store)
+	reportH := userhandler.NewReportHandler(reportSvc)
 
 	// MediaCrawler 代理处理器
 	mediaCrawlerURL := config.Cfg.Crawler.ApiURL
@@ -103,7 +108,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	adminAuditH := adminhandler.NewAuditHandler(store)
 
 	// 工作流引擎和调度器
-	workflowEngine := workflow.NewEngine(db, store, logger, taggerSvc, ragProc, syncerSvc, alertEngine)
+	workflowEngine := workflow.NewEngine(db, store, logger, taggerSvc, ragProc, syncerSvc, alertEngine, reportSvc)
 	workflowScheduler := workflow.NewScheduler(store, workflowEngine, logger)
 	workflowScheduler.Start()
 	workflowH := handler.NewWorkflowHandler(store, workflowEngine, milvusService)
@@ -333,6 +338,13 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					adminDSH.Delete)
 
 				admin.GET("/audit-logs", adminAuditH.List)
+			}
+
+			// 分析报告下载
+			reports := authorized2.Group("/reports")
+			{
+				reports.GET("/:reportId", reportH.Info)
+				reports.GET("/:reportId/download", reportH.Download)
 			}
 
 			// 工作流路由（需要认证）

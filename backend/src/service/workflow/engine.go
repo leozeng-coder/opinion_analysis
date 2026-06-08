@@ -16,6 +16,7 @@ import (
 	"opinion-analysis/src/service/alertengine"
 	"opinion-analysis/src/service/milvus"
 	"opinion-analysis/src/service/ragprocess"
+	"opinion-analysis/src/service/report"
 	"opinion-analysis/src/service/tagger"
 	"opinion-analysis/src/service/digest"
 	actionNodes "opinion-analysis/src/service/workflow/nodes/action"
@@ -38,6 +39,7 @@ type Engine struct {
 	ragProc     *ragprocess.Manager
 	milvusSyncer *milvus.Syncer
 	alertEngine *alertengine.Engine
+	reportSvc   *report.Service
 
 	// 运行中执行的取消注册表：executionID → cancel func
 	cancelMu    sync.Mutex
@@ -57,6 +59,7 @@ func NewEngine(
 	ragProc *ragprocess.Manager,
 	milvusSyncer *milvus.Syncer,
 	alertEngine *alertengine.Engine,
+	reportSvc *report.Service,
 ) *Engine {
 	engine := &Engine{
 		db:           db,
@@ -66,6 +69,7 @@ func NewEngine(
 		ragProc:      ragProc,
 		milvusSyncer: milvusSyncer,
 		alertEngine:  alertEngine,
+		reportSvc:    reportSvc,
 		cancelFuncs:  make(map[int64]context.CancelFunc),
 		activeNodes:  make(map[int64]NodeExecutor),
 	}
@@ -95,6 +99,7 @@ func (e *Engine) registerNodes() {
 
 	// 动作类节点
 	MustRegisterNode(actionNodes.NewHTTPRequestNode())
+	MustRegisterNode(actionNodes.NewAnalysisReportNode(e.reportSvc))
 
 	// 控制流节点
 	MustRegisterNode(controlNodes.NewDelayNode())

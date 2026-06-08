@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Table, Button, Tag, Space, message, Card, Modal, Timeline, Spin, Popconfirm } from 'antd'
-import { ArrowLeftOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, ExclamationCircleOutlined, StopOutlined } from '@ant-design/icons'
+import { Table, Button, Tag, Space, message, Card, Modal, Timeline, Spin, Popconfirm, Alert } from 'antd'
+import { ArrowLeftOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, ExclamationCircleOutlined, StopOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import PageHeader from '@/components/common/PageHeader'
 import { workflowApi } from '@/api/workflow'
 import { WorkflowExecution, WorkflowNodeExecution } from '@/types'
+import { useAuthStore } from '@/store/auth'
 
 const WorkflowExecutionPage: React.FC = () => {
   const navigate = useNavigate()
@@ -61,6 +62,26 @@ const WorkflowExecutionPage: React.FC = () => {
       message.error('加载执行历史失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const downloadReport = async (reportId: string, reportFormat?: string) => {
+    try {
+      const token = useAuthStore.getState().token
+      const resp = await fetch(`/api/reports/${reportId}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!resp.ok) throw new Error('报告不存在或已过期')
+      const blob = await resp.blob()
+      const ext = reportFormat === 'html' ? 'html' : 'md'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `report-${String(reportId).slice(0, 8)}.${ext}`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      message.error(e?.message || '下载失败')
     }
   }
 
@@ -258,6 +279,29 @@ const WorkflowExecutionPage: React.FC = () => {
               </Space>
             </Card>
 
+            {/* 分析报告下载区：若本次执行生成了报告，在此醒目展示 */}
+            {nodeLogs.filter(l => l.output?.reportId).map(l => (
+              <Alert
+                key={l.output!.reportId}
+                style={{ marginBottom: 12 }}
+                icon={<FileTextOutlined />}
+                showIcon
+                type="success"
+                message={`AI 分析报告已生成（${l.output!.reportFormat || 'markdown'} 格式）`}
+                description={`节点：${l.nodeId}`}
+                action={
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={() => downloadReport(l.output!.reportId, l.output!.reportFormat)}
+                  >
+                    下载报告
+                  </Button>
+                }
+              />
+            ))}
+
             <Card size="small" title="节点执行日志">
               {nodeLogs.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
@@ -300,6 +344,17 @@ const WorkflowExecutionPage: React.FC = () => {
                               <pre style={{ fontSize: 11, background: '#f5f5f5', padding: 8, borderRadius: 4, marginTop: 4 }}>
                                 {JSON.stringify(log.output, null, 2)}
                               </pre>
+                              {log.output.reportId && (
+                                <Button
+                                  type="primary"
+                                  size="small"
+                                  icon={<DownloadOutlined />}
+                                  style={{ marginTop: 8 }}
+                                  onClick={() => downloadReport(log.output!.reportId, log.output!.reportFormat)}
+                                >
+                                  下载分析报告（{log.output.reportFormat || 'markdown'}）
+                                </Button>
+                              )}
                             </div>
                           )}
                           {log.errorMsg && (

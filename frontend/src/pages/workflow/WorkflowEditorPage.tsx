@@ -36,8 +36,11 @@ import {
   ExclamationCircleOutlined,
   EyeOutlined,
   CodeOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import PageHeader from '@/components/common/PageHeader'
+import { useAuthStore } from '@/store/auth'
 import { workflowApi } from '@/api/workflow'
 import { crawlerApi } from '@/api/crawler'
 import { alertApi } from '@/api/alert'
@@ -301,6 +304,46 @@ export const NODE_REGISTRY = {
       { name: 'days', label: '统计天数', type: 'number', required: false, default: 1, min: 1, max: 30 },
     ],
   },
+  analysis_report: {
+    label: 'AI 分析报告',
+    description: '基于本次爬取的文章生成 AI 分析报告（Markdown 或 HTML），存入 Redis 7天，可下载',
+    color: '#eb2f96',
+    icon: '📊',
+    configSchema: [
+      {
+        name: 'format',
+        label: '报告格式',
+        type: 'select',
+        required: false,
+        default: 'markdown',
+        options: [
+          { label: 'Markdown（分析叙述为主）', value: 'markdown' },
+          { label: 'HTML（可视化图表为主）', value: 'html' },
+        ],
+      },
+      {
+        name: 'htmlTheme',
+        label: 'HTML 风格',
+        type: 'select',
+        required: false,
+        default: 'random',
+        showIf: { field: 'format', value: 'html' },
+        options: [
+          { label: '🎲 随机（每次不同）', value: 'random' },
+          { label: '🌊 深海蓝', value: '深海蓝' },
+          { label: '🔥 暮光橙', value: '暮光橙' },
+          { label: '🌿 翡翠绿', value: '翡翠绿' },
+          { label: '🔮 紫夜', value: '紫夜' },
+          { label: '🌊 青墨', value: '青墨' },
+          { label: '🌸 玫瑰金', value: '玫瑰金' },
+          { label: '🌌 星辰灰', value: '星辰灰' },
+          { label: '✨ 琥珀金', value: '琥珀金' },
+        ],
+      },
+      { name: 'sampleSize', label: '每组样本数', type: 'number', required: false, default: 8, min: 3, max: 20, placeholder: '每个话题组取几篇代表性文章送入 LLM' },
+      { name: 'maxGroups', label: '最大话题组数', type: 'number', required: false, default: 5, min: 1, max: 10, placeholder: '按标签频次取前 N 个话题分组分析' },
+    ],
+  },
   http_request: {
     label: 'HTTP 请求',
     description: '向外部地址发送任意 HTTP 请求（webhook/回调）',
@@ -466,6 +509,7 @@ const NODE_CATEGORY: Record<string, 'source' | 'sync' | 'process' | 'ops'> = {
   crawler_schedule: 'ops',
   crawler_status:   'ops',
   http_request:     'ops',
+  analysis_report:  'process',
 }
 
 // 节点形状渲染：source=圆形，sync=菱形，process=圆角矩形，ops=六边形
@@ -943,6 +987,9 @@ const summarizeNodeOutput = (type: string | undefined, output?: Record<string, a
       return output.crawlerStatus ? `爬虫状态：${output.crawlerStatus}` : ''
     case 'http_request':
       return `HTTP ${num(output.httpStatusCode)}${output.httpSuccess ? ' 成功' : ' 失败'}`
+    case 'analysis_report':
+      if (output.reportId) return `报告已生成（${output.reportFormat || 'markdown'}），ID: ${String(output.reportId).slice(0, 8)}...`
+      return '报告生成中'
     default:
       return ''
   }
@@ -1377,6 +1424,26 @@ const WorkflowEditorPage: React.FC = () => {
     }
   }, [isEdit, id, loading])
 
+  const downloadReport = async (reportId: string, reportFormat?: string) => {
+    try {
+      const token = useAuthStore.getState().token
+      const resp = await fetch(`/api/reports/${reportId}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!resp.ok) throw new Error('报告不存在或已过期')
+      const blob = await resp.blob()
+      const ext = reportFormat === 'html' ? 'html' : 'md'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `report-${String(reportId).slice(0, 8)}.${ext}`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      message.error(e?.message || '下载失败')
+    }
+  }
+
   const handleExecute = useCallback(async () => {
     if (!isEdit || !id) {
       message.warning('请先保存工作流后再执行')
@@ -1668,8 +1735,9 @@ const WorkflowEditorPage: React.FC = () => {
   const watchedTriggerType   = Form.useWatch('triggerType',     form)
   const watchedScheduleMode  = Form.useWatch('tc_scheduleMode', form)
   const watchedFixedFreq     = Form.useWatch('tc_fixedFreq',    form)
-  // 节点配置抽屉：监听 crawlerType，用于条件性显示关键词/ID输入框
+  // 节点配置抽屉：监听 crawlerType / format，用于条件性显示字段
   const watchedNodeCrawlerType = Form.useWatch('crawlerType', nodeConfigForm)
+  const watchedNodeFormat = Form.useWatch('format', nodeConfigForm)
 
   // 节点执行状态映射：nodeId → status，供画布节点渲染流光/徽章效果
   const nodeStatusMap = React.useMemo(() => {
@@ -2283,6 +2351,29 @@ const WorkflowEditorPage: React.FC = () => {
               </Space>
             </Card>
 
+            {/* 分析报告下载区 */}
+            {detailLogs.filter(l => l.output?.reportId).map(l => (
+              <Alert
+                key={l.output!.reportId}
+                style={{ marginBottom: 12 }}
+                icon={<FileTextOutlined />}
+                showIcon
+                type="success"
+                message={`AI 分析报告已生成（${l.output!.reportFormat || 'markdown'} 格式）`}
+                description={`ID: ${String(l.output!.reportId).slice(0, 8)}...`}
+                action={
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={() => downloadReport(l.output!.reportId, l.output!.reportFormat)}
+                  >
+                    下载报告
+                  </Button>
+                }
+              />
+            ))}
+
             <Card size="small" title="节点执行计划与日志">
               {detailLogs.length === 0 ? (
                 <Empty description="暂无节点执行日志" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -2382,6 +2473,7 @@ const WorkflowEditorPage: React.FC = () => {
                 const { field: depField, value: depValue, values: depValues } = fieldConfig.showIf
                 const watchedValues: Record<string, any> = {
                   crawlerType: watchedNodeCrawlerType,
+                  format: watchedNodeFormat,
                 }
                 const cur = watchedValues[depField]
                 if (depValues !== undefined) {
