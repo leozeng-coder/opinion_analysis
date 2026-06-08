@@ -44,7 +44,6 @@ const parseAllImageUrls = (coverUrl?: string): string[] => {
 
 // 平台选项
 const PLATFORM_OPTIONS = [
-  { label: '全部平台', value: '' },
   { label: '小红书', value: 'xhs' },
   { label: '抖音', value: 'dy' },
   { label: 'B站', value: 'bili' },
@@ -70,7 +69,7 @@ const getCommentStatLabel = (platform: string) => (platform === 'tieba' ? '回�
 const PlatformDataPage: React.FC = () => {
   const [list, setList] = useState<PlatformDataItem[]>([])
   const [loading, setLoading] = useState(false)
-  const [platform, setPlatform] = useState('')
+  const [platform, setPlatform] = useState('zhihu')
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null)
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 })
   const [detailVisible, setDetailVisible] = useState(false)
@@ -91,7 +90,8 @@ const PlatformDataPage: React.FC = () => {
       }
       const res = await platformDataApi.list(params)
       setList(res.data)
-      setPagination({ ...pagination, total: res.total })
+      // 用函数式更新，只改 total，不覆盖用户可能已翻到的新页码
+      setPagination(prev => ({ ...prev, total: res.total }))
     } catch (error) {
       void message.error('加载数据失败')
     } finally {
@@ -112,7 +112,7 @@ const PlatformDataPage: React.FC = () => {
   }
 
   const handleReset = () => {
-    setPlatform('')
+    setPlatform('zhihu')
     setDateRange(null)
     setPagination({ current: 1, pageSize: 20, total: 0 })
   }
@@ -266,15 +266,19 @@ const PlatformDataPage: React.FC = () => {
   ]
 
   return (
-    <div style={{ padding: '24px' }}>
-      <Card title="平台数据" style={{ marginBottom: 16 }}>
-        <Space size={12} wrap style={{ marginBottom: 16 }}>
+    <div style={{ height: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 0 0 0' }}>
+      <Card
+        title="平台数据"
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', margin: 0 }}
+        styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '16px 24px 0' } }}
+      >
+        <Space size={12} wrap style={{ marginBottom: 12, flexShrink: 0 }}>
           <Select
-            placeholder="选择平台"
             value={platform}
-            onChange={setPlatform}
+            onChange={(val) => { setPlatform(val); setPagination(prev => ({ ...prev, current: 1 })) }}
             options={PLATFORM_OPTIONS}
             style={{ width: 140 }}
+            allowClear={false}
           />
           <RangePicker
             value={dateRange}
@@ -292,7 +296,7 @@ const PlatformDataPage: React.FC = () => {
           columns={columns}
           dataSource={list}
           loading={loading}
-          rowKey="id"
+          rowKey={(record) => `${record.platform}-${record.id}`}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
@@ -302,7 +306,8 @@ const PlatformDataPage: React.FC = () => {
             showTotal: (total) => `共 ${total} 条`,
           }}
           onChange={handleTableChange}
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1200, y: 'calc(100vh - 340px)' }}
+          style={{ flex: 1 }}
         />
       </Card>
 

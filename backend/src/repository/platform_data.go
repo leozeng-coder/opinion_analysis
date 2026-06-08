@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -520,24 +521,35 @@ func (r *PlatformDataRepository) queryAllPlatforms(ctx context.Context, query mo
 
 	platforms := []string{"xhs", "dy", "bili", "wb", "ks", "tieba", "zhihu"}
 
+	// 为保证跨平台分页准确，每个平台最多取 page*pageSize 条（最坏情况某平台占满当前页）
+	perPlatformLimit := query.Page * query.PageSize
+
 	for _, platform := range platforms {
 		platformQuery := query
 		platformQuery.Platform = platform
 		platformQuery.Page = 1
-		platformQuery.PageSize = 100 // 每个平台取前100条
+		platformQuery.PageSize = perPlatformLimit
 
-		items, _, err := r.QueryPlatformData(ctx, platformQuery)
+		items, platformTotal, err := r.QueryPlatformData(ctx, platformQuery)
 		if err != nil {
 			// 忽略单个平台的错误，继续查询其他平台
 			continue
 		}
 
 		allItems = append(allItems, items...)
+		totalCount += platformTotal // 累加每个平台的真实 DB 总数
 	}
 
-	// 按时间排序
-	// 这里简化处理，实际应该在数据库层面做 UNION 查询
-	totalCount = int64(len(allItems))
+	// 按发布时间降序排列
+	sort.Slice(allItems, func(i, j int) bool {
+		if allItems[i].PublishTime == nil {
+			return false
+		}
+		if allItems[j].PublishTime == nil {
+			return true
+		}
+		return allItems[i].PublishTime.After(*allItems[j].PublishTime)
+	})
 
 	// 分页
 	start := (query.Page - 1) * query.PageSize
