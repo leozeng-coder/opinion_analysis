@@ -12,6 +12,48 @@ import (
 	"opinion-analysis/src/model"
 )
 
+var cst = time.FixedZone("CST", 8*3600)
+
+// autoUnixToCST converts a UTC Unix timestamp (seconds or milliseconds) to CST.
+// Values > 9999999999 are treated as milliseconds and divided by 1000 first.
+func autoUnixToCST(ts int64) *time.Time {
+	if ts <= 0 {
+		return nil
+	}
+	s := ts
+	if ts > 9999999999 {
+		s = ts / 1000
+	}
+	t := time.Unix(s, 0).In(cst)
+	return &t
+}
+
+// parseCSTTime parses a "YYYY-MM-DD HH:MM:SS" string as CST (no timezone info).
+func parseCSTTime(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, cst)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+
+// parseWeiboDateTime parses Weibo's create_date_time field which stores the correct
+// CST time with timezone, e.g. "2025-10-13 18:42:22+08:00".
+func parseWeiboDateTime(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse("2006-01-02 15:04:05-07:00", s)
+	if err != nil {
+		return nil
+	}
+	tCST := t.In(cst)
+	return &tCST
+}
+
 type PlatformDataRepository struct {
 	db *gorm.DB
 }
@@ -56,12 +98,16 @@ func (r *PlatformDataRepository) queryXhsData(ctx context.Context, query model.P
 
 	db := r.db.WithContext(ctx).Table("xhs_note")
 
-	// 时间范围过滤
+	// 时间范围过滤（直接比较 Unix 整数，不依赖 MySQL 时区）
 	if query.StartDate != "" {
-		db = db.Where("FROM_UNIXTIME(time) >= ?", query.StartDate)
+		if t, err := time.ParseInLocation("2006-01-02", query.StartDate, cst); err == nil {
+			db = db.Where("`time` >= ?", t.Unix())
+		}
 	}
 	if query.EndDate != "" {
-		db = db.Where("FROM_UNIXTIME(time) <= ?", query.EndDate+" 23:59:59")
+		if t, err := time.ParseInLocation("2006-01-02", query.EndDate, cst); err == nil {
+			db = db.Where("`time` <= ?", t.Add(24*time.Hour-time.Second).Unix())
+		}
 	}
 
 	// 统计总数
@@ -79,14 +125,14 @@ func (r *PlatformDataRepository) queryXhsData(ctx context.Context, query model.P
 		nickname as author,
 		avatar,
 		note_url as url,
-		FROM_UNIXTIME(time) as publish_time,
+		` + "`time`" + ` as publish_ts,
 		liked_count,
 		comment_count,
 		share_count,
 		collected_count,
 		image_list as cover_url,
 		ip_location
-	`).Order("time DESC").Limit(query.PageSize).Offset(offset).Rows()
+	`).Order("`time` DESC").Limit(query.PageSize).Offset(offset).Rows()
 
 	if err != nil {
 		return nil, 0, err
@@ -95,18 +141,19 @@ func (r *PlatformDataRepository) queryXhsData(ctx context.Context, query model.P
 
 	for rows.Next() {
 		var item model.PlatformDataItem
+		var publishTs int64
 		var likeCountStr, commentCountStr, shareCountStr, collectCountStr string
 
 		if err := rows.Scan(
 			&item.ID, &item.Platform, &item.Title, &item.Content, &item.Author,
-			&item.Avatar, &item.URL, &item.PublishTime,
+			&item.Avatar, &item.URL, &publishTs,
 			&likeCountStr, &commentCountStr, &shareCountStr, &collectCountStr,
 			&item.CoverURL, &item.IPLocation,
 		); err != nil {
 			return nil, 0, err
 		}
 
-		// 转换字符串数字为 int
+		item.PublishTime = autoUnixToCST(publishTs)
 		item.LikeCount = parseIntPtr(likeCountStr)
 		item.CommentCount = parseIntPtr(commentCountStr)
 		item.ShareCount = parseIntPtr(shareCountStr)
@@ -126,10 +173,14 @@ func (r *PlatformDataRepository) queryDouyinData(ctx context.Context, query mode
 	db := r.db.WithContext(ctx).Table("douyin_aweme")
 
 	if query.StartDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) >= ?", query.StartDate)
+		if t, err := time.ParseInLocation("2006-01-02", query.StartDate, cst); err == nil {
+			db = db.Where("create_time >= ?", t.Unix())
+		}
 	}
 	if query.EndDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) <= ?", query.EndDate+" 23:59:59")
+		if t, err := time.ParseInLocation("2006-01-02", query.EndDate, cst); err == nil {
+			db = db.Where("create_time <= ?", t.Add(24*time.Hour-time.Second).Unix())
+		}
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -145,7 +196,7 @@ func (r *PlatformDataRepository) queryDouyinData(ctx context.Context, query mode
 		nickname as author,
 		avatar,
 		aweme_url as url,
-		FROM_UNIXTIME(create_time) as publish_time,
+		create_time as publish_ts,
 		liked_count,
 		comment_count,
 		share_count,
@@ -161,17 +212,19 @@ func (r *PlatformDataRepository) queryDouyinData(ctx context.Context, query mode
 
 	for rows.Next() {
 		var item model.PlatformDataItem
+		var publishTs int64
 		var likeCountStr, commentCountStr, shareCountStr, collectCountStr string
 
 		if err := rows.Scan(
 			&item.ID, &item.Platform, &item.Title, &item.Content, &item.Author,
-			&item.Avatar, &item.URL, &item.PublishTime,
+			&item.Avatar, &item.URL, &publishTs,
 			&likeCountStr, &commentCountStr, &shareCountStr, &collectCountStr,
 			&item.CoverURL, &item.IPLocation,
 		); err != nil {
 			return nil, 0, err
 		}
 
+		item.PublishTime = autoUnixToCST(publishTs)
 		item.LikeCount = parseIntPtr(likeCountStr)
 		item.CommentCount = parseIntPtr(commentCountStr)
 		item.ShareCount = parseIntPtr(shareCountStr)
@@ -191,10 +244,14 @@ func (r *PlatformDataRepository) queryBilibiliData(ctx context.Context, query mo
 	db := r.db.WithContext(ctx).Table("bilibili_video")
 
 	if query.StartDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) >= ?", query.StartDate)
+		if t, err := time.ParseInLocation("2006-01-02", query.StartDate, cst); err == nil {
+			db = db.Where("create_time >= ?", t.Unix())
+		}
 	}
 	if query.EndDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) <= ?", query.EndDate+" 23:59:59")
+		if t, err := time.ParseInLocation("2006-01-02", query.EndDate, cst); err == nil {
+			db = db.Where("create_time <= ?", t.Add(24*time.Hour-time.Second).Unix())
+		}
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -210,7 +267,7 @@ func (r *PlatformDataRepository) queryBilibiliData(ctx context.Context, query mo
 		nickname as author,
 		avatar,
 		video_url as url,
-		FROM_UNIXTIME(create_time) as publish_time,
+		create_time as publish_ts,
 		liked_count,
 		video_comment as comment_count,
 		video_share_count as share_count,
@@ -227,17 +284,19 @@ func (r *PlatformDataRepository) queryBilibiliData(ctx context.Context, query mo
 
 	for rows.Next() {
 		var item model.PlatformDataItem
+		var publishTs int64
 		var likeCountStr, commentCountStr, shareCountStr, viewCountStr, collectCountStr string
 
 		if err := rows.Scan(
 			&item.ID, &item.Platform, &item.Title, &item.Content, &item.Author,
-			&item.Avatar, &item.URL, &item.PublishTime,
+			&item.Avatar, &item.URL, &publishTs,
 			&likeCountStr, &commentCountStr, &shareCountStr, &viewCountStr, &collectCountStr,
 			&item.CoverURL, &item.IPLocation,
 		); err != nil {
 			return nil, 0, err
 		}
 
+		item.PublishTime = autoUnixToCST(publishTs)
 		item.LikeCount = parseIntPtr(likeCountStr)
 		item.CommentCount = parseIntPtr(commentCountStr)
 		item.ShareCount = parseIntPtr(shareCountStr)
@@ -257,11 +316,20 @@ func (r *PlatformDataRepository) queryWeiboData(ctx context.Context, query model
 
 	db := r.db.WithContext(ctx).Table("weibo_note")
 
+	// Weibo's create_time is a shifted timestamp (CST clock face stored as UTC due to a
+	// crawler bug in rfc2822_to_timestamp). Filter boundaries must use the same shift:
+	// treat the CST midnight as if it were a UTC midnight.
 	if query.StartDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) >= ?", query.StartDate)
+		if t, err := time.ParseInLocation("2006-01-02", query.StartDate, cst); err == nil {
+			shiftedTs := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC).Unix()
+			db = db.Where("create_time >= ?", shiftedTs)
+		}
 	}
 	if query.EndDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) <= ?", query.EndDate+" 23:59:59")
+		if t, err := time.ParseInLocation("2006-01-02", query.EndDate, cst); err == nil {
+			shiftedTs := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 0, time.UTC).Unix()
+			db = db.Where("create_time <= ?", shiftedTs)
+		}
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -277,7 +345,7 @@ func (r *PlatformDataRepository) queryWeiboData(ctx context.Context, query model
 		nickname as author,
 		avatar,
 		note_url as url,
-		FROM_UNIXTIME(create_time) as publish_time,
+		create_date_time as publish_dt,
 		liked_count,
 		comments_count as comment_count,
 		shared_count as share_count,
@@ -292,17 +360,19 @@ func (r *PlatformDataRepository) queryWeiboData(ctx context.Context, query model
 
 	for rows.Next() {
 		var item model.PlatformDataItem
+		var publishDt string
 		var likeCountStr, commentCountStr, shareCountStr string
 
 		if err := rows.Scan(
 			&item.ID, &item.Platform, &item.Title, &item.Content, &item.Author,
-			&item.Avatar, &item.URL, &item.PublishTime,
+			&item.Avatar, &item.URL, &publishDt,
 			&likeCountStr, &commentCountStr, &shareCountStr,
 			&item.CoverURL, &item.IPLocation,
 		); err != nil {
 			return nil, 0, err
 		}
 
+		item.PublishTime = parseWeiboDateTime(publishDt)
 		item.LikeCount = parseIntPtr(likeCountStr)
 		item.CommentCount = parseIntPtr(commentCountStr)
 		item.ShareCount = parseIntPtr(shareCountStr)
@@ -321,10 +391,14 @@ func (r *PlatformDataRepository) queryKuaishouData(ctx context.Context, query mo
 	db := r.db.WithContext(ctx).Table("kuaishou_video")
 
 	if query.StartDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) >= ?", query.StartDate)
+		if t, err := time.ParseInLocation("2006-01-02", query.StartDate, cst); err == nil {
+			db = db.Where("create_time >= ?", t.Unix())
+		}
 	}
 	if query.EndDate != "" {
-		db = db.Where("FROM_UNIXTIME(create_time) <= ?", query.EndDate+" 23:59:59")
+		if t, err := time.ParseInLocation("2006-01-02", query.EndDate, cst); err == nil {
+			db = db.Where("create_time <= ?", t.Add(24*time.Hour-time.Second).Unix())
+		}
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -340,7 +414,7 @@ func (r *PlatformDataRepository) queryKuaishouData(ctx context.Context, query mo
 		nickname as author,
 		avatar,
 		video_url as url,
-		FROM_UNIXTIME(create_time) as publish_time,
+		create_time as publish_ts,
 		liked_count,
 		'' as comment_count,
 		'' as share_count,
@@ -356,17 +430,19 @@ func (r *PlatformDataRepository) queryKuaishouData(ctx context.Context, query mo
 
 	for rows.Next() {
 		var item model.PlatformDataItem
+		var publishTs int64
 		var likeCountStr, commentCountStr, shareCountStr, viewCountStr string
 
 		if err := rows.Scan(
 			&item.ID, &item.Platform, &item.Title, &item.Content, &item.Author,
-			&item.Avatar, &item.URL, &item.PublishTime,
+			&item.Avatar, &item.URL, &publishTs,
 			&likeCountStr, &commentCountStr, &shareCountStr, &viewCountStr,
 			&item.CoverURL, &item.IPLocation,
 		); err != nil {
 			return nil, 0, err
 		}
 
+		item.PublishTime = autoUnixToCST(publishTs)
 		item.LikeCount = parseIntPtr(likeCountStr)
 		item.CommentCount = parseIntPtr(commentCountStr)
 		item.ShareCount = parseIntPtr(shareCountStr)
@@ -430,10 +506,8 @@ func (r *PlatformDataRepository) queryTiebaData(ctx context.Context, query model
 			return nil, 0, err
 		}
 
-		if publishTimeStr != nil && *publishTimeStr != "" {
-			if t, err := time.Parse("2006-01-02 15:04:05", *publishTimeStr); err == nil {
-				item.PublishTime = &t
-			}
+		if publishTimeStr != nil {
+			item.PublishTime = parseCSTTime(*publishTimeStr)
 		}
 
 		item.CommentCount = &commentCount
@@ -498,10 +572,11 @@ func (r *PlatformDataRepository) queryZhihuData(ctx context.Context, query model
 			return nil, 0, err
 		}
 
-		// 解析时间字符串
+		// created_time is stored as a numeric string (e.g. "1465223615") due to SQLAlchemy
+		// Column(String(32)) on an int field — parse it as int64 then convert to CST.
 		if publishTimeStr != nil && *publishTimeStr != "" {
-			if t, err := time.Parse("2006-01-02 15:04:05", *publishTimeStr); err == nil {
-				item.PublishTime = &t
+			if ts, err := strconv.ParseInt(*publishTimeStr, 10, 64); err == nil {
+				item.PublishTime = autoUnixToCST(ts)
 			}
 		}
 

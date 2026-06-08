@@ -290,6 +290,20 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			title = title[:50] + "..."
 		}
 
+		// Prefer CreateDateTime ("2025-10-13 18:42:22+08:00") over CreateTime, which is a
+		// shifted timestamp due to a crawler bug in rfc2822_to_timestamp.
+		var weiboPublishedAt time.Time
+		if note.CreateDateTime != "" {
+			if t, err := time.Parse("2006-01-02 15:04:05-07:00", note.CreateDateTime); err == nil {
+				weiboPublishedAt = t
+			}
+		}
+		if weiboPublishedAt.IsZero() {
+			// Fallback: CreateTime is shifted (CST clock face stored as UTC), so subtract 8h to
+			// recover the true UTC instant.
+			weiboPublishedAt = time.Unix(note.CreateTime-8*3600, 0)
+		}
+
 		article := model.Article{
 			SourceID:       config.SourceID,
 			Title:          title,
@@ -298,7 +312,7 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			OriginURL:      note.NoteURL,
 			Platform:       "weibo",
 			PlatformItemID: strconv.FormatInt(note.NoteID, 10),
-			PublishedAt:    time.Unix(note.CreateTime, 0),
+			PublishedAt:    weiboPublishedAt,
 			Keywords:       "[]",
 			Sentiment:      "neutral",
 			SentScore:      0.5,
@@ -440,7 +454,7 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			continue
 		}
 
-		publishTime, err := time.Parse("2006-01-02 15:04:05", note.PublishTime)
+		publishTime, err := time.ParseInLocation("2006-01-02 15:04:05", note.PublishTime, time.FixedZone("CST", 8*3600))
 		if err != nil {
 			// 记录详细的时间解析错误
 			fmt.Printf("[TiebaSyncer] 时间解析失败 - NoteID: %s, PublishTime: '%s', Error: %v\n",
@@ -499,7 +513,7 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 	if config.MinSourceID > 0 {
 		query = query.Where("id > ?", config.MinSourceID)
 	} else if config.SyncMode == "incremental" && !config.LastSyncTime.IsZero() {
-		query = query.Where("created_time > ?", config.LastSyncTime.Format("2006-01-02 15:04:05"))
+		query = query.Where("created_time > ?", strconv.FormatInt(config.LastSyncTime.Unix(), 10))
 	}
 
 	if err := query.Order("id ASC").Find(&contents).Error; err != nil {
