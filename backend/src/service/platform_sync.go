@@ -76,6 +76,7 @@ type SyncResult struct {
 	Duration     string    `json:"duration"`
 	Status       string    `json:"status"`
 	ErrorMessage string    `json:"errorMessage,omitempty"`
+	InsertedIDs  []int64   `json:"insertedIds,omitempty"`
 }
 
 // SyncPlatforms 同步多个平台（支持并发）
@@ -363,6 +364,7 @@ func (s *PlatformSyncService) progressToResult(progress *SyncProgress) *SyncResu
 		Duration:     snapshot.Duration,
 		Status:       snapshot.Status,
 		ErrorMessage: snapshot.ErrorMessage,
+		InsertedIDs:  snapshot.InsertedIDs,
 	}
 }
 

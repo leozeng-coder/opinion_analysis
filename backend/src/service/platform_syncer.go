@@ -166,6 +166,7 @@ type SyncProgress struct {
 	EndTime      time.Time `json:"endTime"`
 	Duration     string    `json:"duration"`
 	ErrorMessage string    `json:"errorMessage,omitempty"`
+	InsertedIDs  []int64   `json:"insertedIds,omitempty"`
 	mu           sync.RWMutex
 }
 
@@ -177,6 +178,13 @@ func (p *SyncProgress) Update(processed, new, skipped, errors int) {
 	p.NewCount = new
 	p.SkippedCount = skipped
 	p.ErrorCount = errors
+}
+
+// AddInsertedID 记录本次成功插入的 article ID
+func (p *SyncProgress) AddInsertedID(id int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.InsertedIDs = append(p.InsertedIDs, id)
 }
 
 // SetStatus 设置状态
@@ -204,6 +212,8 @@ func (p *SyncProgress) SetError(err error) {
 func (p *SyncProgress) GetSnapshot() SyncProgress {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	ids := make([]int64, len(p.InsertedIDs))
+	copy(ids, p.InsertedIDs)
 	return SyncProgress{
 		Platform:       p.Platform,
 		Status:         p.Status,
@@ -216,6 +226,7 @@ func (p *SyncProgress) GetSnapshot() SyncProgress {
 		EndTime:        p.EndTime,
 		Duration:       p.Duration,
 		ErrorMessage:   p.ErrorMessage,
+		InsertedIDs:    ids,
 	}
 }
 

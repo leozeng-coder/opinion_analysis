@@ -636,7 +636,7 @@ const CustomNode = ({ id, data }: any) => {
   const isRunning  = execStatus === 'running'
   const isSuccess  = execStatus === 'success' || execStatus === 'partial_success'
   const isFailed   = execStatus === 'failed'
-  const isDimmed   = execStatus === 'skipped' || execStatus === 'cancelled'
+  const isDimmed   = execStatus === 'skipped' || execStatus === 'cancelled' || execStatus === 'inherited'
 
   // Clip shape for shimmer overlay matches each category's visual boundary
   const shimmerClip: React.CSSProperties =
@@ -903,6 +903,7 @@ const EXEC_STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode;
   partial_success: { color: 'warning', icon: <ExclamationCircleOutlined />, label: '部分成功' },
   failed: { color: 'error', icon: <CloseCircleOutlined />, label: '失败' },
   cancelled: { color: 'default', icon: <StopOutlined />, label: '已取消' },
+  inherited: { color: 'default', icon: <HistoryOutlined />, label: '继承' },
 }
 
 const getExecStatusConfig = (status: string) =>
@@ -1022,6 +1023,18 @@ const buildConsoleLines = (params: {
     const data = nodeMap.get(log.nodeId)
     const label = data ? nodeDisplayLabel(data) : log.nodeId
     const type = data?.type
+
+    // 继承的前序节点只显示一行简要信息
+    if (log.status === 'inherited') {
+      lines.push({
+        key: `node-${log.id}-inherited`,
+        time: fmtTime(log.startedAt),
+        level: 'info',
+        tag: label,
+        message: '(继承上次执行结果)',
+      })
+      continue
+    }
 
     lines.push({
       key: `node-${log.id}-start`,
@@ -1184,6 +1197,17 @@ const WorkflowEditorPage: React.FC = () => {
   const [crawlerMaxCommentsLimit, setCrawlerMaxCommentsLimit] = useState<number>(1000)
   const [crawlerMaxSubCommentsLimit, setCrawlerMaxSubCommentsLimit] = useState<number>(500)
 
+  // 右键菜单
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: Node } | null>(null)
+
+  // 全局点击关闭右键菜单
+  useEffect(() => {
+    if (!contextMenu) return
+    const handleGlobalClick = () => setContextMenu(null)
+    document.addEventListener('mousedown', handleGlobalClick)
+    return () => document.removeEventListener('mousedown', handleGlobalClick)
+  }, [contextMenu])
+
   // ============ 执行 / 控制台状态 ============
   const location = useLocation()
   // 控制台面板模式：console=实时日志，history=历史记录，hidden=收起
@@ -1202,6 +1226,13 @@ const WorkflowEditorPage: React.FC = () => {
   const [detailLogs, setDetailLogs] = useState<WorkflowNodeExecution[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
+
+  // 当前控制台显示的是哪次执行的日志（用于右键重跑的参考）
+  // null 表示实时执行中的 currentExecution，非 null 表示用户复现了某次历史执行
+  const [replayExecId, setReplayExecId] = useState<number | null>(null)
+
+  // 画布锁定：执行中或复现历史时，禁止编辑
+  const isLocked = isExecuting || replayExecId !== null
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const consoleEndRef = useRef<HTMLDivElement>(null)
@@ -1469,6 +1500,64 @@ const WorkflowEditorPage: React.FC = () => {
       setRegenerating(false)
     }
   }
+
+  const handleNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault()
+    setContextMenu({ x: event.clientX, y: event.clientY, node })
+  }, [])
+
+  // 复现某次历史执行：把那次执行的日志加载到控制台，节点画布显示对应状态
+  const handleReplayExecution = useCallback(async (execution: WorkflowExecution) => {
+    setDetailVisible(false)
+    setCurrentExecution(execution)
+    setReplayExecId(execution.id)
+    setNodeLogs([])
+    setCrawlerLogs([])
+    setConsoleMode('console')
+    currentExecIdRef.current = execution.id
+    try {
+      const logs = await workflowApi.executionLogs(execution.id)
+      setNodeLogs(logs || [])
+    } catch {
+      message.error('加载执行日志失败')
+    }
+  }, [])
+
+  // 从指定节点重跑，以 execId 作为前序状态参考
+  const handleExecuteFromNode = useCallback(async (nodeId: string, execId: number) => {
+    setContextMenu(null)
+    setDetailVisible(false)
+    if (!isEdit || !id) return
+    setExecuting(true)
+    try {
+      const exec = await workflowApi.executeFromNode(Number(id), nodeId, execId)
+      message.success(`已从节点重跑（执行 #${exec.id}）`)
+      resetConsoleCacheCleared(id)
+      setIsExecuting(true)
+      setReplayExecId(null)
+      setCurrentExecution({ id: exec.id, workflowId: Number(id), status: 'running', startedAt: new Date().toISOString() })
+      setNodeLogs([])
+      setCrawlerLogs([])
+      setConsoleMode('console')
+      startMonitor(exec.id)
+    } catch (error: any) {
+      message.error(error?.message || '重跑失败')
+    } finally {
+      setExecuting(false)
+    }
+  }, [isEdit, id, startMonitor])
+
+  // 右键菜单触发：优先使用当前复现/实时执行的 execId
+  const handleContextMenuRerun = useCallback((node: Node) => {
+    const execId = replayExecId ?? (currentExecution?.status !== 'running' ? currentExecution?.id : null)
+      ?? history.find((e) => e.status !== 'running')?.id
+    if (!execId) {
+      message.warning('没有可参考的历史执行记录，请先执行一次工作流，或在历史记录中点击「复现」')
+      setContextMenu(null)
+      return
+    }
+    handleExecuteFromNode(node.id, execId)
+  }, [replayExecId, currentExecution, history, handleExecuteFromNode])
 
   const handleExecute = useCallback(async () => {
     if (!isEdit || !id) {
@@ -1812,11 +1901,22 @@ const WorkflowEditorPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 90,
+      width: 140,
       render: (_: any, r: WorkflowExecution) => (
-        <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewHistoryDetail(r)}>
-          详情
-        </Button>
+        <Space size={0}>
+          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewHistoryDetail(r)}>
+            详情
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<SyncOutlined />}
+            disabled={r.status === 'running'}
+            onClick={() => handleReplayExecution(r)}
+          >
+            复现
+          </Button>
+        </Space>
       ),
     },
   ]
@@ -1824,14 +1924,14 @@ const WorkflowEditorPage: React.FC = () => {
   return (
     <div style={{ height: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <PageHeader
-        title={isEdit ? '编辑工作流' : '新建工作流'}
+        title={replayExecId ? `复现执行 #${replayExecId}（只读）` : isEdit ? '编辑工作流' : '新建工作流'}
         extra={
           <Space>
             <Button
               type="primary"
               icon={<SaveOutlined />}
               loading={saving}
-              disabled={isExecuting}
+              disabled={isLocked}
               onClick={() => form.submit()}
             >
               保存
@@ -1860,6 +1960,14 @@ const WorkflowEditorPage: React.FC = () => {
                   执行
                 </Button>
               ))}
+            {replayExecId && !isExecuting && (
+              <Button
+                icon={<StopOutlined />}
+                onClick={() => { setReplayExecId(null); setNodeLogs([]); setCrawlerLogs([]) }}
+              >
+                退出复现
+              </Button>
+            )}
             <Button
               icon={<CodeOutlined />}
               type={consoleMode === 'hidden' ? 'default' : 'primary'}
@@ -1893,7 +2001,7 @@ const WorkflowEditorPage: React.FC = () => {
             form={form}
             layout="vertical"
             onFinish={handleSubmit}
-            disabled={isExecuting}
+            disabled={isLocked}
             initialValues={{
               status: true,
               triggerType: 'manual',
@@ -2011,22 +2119,24 @@ const WorkflowEditorPage: React.FC = () => {
           <div
             ref={reactFlowWrapper}
             style={{ width: '100%', height: '100%' }}
-            onDrop={isExecuting ? undefined : onDrop}
-            onDragOver={isExecuting ? undefined : onDragOver}
+            onDrop={isLocked ? undefined : onDrop}
+            onDragOver={isLocked ? undefined : onDragOver}
           >
             <ExecutionStatusContext.Provider value={nodeStatusMap}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
-              onNodesChange={isExecuting ? undefined : handleNodesChange}
-              onEdgesChange={isExecuting ? undefined : onEdgesChange}
-              onConnect={isExecuting ? undefined : onConnect}
+              onNodesChange={isLocked ? undefined : handleNodesChange}
+              onEdgesChange={isLocked ? undefined : onEdgesChange}
+              onConnect={isLocked ? undefined : onConnect}
               onNodeClick={handleNodeClick}
+              onNodeContextMenu={handleNodeContextMenu}
+              onPaneClick={() => setContextMenu(null)}
               onInit={setRfInstance}
               nodeTypes={nodeTypes}
-              nodesDraggable={!isExecuting}
-              nodesConnectable={!isExecuting}
-              elementsSelectable={!isExecuting}
+              nodesDraggable={!isLocked}
+              nodesConnectable={!isLocked}
+              elementsSelectable={!isLocked}
               fitView
             >
               <Background />
@@ -2037,6 +2147,29 @@ const WorkflowEditorPage: React.FC = () => {
             </ReactFlow>
             </ExecutionStatusContext.Provider>
           </div>
+          {/* 节点右键菜单 */}
+          {contextMenu && (
+            <div
+              style={{
+                position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 9999,
+                background: '#fff', border: '1px solid #d9d9d9', borderRadius: 6,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.12)', minWidth: 160, overflow: 'hidden',
+              }}
+            >
+              <div style={{ padding: '6px 12px', fontSize: 12, color: '#666', borderBottom: '1px solid #f0f0f0', fontWeight: 500 }}>
+                {contextMenu.node.data?.label || contextMenu.node.id}
+              </div>
+              <div
+                role="button"
+                style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#f5f5f5')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = '')}
+                onClick={() => handleContextMenuRerun(contextMenu.node)}
+              >
+                ▶ 从此节点重跑
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* 右侧节点库（小方块、一排两个、拖拽添加，可滚动） */}
@@ -2445,6 +2578,17 @@ const WorkflowEditorPage: React.FC = () => {
                               错误: {log.errorMsg}
                             </div>
                           )}
+                          {detailExecution && detailExecution.status !== 'running' && (
+                            <Button
+                              type="link"
+                              size="small"
+                              icon={<PlayCircleOutlined />}
+                              style={{ padding: '2px 0', marginTop: 4 }}
+                              onClick={() => handleExecuteFromNode(log.nodeId, detailExecution.id)}
+                            >
+                              从此节点重跑
+                            </Button>
+                          )}
                         </div>
                       ),
                     }
@@ -2482,7 +2626,7 @@ const WorkflowEditorPage: React.FC = () => {
         }
       >
         {selectedNode && (
-          <Form form={nodeConfigForm} layout="vertical" disabled={isExecuting}>
+          <Form form={nodeConfigForm} layout="vertical" disabled={isLocked}>
             <Form.Item label="节点 ID">
               <Input value={selectedNode.id} disabled />
             </Form.Item>

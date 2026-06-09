@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"opinion-analysis/src/model"
 	platformSync "opinion-analysis/src/service"
 	"opinion-analysis/src/service/workflow/nodes"
 )
@@ -65,19 +64,14 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		topic = topics[0]
 	}
 
-	articlePlatforms := platformSync.ResolveArticlePlatforms(syncCodes)
-	maxArticleIDBefore, err := n.maxArticleID(ctx, articlePlatforms)
-	if err != nil {
-		return nil, n.WrapError("query max article id failed", err)
-	}
-
-	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v topic=%s includeSourceIDs=%d maxArticleIdBefore=%d",
-		syncMode, syncCodes, topic, len(includeSourceIDs), maxArticleIDBefore)
+	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v topic=%s includeSourceIDs=%d",
+		syncMode, syncCodes, topic, len(includeSourceIDs))
 
 	syncSvc := platformSync.NewPlatformSyncService(n.db)
 	results := make(map[string]interface{})
 	totalNew := 0
 	hasErrors := false
+	var allInsertedIDs []int64
 
 	for _, code := range syncCodes {
 		var result *platformSync.SyncResult
@@ -86,25 +80,20 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 
 		switch {
 		case len(includeSourceIDs) > 0:
-			// 优先级最高：如果上游传递了过滤后的源表 ID 列表，只同步这些 ID
 			strategy = "filtered"
 			result, syncErr = syncSvc.SyncPlatformBySourceIDsWithTopic(ctx, code, includeSourceIDs, topic, enableSentiment)
 		case syncMode == "full":
-			// 真正的全表扫描对账（按 origin_url 去重，幂等），并对齐偏移量
 			strategy = "full"
 			result, syncErr = syncSvc.SyncPlatformFullWithTopic(ctx, code, topic, enableSentiment)
 		case syncSinceMinutes > 0:
-			// 显式时间窗口覆盖：按「最近 N 分钟发帖」同步（不走偏移量）
 			since := time.Now().Add(-time.Duration(syncSinceMinutes) * time.Minute)
 			strategy = fmt.Sprintf("since=%dm", syncSinceMinutes)
 			result, syncErr = syncSvc.SyncPlatformSinceWithTopic(ctx, code, since, topic, enableSentiment)
 		default:
 			if baseline, ok := sourceBaselines[code]; ok {
-				// 上游有爬虫节点：以爬虫启动前的源表 max(id) 为起点，只同步本次爬取新增行
 				strategy = fmt.Sprintf("baseline=%d", baseline)
 				result, syncErr = syncSvc.SyncPlatformFromBaselineWithTopic(ctx, code, baseline, topic, enableSentiment)
 			} else {
-				// 无爬虫节点（手动触发同步）：基于持久化偏移量，gap-free 增量
 				strategy = "offset"
 				result, syncErr = syncSvc.SyncPlatformByOffsetWithTopic(ctx, code, topic, enableSentiment)
 			}
@@ -117,6 +106,7 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		if result.ErrorCount > 0 {
 			hasErrors = true
 		}
+		allInsertedIDs = append(allInsertedIDs, result.InsertedIDs...)
 		results[code] = map[string]interface{}{
 			"strategy":     strategy,
 			"newCount":     result.NewCount,
@@ -128,52 +118,28 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 			code, strategy, result.NewCount, result.SkippedCount, result.ErrorCount)
 	}
 
-	// 本次同步新增的 articles：id > 同步前的 max(id)
-	articleIDs, err := n.listNewArticleIDs(ctx, articlePlatforms, maxArticleIDBefore)
-	if err != nil {
-		return nil, n.WrapError("query synced article ids failed", err)
-	}
-
 	status := "synced"
 	if hasErrors {
 		status = "partial_success"
 	}
 
 	produced := map[string]interface{}{
-		"articleIds":         nodes.PackArticleIDs(articleIDs),
-		"articlesCount":      len(articleIDs),
-		"syncMode":           syncMode,
-		"syncPlatforms":      syncCodes,
-		"syncPlatformCodes":  syncCodes,
-		"syncResults":        results,
-		"syncNewCount":       totalNew,
-		"maxArticleIdBefore": maxArticleIDBefore,
-		"status":             status,
+		"articleIds":        nodes.PackArticleIDs(allInsertedIDs),
+		"articlesCount":    len(allInsertedIDs),
+		"syncMode":         syncMode,
+		"syncPlatforms":    syncCodes,
+		"syncPlatformCodes": syncCodes,
+		"syncResults":      results,
+		"syncNewCount":     totalNew,
+		"status":           status,
 	}
 
 	output := nodes.CarryForward(input, produced)
 
-	log.Printf("[PlatformSyncNode] done: newRecords=%d articleIds=%d (%v)",
-		totalNew, len(articleIDs), articleIDs)
+	log.Printf("[PlatformSyncNode] done: newRecords=%d articleIds=%d",
+		totalNew, len(allInsertedIDs))
 
 	return output, nil
-}
-
-func (n *PlatformSyncNode) maxArticleID(ctx context.Context, articlePlatforms []string) (uint, error) {
-	var maxID uint
-	err := n.db.WithContext(ctx).Model(&model.Article{}).
-		Where("platform IN ?", articlePlatforms).
-		Select("COALESCE(MAX(id), 0)").Scan(&maxID).Error
-	return maxID, err
-}
-
-func (n *PlatformSyncNode) listNewArticleIDs(ctx context.Context, articlePlatforms []string, afterID uint) ([]int64, error) {
-	var ids []int64
-	err := n.db.WithContext(ctx).Model(&model.Article{}).
-		Where("platform IN ? AND id > ?", articlePlatforms, afterID).
-		Order("id ASC").
-		Pluck("id", &ids).Error
-	return ids, err
 }
 
 // extractSourceBaselines 从上游 crawler_run 节点的输出中提取各平台的源表 baseline（爬虫启动前 max(id)）。

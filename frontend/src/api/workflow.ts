@@ -26,6 +26,13 @@ export const workflowApi = {
   execute: (id: number, input?: Record<string, any>) =>
     request.post<WorkflowExecution>(`/workflows/${id}/execute`, { input }),
 
+  // 从指定节点重跑
+  executeFromNode: (id: number, fromNodeId: string, executionId: number) =>
+    request.post<{ id: number; message: string }>(
+      `/workflows/${id}/execute-from-node`,
+      { fromNodeId, executionId }
+    ),
+
   // 执行历史
   executions: (id: number, params: { page: number; pageSize: number }) =>
     request.get<PageData<WorkflowExecution>>(`/workflows/${id}/executions`, { params }),

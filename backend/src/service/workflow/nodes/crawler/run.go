@@ -112,23 +112,28 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 
 	commentMaxIDs := n.captureCommentBaselines(ctx, syncCodes)
 
+	var waitErr error
 	if waitForCompletion {
 		timeout := time.Duration(timeoutMinutes) * time.Minute
 		if err := n.crawlerSvc.WaitForCompletion(ctx, result.RunID, timeout); err != nil {
-			return nil, n.WrapError("crawler execution failed", err)
-		}
-		log.Printf("[CrawlerRunNode] Crawler finished: runId=%d", result.RunID)
+			waitErr = err
+			log.Printf("[CrawlerRunNode] Crawler wait failed (data may still exist): runId=%d err=%v", result.RunID, err)
+		} else {
+			log.Printf("[CrawlerRunNode] Crawler finished: runId=%d", result.RunID)
 
-		// 统计本次爬取新增的文章数和评论数
-		newArticles := n.countNewRows(ctx, syncCodes, sourceMaxIDs, platformSync.SyncCodeToSourceTable)
-		newComments := n.countNewRows(ctx, syncCodes, commentMaxIDs, platformSync.SyncCodeToCommentTable)
-		log.Printf("[CrawlerRunNode] 本次爬取完成：新增文章 %d 篇，新增评论 %d 条（runId=%d）",
-			newArticles, newComments, result.RunID)
+			// 统计本次爬取新增的文章数和评论数
+			newArticles := n.countNewRows(ctx, syncCodes, sourceMaxIDs, platformSync.SyncCodeToSourceTable)
+			newComments := n.countNewRows(ctx, syncCodes, commentMaxIDs, platformSync.SyncCodeToCommentTable)
+			log.Printf("[CrawlerRunNode] 本次爬取完成：新增文章 %d 篇，新增评论 %d 条（runId=%d）",
+				newArticles, newComments, result.RunID)
+		}
 	}
 
 	status := "triggered"
-	if waitForCompletion {
+	if waitForCompletion && waitErr == nil {
 		status = "completed"
+	} else if waitForCompletion && waitErr != nil {
+		status = "timeout"
 	}
 
 	produced := map[string]interface{}{
@@ -141,6 +146,12 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 		"topics":             topics,
 		"status":             status,
 		"waitedCompletion":   waitForCompletion,
+	}
+
+	if waitErr != nil {
+		produced["timeoutError"] = waitErr.Error()
+		// 返回 partial_success：数据可能已写入源表，元信息保留给下游使用
+		return nodes.CarryForward(input, produced), n.WrapError("crawler timeout (data may exist in source tables)", waitErr)
 	}
 
 	return nodes.CarryForward(input, produced), nil

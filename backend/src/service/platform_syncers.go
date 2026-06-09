@@ -84,6 +84,7 @@ func (s *XhsSyncer) Sync(ctx context.Context, config SyncConfig, progress *SyncP
 			continue
 		}
 
+		progress.AddInsertedID(int64(article.ID))
 		_ = s.syncComments(article.ID, "xhs", note.NoteID)
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
@@ -159,6 +160,7 @@ func (s *DouyinSyncer) Sync(ctx context.Context, config SyncConfig, progress *Sy
 			continue
 		}
 
+		progress.AddInsertedID(int64(article.ID))
 		_ = s.syncComments(article.ID, "douyin", strconv.FormatInt(aweme.AwemeID, 10))
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
@@ -234,6 +236,7 @@ func (s *BilibiliSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 			continue
 		}
 
+		progress.AddInsertedID(int64(article.ID))
 		_ = s.syncComments(article.ID, "bilibili", strconv.FormatInt(video.VideoID, 10))
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
@@ -328,6 +331,7 @@ func (s *WeiboSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			continue
 		}
 
+		progress.AddInsertedID(int64(article.ID))
 		_ = s.syncComments(article.ID, "weibo", strconv.FormatInt(note.NoteID, 10))
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
@@ -403,6 +407,7 @@ func (s *KuaishouSyncer) Sync(ctx context.Context, config SyncConfig, progress *
 			continue
 		}
 
+		progress.AddInsertedID(int64(article.ID))
 		_ = s.syncComments(article.ID, "kuaishou", video.VideoID)
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
 	}
@@ -486,6 +491,7 @@ func (s *TiebaSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
 			continue
 		}
+		progress.AddInsertedID(int64(article.ID))
 		_ = s.syncComments(article.ID, "tieba", note.NoteID)
 
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)
@@ -579,6 +585,7 @@ func (s *ZhihuSyncer) Sync(ctx context.Context, config SyncConfig, progress *Syn
 			progress.Update(i+1, progress.NewCount, progress.SkippedCount, progress.ErrorCount+1)
 			continue
 		}
+		progress.AddInsertedID(int64(article.ID))
 		_ = s.syncComments(article.ID, "zhihu", content.ContentID)
 
 		progress.Update(i+1, progress.NewCount+1, progress.SkippedCount, progress.ErrorCount)

@@ -72,6 +72,7 @@ func (h *RAGHandler) Status(c *gin.Context) {
 
 	// 并发探测：embedding 服务 + Milvus，各自独立超时，互不阻塞
 	var wg sync.WaitGroup
+	var mu sync.Mutex
 
 	if h.embed != nil {
 		wg.Add(1)
@@ -87,16 +88,21 @@ func (h *RAGHandler) Status(c *gin.Context) {
 			client := &http.Client{Timeout: 3 * time.Second}
 			resp, err := client.Get(h.embed.BaseURL() + "/health")
 			if err != nil {
+				mu.Lock()
 				out["serviceError"] = err.Error()
+				mu.Unlock()
 				return
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode/100 != 2 {
+				mu.Lock()
 				out["serviceError"] = "http " + resp.Status
+				mu.Unlock()
 				return
 			}
 			var hr healthResp
 			if err := json.NewDecoder(resp.Body).Decode(&hr); err == nil {
+				mu.Lock()
 				out["serviceReachable"] = true
 				out["embedDim"] = hr.EmbedDimension
 				out["embedderReady"] = hr.EmbedderReady
@@ -106,6 +112,7 @@ func (h *RAGHandler) Status(c *gin.Context) {
 				if hr.EmbedProvider != "" {
 					out["embedProvider"] = hr.EmbedProvider
 				}
+				mu.Unlock()
 			}
 		}()
 	}
@@ -115,13 +122,17 @@ func (h *RAGHandler) Status(c *gin.Context) {
 		go func() {
 			defer wg.Done()
 			if err := h.milvus.Ping(3 * time.Second); err == nil {
-				out["milvusReachable"] = true
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer cancel()
 				exists, _ := h.milvus.HasCollection(ctx)
+				mu.Lock()
+				out["milvusReachable"] = true
 				out["collectionExists"] = exists
+				mu.Unlock()
 			} else {
+				mu.Lock()
 				out["milvusError"] = err.Error()
+				mu.Unlock()
 			}
 		}()
 	}

@@ -215,6 +215,55 @@ func (h *WorkflowHandler) Execute(c *gin.Context) {
 	})
 }
 
+// ExecuteFromNode 从指定节点重跑工作流
+func (h *WorkflowHandler) ExecuteFromNode(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+
+	var req struct {
+		FromNodeID  string `json:"fromNodeId"`
+		ExecutionID int64  `json:"executionId"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.FromNodeID == "" {
+		response.Fail(c, http.StatusBadRequest, "fromNodeId is required")
+		return
+	}
+	if req.ExecutionID <= 0 {
+		response.Fail(c, http.StatusBadRequest, "executionId must be positive")
+		return
+	}
+
+	execution := &model.WorkflowExecution{
+		WorkflowID: id,
+		Status:     "running",
+		StartedAt:  time.Now(),
+	}
+	if err := h.store.WorkflowExecution.Create(execution); err != nil {
+		response.ServerError(c)
+		return
+	}
+
+	go func() {
+		ctx := context.Background()
+		_, err := h.engine.ExecuteFromNode(ctx, id, req.FromNodeID, req.ExecutionID)
+		if err != nil {
+			// 错误已在 Engine 中记录
+		}
+	}()
+
+	response.OK(c, gin.H{
+		"id":      execution.ID,
+		"message": "workflow re-execution started from node",
+	})
+}
+
 // Executions 获取工作流执行历史
 func (h *WorkflowHandler) Executions(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

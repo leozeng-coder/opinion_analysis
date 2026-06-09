@@ -393,7 +393,13 @@ func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[st
 			e.updateNodeExecutionStatus(nodeExec.ID, "cancelled", "用户取消", nil)
 			return nil, ctx.Err()
 		}
-		e.updateNodeExecutionStatus(nodeExec.ID, "failed", errorMsg, nil)
+		// 即使失败，若节点返回了 output（如 crawler timeout 仍有元信息），也保存到 DB，
+		// 以便「从此节点重跑」时能重建有效的上下文（syncPlatformCodes 等）。
+		var failedOutput map[string]interface{}
+		if output != nil {
+			failedOutput = diffPayload(input, output)
+		}
+		e.updateNodeExecutionStatus(nodeExec.ID, "failed", errorMsg, failedOutput)
 		return nil, fmt.Errorf("[Node: %s, Type: %s] Execution failed: %w", nodeID, nodeType, err)
 	}
 
@@ -549,6 +555,216 @@ func diffPayload(input, output map[string]interface{}) map[string]interface{} {
 		}
 	}
 	return delta
+}
+
+// ExecuteFromNode 从指定节点重跑工作流，前序节点输出从上次执行记录中重建，不重新执行。
+// prevExecID 为参考的历史执行 ID，fromNodeID 及其下游将重新运行。
+func (e *Engine) ExecuteFromNode(ctx context.Context, workflowID int64, fromNodeID string, prevExecID int64) (*model.WorkflowExecution, error) {
+	workflow, err := e.store.Workflow.FindByID(workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load workflow: %w", err)
+	}
+
+	e.logger.Info("starting execute-from-node",
+		zap.Int64("workflowId", workflowID),
+		zap.String("fromNodeId", fromNodeID),
+		zap.Int64("prevExecId", prevExecID))
+
+	// 复用 handler 预先创建的 running 记录，或自行创建
+	execution, err := e.store.WorkflowExecution.FindLatestRunning(workflowID)
+	if err != nil || execution == nil {
+		execution = &model.WorkflowExecution{
+			WorkflowID: workflowID,
+			Status:     "running",
+			StartedAt:  time.Now(),
+		}
+		if err := e.store.WorkflowExecution.Create(execution); err != nil {
+			return nil, fmt.Errorf("failed to create execution record: %w", err)
+		}
+	}
+
+	execCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e.registerCancel(execution.ID, cancel)
+	defer e.unregisterCancel(execution.ID)
+
+	var nodeList []map[string]interface{}
+	var edgeList []map[string]interface{}
+	if err := json.Unmarshal(workflow.Nodes, &nodeList); err != nil {
+		e.updateExecutionStatus(execution.ID, "failed", "failed to parse nodes: "+err.Error())
+		return nil, fmt.Errorf("failed to parse nodes: %w", err)
+	}
+	if err := json.Unmarshal(workflow.Edges, &edgeList); err != nil {
+		e.updateExecutionStatus(execution.ID, "failed", "failed to parse edges: "+err.Error())
+		return nil, fmt.Errorf("failed to parse edges: %w", err)
+	}
+
+	sortedNodes, err := e.topologicalSort(nodeList, edgeList)
+	if err != nil {
+		e.updateExecutionStatus(execution.ID, "failed", err.Error())
+		return nil, err
+	}
+
+	// 加载前次执行的节点记录，重建前序节点输出
+	prevNodeExecs, _ := e.store.WorkflowNodeExecution.ListByExecutionID(prevExecID)
+	prevNodeMap := make(map[string]*model.WorkflowNodeExecution, len(prevNodeExecs))
+	for i := range prevNodeExecs {
+		prevNodeMap[prevNodeExecs[i].NodeID] = &prevNodeExecs[i]
+	}
+
+	nodeOutputs := make(map[string]map[string]interface{})
+	outgoingActive := make(map[string]bool)
+
+	for _, node := range sortedNodes {
+		nodeID := node["id"].(string)
+		if nodeID == fromNodeID {
+			break // 后续节点在主循环中执行
+		}
+		nodeType := e.resolveNodeType(node)
+		if nodeType == "trigger" {
+			nodeOutputs[nodeID] = map[string]interface{}{}
+			outgoingActive[nodeID] = true
+			continue
+		}
+		prev, ok := prevNodeMap[nodeID]
+		if !ok || prev.Status == "skipped" || prev.Status == "cancelled" {
+			// 无记录或被跳过：仍标记 outgoingActive=true（force 模式），
+			// 让 fromNodeID 能正常开始执行。输出用空 map。
+			outgoingActive[nodeID] = true
+			nodeOutputs[nodeID] = map[string]interface{}{}
+			continue
+		}
+		// fullOutput = merge(storedInput, storedDelta)
+		var storedInput, storedDelta map[string]interface{}
+		_ = json.Unmarshal(prev.Input, &storedInput)
+		_ = json.Unmarshal(prev.Output, &storedDelta)
+		full := make(map[string]interface{}, len(storedInput)+len(storedDelta))
+		for k, v := range storedInput {
+			full[k] = v
+		}
+		for k, v := range storedDelta {
+			full[k] = v
+		}
+		nodeOutputs[nodeID] = full
+		if nodeType == "condition" {
+			outgoingActive[nodeID] = conditionPassed(full)
+		} else {
+			// Force 模式：只要有 DB 记录就视为有效（即使 status=failed），
+			// 因为用户主动选择从此节点重跑，意味着认为前序数据可用。
+			outgoingActive[nodeID] = true
+		}
+	}
+
+	// 为前序节点写入 inherited 记录，确保本次 execution 可被后续「从此节点重跑」使用
+	for _, node := range sortedNodes {
+		nodeID := node["id"].(string)
+		if nodeID == fromNodeID {
+			break
+		}
+		nodeType := e.resolveNodeType(node)
+		if nodeType == "trigger" {
+			continue
+		}
+		prev := prevNodeMap[nodeID]
+		if prev == nil {
+			continue
+		}
+		inheritedExec := &model.WorkflowNodeExecution{
+			ExecutionID: execution.ID,
+			NodeID:      nodeID,
+			Status:      "inherited",
+			Input:       prev.Input,
+			Output:      prev.Output,
+			StartedAt:   time.Now(),
+		}
+		now := time.Now()
+		inheritedExec.FinishedAt = &now
+		_ = e.store.WorkflowNodeExecution.Create(inheritedExec)
+	}
+
+	// 预计算入边
+	hasIncoming := make(map[string]bool)
+	for _, edge := range edgeList {
+		if t, ok := edge["target"].(string); ok {
+			hasIncoming[t] = true
+		}
+	}
+
+	partialNodes := 0
+	skippedNodes := 0
+
+	for _, node := range sortedNodes {
+		nodeID := node["id"].(string)
+		nodeType := e.resolveNodeType(node)
+
+		// 跳过已重建（前序）的节点
+		if _, done := nodeOutputs[nodeID]; done {
+			continue
+		}
+
+		if err := execCtx.Err(); err != nil {
+			e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
+			return execution, ErrCancelled
+		}
+
+		if nodeType == "trigger" {
+			nodeOutputs[nodeID] = map[string]interface{}{}
+			outgoingActive[nodeID] = true
+			continue
+		}
+
+		if hasIncoming[nodeID] && !hasActiveIncoming(nodeID, edgeList, outgoingActive) {
+			outgoingActive[nodeID] = false
+			skippedNodes++
+			e.recordSkippedNode(execution.ID, nodeID)
+			continue
+		}
+
+		input := e.collectInputs(nodeID, edgeList, nodeOutputs)
+		output, err := e.executeNode(execCtx, execution.ID, node, input)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(execCtx.Err(), context.Canceled) {
+				e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
+				return execution, ErrCancelled
+			}
+			e.updateExecutionStatus(execution.ID, "failed", err.Error())
+			return execution, err
+		}
+
+		if output != nil {
+			if s, ok := output["status"].(string); ok && (s == "partial_success" || s == "partial") {
+				partialNodes++
+			}
+		}
+
+		nodeOutputs[nodeID] = output
+		if nodeType == "condition" {
+			outgoingActive[nodeID] = conditionPassed(output)
+		} else {
+			outgoingActive[nodeID] = true
+		}
+	}
+
+	finalStatus := "success"
+	finalMsg := ""
+	if partialNodes > 0 {
+		finalStatus = "partial_success"
+		finalMsg = fmt.Sprintf("%d 个节点存在部分失败，详见节点日志", partialNodes)
+	}
+	if skippedNodes > 0 {
+		if finalMsg != "" {
+			finalMsg += "；"
+		}
+		finalMsg += fmt.Sprintf("%d 个节点因条件分支被跳过", skippedNodes)
+	}
+	e.updateExecutionStatus(execution.ID, finalStatus, finalMsg)
+
+	e.logger.Info("execute-from-node completed",
+		zap.Int64("workflowId", workflowID),
+		zap.Int64("executionId", execution.ID),
+		zap.String("status", finalStatus))
+
+	return execution, nil
 }
 
 func (e *Engine) resolveNodeType(node map[string]interface{}) string {
