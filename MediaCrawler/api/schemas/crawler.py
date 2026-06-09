@@ -74,6 +74,8 @@ class CrawlerStartRequest(BaseModel):
     headless: bool = False
     # Performance
     max_notes_count: int = 50
+    max_comments_count_singlenotes: int = 50
+    max_sub_comments_count_singlenotes: int = 20
     max_concurrency_num: int = 3
     sleep_sec_min: int = 1
     sleep_sec_max: int = 3

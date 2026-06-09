@@ -62,6 +62,7 @@ class BaiduTieBaClient(AbstractApiClient):
         self.default_ip_proxy = default_ip_proxy
         self.playwright_page = playwright_page  # Playwright page object
         self._pc_tbs = ""
+        self._playwright_lock = asyncio.Lock()  # serialise all playwright navigations
 
     @staticmethod
     def _sign_pc_params(params: Dict[str, Any]) -> str:
@@ -560,16 +561,17 @@ class BaiduTieBaClient(AbstractApiClient):
                 utils.logger.info(f"[BaiduTieBaClient.get_comments_all_sub_comments] Accessing sub-comment page: {sub_comment_url}")
 
                 try:
-                    # Use Playwright to access sub-comment page
-                    await self.playwright_page.goto(sub_comment_url, wait_until="domcontentloaded")
+                    # Serialise all playwright navigations to avoid ERR_ABORTED from concurrent goto calls
+                    async with self._playwright_lock:
+                        await self.playwright_page.goto(sub_comment_url, wait_until="domcontentloaded")
 
-                    # Wait for page loading, using delay setting from config file
-                    await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+                        # Wait for page loading
+                        await asyncio.sleep(utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC))
 
-                    # Get page HTML content
-                    page_content = await self.playwright_page.content()
+                        # Get page HTML content
+                        page_content = await self.playwright_page.content()
 
-                    # Extract sub-comments
+                    # Extract sub-comments (outside lock — pure CPU work)
                     sub_comments = self._page_extractor.extract_tieba_note_sub_comments(
                         page_content, parent_comment=parment_comment
                     )
@@ -737,7 +739,7 @@ class BaiduTieBaClient(AbstractApiClient):
             await self.playwright_page.goto(creator_url, wait_until="domcontentloaded")
 
             # Wait for page loading, using delay setting from config file
-            await asyncio.sleep(config.CRAWLER_MAX_SLEEP_SEC)
+            await asyncio.sleep(utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC))
 
             # Get page content (this API returns JSON)
             page_content = await self.playwright_page.content()

@@ -12,10 +12,12 @@ import (
 // CrawlerConfigData 爬虫运行时配置（来自 system_settings）。
 type CrawlerConfigData struct {
 	// 性能
-	MaxNotesCount  int
-	MaxConcurrency int
-	SleepSecMin    int
-	SleepSecMax    int
+	MaxNotesCount       int
+	MaxCommentsCount    int
+	MaxSubCommentsCount int
+	MaxConcurrency      int
+	SleepSecMin         int
+	SleepSecMax         int
 	// IP 代理
 	EnableIPProxy    bool
 	IPProxyPoolCount int
@@ -43,6 +45,8 @@ type CrawlerConfigData struct {
 
 var crawlerConfigKeys = []string{
 	"crawler.max_notes_count",
+	"crawler.max_comments_count",
+	"crawler.max_sub_comments_count",
 	"crawler.max_concurrency_num",
 	"crawler.sleep_sec_min",
 	"crawler.sleep_sec_max",
@@ -70,8 +74,10 @@ var crawlerConfigKeys = []string{
 
 func crawlerConfigDefaults() map[string]string {
 	return map[string]string{
-		"crawler.max_notes_count":    "50",
-		"crawler.max_concurrency_num": "3",
+		"crawler.max_notes_count":        "50",
+		"crawler.max_comments_count":     "50",
+		"crawler.max_sub_comments_count": "20",
+		"crawler.max_concurrency_num":    "3",
 		"crawler.sleep_sec_min":      "1",
 		"crawler.sleep_sec_max":      "3",
 		"crawler.enable_ip_proxy":    "false",
@@ -127,8 +133,10 @@ func mapToCrawlerConfigData(m map[string]string) CrawlerConfigData {
 		d[k] = v
 	}
 	return CrawlerConfigData{
-		MaxNotesCount:     parseIntSetting(d["crawler.max_notes_count"], 50),
-		MaxConcurrency:    parseIntSetting(d["crawler.max_concurrency_num"], 3),
+		MaxNotesCount:       parseIntSetting(d["crawler.max_notes_count"], 50),
+		MaxCommentsCount:    parseIntSetting(d["crawler.max_comments_count"], 50),
+		MaxSubCommentsCount: parseIntSetting(d["crawler.max_sub_comments_count"], 20),
+		MaxConcurrency:      parseIntSetting(d["crawler.max_concurrency_num"], 3),
 		SleepSecMin:       parseIntSetting(d["crawler.sleep_sec_min"], 1),
 		SleepSecMax:       parseIntSetting(d["crawler.sleep_sec_max"], 3),
 		EnableIPProxy:     parseBoolSetting(d["crawler.enable_ip_proxy"]),
@@ -166,8 +174,10 @@ func (r *SystemRepository) GetCrawlerConfig() (CrawlerConfigData, error) {
 // SaveCrawlerConfig 写入爬虫配置到 system_settings。
 func (r *SystemRepository) SaveCrawlerConfig(cfg CrawlerConfigData, updatedBy uint) error {
 	pairs := map[string]string{
-		"crawler.max_notes_count":     strconv.Itoa(cfg.MaxNotesCount),
-		"crawler.max_concurrency_num": strconv.Itoa(cfg.MaxConcurrency),
+		"crawler.max_notes_count":        strconv.Itoa(cfg.MaxNotesCount),
+		"crawler.max_comments_count":     strconv.Itoa(cfg.MaxCommentsCount),
+		"crawler.max_sub_comments_count": strconv.Itoa(cfg.MaxSubCommentsCount),
+		"crawler.max_concurrency_num":    strconv.Itoa(cfg.MaxConcurrency),
 		"crawler.sleep_sec_min":       strconv.Itoa(cfg.SleepSecMin),
 		"crawler.sleep_sec_max":       strconv.Itoa(cfg.SleepSecMax),
 		"crawler.enable_ip_proxy":     boolToSetting(cfg.EnableIPProxy),
@@ -222,8 +232,10 @@ func (r *SystemRepository) SaveCrawlerConfig(cfg CrawlerConfigData, updatedBy ui
 
 // CrawlerConfigResponse 管理端 API 响应（敏感字段脱敏）。
 type CrawlerConfigResponse struct {
-	MaxNotesCount     int    `json:"maxNotesCount"`
-	MaxConcurrency    int    `json:"maxConcurrency"`
+	MaxNotesCount       int    `json:"maxNotesCount"`
+	MaxCommentsCount    int    `json:"maxCommentsCount"`
+	MaxSubCommentsCount int    `json:"maxSubCommentsCount"`
+	MaxConcurrency      int    `json:"maxConcurrency"`
 	SleepSecMin       int    `json:"sleepSecMin"`
 	SleepSecMax       int    `json:"sleepSecMax"`
 	EnableIPProxy     bool   `json:"enableIPProxy"`
@@ -262,8 +274,10 @@ func BuildCrawlerConfigResponse(cfg CrawlerConfigData) CrawlerConfigResponse {
 		return crawlerCookieInfo{Masked: true, Value: utils.MaskString(raw)}
 	}
 	return CrawlerConfigResponse{
-		MaxNotesCount:     cfg.MaxNotesCount,
-		MaxConcurrency:    cfg.MaxConcurrency,
+		MaxNotesCount:       cfg.MaxNotesCount,
+		MaxCommentsCount:    cfg.MaxCommentsCount,
+		MaxSubCommentsCount: cfg.MaxSubCommentsCount,
+		MaxConcurrency:      cfg.MaxConcurrency,
 		SleepSecMin:       cfg.SleepSecMin,
 		SleepSecMax:       cfg.SleepSecMax,
 		EnableIPProxy:     cfg.EnableIPProxy,

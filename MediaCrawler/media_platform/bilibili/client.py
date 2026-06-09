@@ -264,6 +264,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         is_fetch_sub_comments=False,
         callback: Optional[Callable] = None,
         max_count: int = 10,
+        max_sub_count: int = 20,
     ):
         """
         get video all comments include sub comments
@@ -271,7 +272,8 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         :param crawl_interval:
         :param is_fetch_sub_comments:
         :param callback:
-        max_count: Maximum number of comments to crawl per note
+        :param max_count: Maximum number of first-level comments to crawl per note
+        :param max_sub_count: Maximum number of second-level comments per first-level comment
 
         :return:
         """
@@ -303,6 +305,13 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 break
 
             comment_list: List[Dict] = comments_res.get("replies", [])
+            # 首页额外合并热评（top_replies），避免遗漏 B站返回的置顶/热门评论
+            if next_page == 0 or (not result and len(comment_list) == 0):
+                top_replies: List[Dict] = comments_res.get("top_replies", [])
+                if top_replies:
+                    existing_rpids = {r.get("rpid") for r in top_replies}
+                    comment_list = top_replies + [c for c in comment_list if c.get("rpid") not in existing_rpids]
+                    utils.logger.info(f"[BilibiliClient.get_video_all_comments] Merged {len(top_replies)} top_replies for video_id: {video_id}")
 
             # Check if is_end and next exist
             if "is_end" not in cursor_info or "next" not in cursor_info:
@@ -319,7 +328,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 for comment in comment_list:
                     comment_id = comment['rpid']
                     if (comment.get("rcount", 0) > 0):
-                        {await self.get_video_all_level_two_comments(video_id, comment_id, CommentOrderType.DEFAULT, 10, crawl_interval, callback)}
+                        {await self.get_video_all_level_two_comments(video_id, comment_id, CommentOrderType.DEFAULT, 10, crawl_interval, callback, max_sub_count)}
             if len(result) + len(comment_list) > max_count:
                 comment_list = comment_list[:max_count - len(result)]
             if callback:  # If there is a callback function, execute it
@@ -339,6 +348,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         ps: int = 10,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        max_count: int = 20,
     ) -> Dict:
         """
         get video all level two comments for a level one comment
@@ -348,18 +358,24 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
         :param ps: Number of comments per page
         :param crawl_interval:
         :param callback:
+        :param max_count: Maximum second-level comments to crawl per first-level comment
         :return:
         """
 
         pn = 1
+        total_fetched = 0
         while True:
             result = await self.get_video_level_two_comments(video_id, level_one_comment_id, pn, ps, order_mode)
             comment_list: List[Dict] = result.get("replies", [])
-            if callback:  # If there is a callback function, execute it
+            remaining = max_count - total_fetched
+            if len(comment_list) > remaining:
+                comment_list = comment_list[:remaining]
+            if callback:
                 await callback(video_id, comment_list)
+            total_fetched += len(comment_list)
             sleep_time = utils.get_random_sleep_time(crawl_interval)
             await asyncio.sleep(sleep_time)
-            if (int(result["page"]["count"]) <= pn * ps):
+            if total_fetched >= max_count or (int(result["page"]["count"]) <= pn * ps):
                 break
 
             pn += 1

@@ -251,6 +251,8 @@ class CrawlerManager:
 
         # Performance
         cmd.extend(["--max_notes_count", str(config.max_notes_count)])
+        cmd.extend(["--max_comments_count_singlenotes", str(config.max_comments_count_singlenotes)])
+        cmd.extend(["--max_sub_comments_count_singlenotes", str(config.max_sub_comments_count_singlenotes)])
         cmd.extend(["--max_concurrency_num", str(config.max_concurrency_num)])
         cmd.extend(["--sleep_sec_min", str(config.sleep_sec_min)])
         cmd.extend(["--sleep_sec_max", str(config.sleep_sec_max)])

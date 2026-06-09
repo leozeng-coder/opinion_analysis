@@ -7,6 +7,8 @@ export interface CrawlerCookieInfo {
 
 export interface CrawlerConfigResponse {
   maxNotesCount: number
+  maxCommentsCount: number
+  maxSubCommentsCount: number
   maxConcurrency: number
   sleepSecMin: number
   sleepSecMax: number
@@ -30,6 +32,8 @@ export interface CrawlerConfigResponse {
 
 export interface UpdateCrawlerPayload {
   maxNotesCount?: number
+  maxCommentsCount?: number
+  maxSubCommentsCount?: number
   maxConcurrency?: number
   sleepSecMin?: number
   sleepSecMax?: number

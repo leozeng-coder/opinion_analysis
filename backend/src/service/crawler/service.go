@@ -68,8 +68,10 @@ type TriggerParams struct {
 	EndAt             string
 	TimeoutMinutes    int
 	// 性能参数
-	MaxNotesCount int // 0 表示使用 Python 侧默认值
-	MaxConcurrency int
+	MaxNotesCount       int // 0 表示使用 Python 侧默认值
+	MaxCommentsCount    int // 单视频最大一级评论数，0 表示使用 Python 侧默认值
+	MaxSubCommentsCount int // 单一级评论最大二级评论数，0 表示使用 Python 侧默认值
+	MaxConcurrency      int
 	SleepSecMin   int
 	SleepSecMax   int
 	// 平台排序
@@ -107,8 +109,10 @@ type MediaCrawlerStartRequest struct {
 	EnableComments    bool   `json:"enable_comments"`
 	EnableSubComments bool   `json:"enable_sub_comments"`
 	// 性能参数（0 表示使用 Python 侧默认值）
-	MaxNotesCount  int `json:"max_notes_count,omitempty"`
-	MaxConcurrency int `json:"max_concurrency_num,omitempty"`
+	MaxNotesCount       int `json:"max_notes_count,omitempty"`
+	MaxCommentsCount    int `json:"max_comments_count_singlenotes,omitempty"`
+	MaxSubCommentsCount int `json:"max_sub_comments_count_singlenotes,omitempty"`
+	MaxConcurrency      int `json:"max_concurrency_num,omitempty"`
 	SleepSecMin    int `json:"sleep_sec_min,omitempty"`
 	SleepSecMax    int `json:"sleep_sec_max,omitempty"`
 	// 平台排序（空字符串表示使用 Python 侧默认值）
@@ -192,7 +196,7 @@ func (s *Service) Trigger(ctx context.Context, params TriggerParams) (*TriggerRe
 		log.Printf("[CrawlerService] Calling MediaCrawler API for runId=%d", logRow.ID)
 		timeoutMinutes := params.TimeoutMinutes
 		if timeoutMinutes <= 0 {
-			timeoutMinutes = 30
+			timeoutMinutes = 60
 		}
 		bgCtx := context.Background()
 		go s.callMediaCrawlerAPI(bgCtx, logRow.ID, params, time.Duration(timeoutMinutes)*time.Minute)
@@ -267,6 +271,24 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 			maxNotes = dynCfg.MaxNotesCount
 		}
 	}
+	maxComments := dynCfg.MaxCommentsCount
+	if params.MaxCommentsCount > 0 {
+		maxComments = params.MaxCommentsCount
+		if dynCfg.MaxCommentsCount > 0 && maxComments > dynCfg.MaxCommentsCount {
+			log.Printf("[CrawlerService] 工作流请求 maxCommentsCount=%d 超过后台上限 %d，已限制",
+				params.MaxCommentsCount, dynCfg.MaxCommentsCount)
+			maxComments = dynCfg.MaxCommentsCount
+		}
+	}
+	maxSubComments := dynCfg.MaxSubCommentsCount
+	if params.MaxSubCommentsCount > 0 {
+		maxSubComments = params.MaxSubCommentsCount
+		if dynCfg.MaxSubCommentsCount > 0 && maxSubComments > dynCfg.MaxSubCommentsCount {
+			log.Printf("[CrawlerService] 工作流请求 maxSubCommentsCount=%d 超过后台上限 %d，已限制",
+				params.MaxSubCommentsCount, dynCfg.MaxSubCommentsCount)
+			maxSubComments = dynCfg.MaxSubCommentsCount
+		}
+	}
 	maxConc := dynCfg.MaxConcurrency
 	if params.MaxConcurrency > 0 {
 		maxConc = params.MaxConcurrency
@@ -332,6 +354,8 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 		EnableComments:    params.EnableComments,
 		EnableSubComments: params.EnableSubComments,
 		MaxNotesCount:     maxNotes,
+		MaxCommentsCount:  maxComments,
+		MaxSubCommentsCount: maxSubComments,
 		MaxConcurrency:    maxConc,
 		SleepSecMin:       sleepMin,
 		SleepSecMax:       sleepMax,

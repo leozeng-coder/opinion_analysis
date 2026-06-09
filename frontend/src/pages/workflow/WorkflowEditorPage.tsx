@@ -229,6 +229,8 @@ export const NODE_REGISTRY = {
       },
       { name: 'startPage', label: '起始页', type: 'number', required: false, default: 1, min: 1, max: 100 },
       { name: 'maxNotesCount', label: '爬取数量', type: 'number', required: false, min: 1, placeholder: '留空则使用后台管理的默认值' },
+      { name: 'maxCommentsCount', label: '一级评论数量', type: 'number', required: false, min: 1, placeholder: '留空则使用后台管理的默认值' },
+      { name: 'maxSubCommentsCount', label: '二级评论数量', type: 'number', required: false, min: 1, placeholder: '留空则使用后台管理的默认值' },
       {
         type: 'boolean-pair',
         name: '_bp_crawl1',
@@ -245,7 +247,7 @@ export const NODE_REGISTRY = {
           { name: 'waitForCompletion', label: '等待爬取完成', default: true },
         ],
       },
-      { name: 'timeoutMinutes', label: '超时时间(分钟)', type: 'number', required: false, default: 10, min: 1, max: 60 },
+      { name: 'timeoutMinutes', label: '超时时间(分钟)', type: 'number', required: false, default: 60, min: 1, max: 480 },
     ],
   },
   crawler_schedule: {
@@ -1179,6 +1181,8 @@ const WorkflowEditorPage: React.FC = () => {
 
   // 爬取数量上限（从后台管理配置读取）
   const [crawlerMaxLimit, setCrawlerMaxLimit] = useState<number>(500)
+  const [crawlerMaxCommentsLimit, setCrawlerMaxCommentsLimit] = useState<number>(1000)
+  const [crawlerMaxSubCommentsLimit, setCrawlerMaxSubCommentsLimit] = useState<number>(500)
 
   // ============ 执行 / 控制台状态 ============
   const location = useLocation()
@@ -1244,8 +1248,15 @@ const WorkflowEditorPage: React.FC = () => {
   useEffect(() => {
     workflowApi
       .getCrawlerLimits()
-      .then((res) => setCrawlerMaxLimit(res.maxNotesCount || 500))
-      .catch(() => setCrawlerMaxLimit(500))
+      .then((res) => {
+        setCrawlerMaxLimit(res.maxNotesCount || 500)
+        setCrawlerMaxCommentsLimit(res.maxCommentsCount || 1000)
+        setCrawlerMaxSubCommentsLimit(res.maxSubCommentsCount || 500)
+      })
+      .catch(() => {
+        setCrawlerMaxLimit(500)
+        setCrawlerMaxCommentsLimit(1000)
+      })
   }, [])
 
 
@@ -2605,16 +2616,37 @@ const WorkflowEditorPage: React.FC = () => {
                   name={field.name}
                   rules={[{ required: field.required, message: `请输入${field.label}` }]}
                   valuePropName={isBooleanField ? 'checked' : 'value'}
-                  tooltip={field.name === 'maxNotesCount' ? `当前后台配置的最大爬取上限为 ${crawlerMaxLimit} 篇` : undefined}
-                  extra={field.name === 'maxNotesCount' && nodeConfigForm.getFieldValue('maxNotesCount') > crawlerMaxLimit ? (
-                    <span style={{ color: '#ff4d4f' }}>⚠️ 超出后台管理配置的最大上限（{crawlerMaxLimit} 篇），将被限制为 {crawlerMaxLimit} 篇</span>
-                  ) : undefined}
+                  tooltip={
+                    field.name === 'maxNotesCount' ? `当前后台配置的最大爬取上限为 ${crawlerMaxLimit} 篇` :
+                    field.name === 'maxCommentsCount' ? `当前后台配置的最大一级评论上限为 ${crawlerMaxCommentsLimit} 条` :
+                    field.name === 'maxSubCommentsCount' ? `当前后台配置的最大二级评论上限为 ${crawlerMaxSubCommentsLimit} 条` :
+                    undefined
+                  }
+                  extra={
+                    field.name === 'maxNotesCount' && nodeConfigForm.getFieldValue('maxNotesCount') > crawlerMaxLimit ? (
+                      <span style={{ color: '#ff4d4f' }}>⚠️ 超出后台管理配置的最大上限（{crawlerMaxLimit} 篇），将被限制为 {crawlerMaxLimit} 篇</span>
+                    ) : field.name === 'maxCommentsCount' && nodeConfigForm.getFieldValue('maxCommentsCount') > crawlerMaxCommentsLimit ? (
+                      <span style={{ color: '#ff4d4f' }}>⚠️ 超出后台管理配置的最大上限（{crawlerMaxCommentsLimit} 条），将被限制为 {crawlerMaxCommentsLimit} 条</span>
+                    ) : field.name === 'maxSubCommentsCount' && nodeConfigForm.getFieldValue('maxSubCommentsCount') > crawlerMaxSubCommentsLimit ? (
+                      <span style={{ color: '#ff4d4f' }}>⚠️ 超出后台管理配置的最大上限（{crawlerMaxSubCommentsLimit} 条），将被限制为 {crawlerMaxSubCommentsLimit} 条</span>
+                    ) : undefined
+                  }
                 >
                   {isNumberField ? (
                     <InputNumber
                       min={fieldConfig.min}
-                      max={field.name === 'maxNotesCount' ? crawlerMaxLimit : fieldConfig.max}
-                      placeholder={field.name === 'maxNotesCount' ? `留空则使用后台管理的默认值（上限 ${crawlerMaxLimit} 篇）` : fieldConfig.placeholder}
+                      max={
+                        field.name === 'maxNotesCount' ? crawlerMaxLimit :
+                        field.name === 'maxCommentsCount' ? crawlerMaxCommentsLimit :
+                        field.name === 'maxSubCommentsCount' ? crawlerMaxSubCommentsLimit :
+                        fieldConfig.max
+                      }
+                      placeholder={
+                        field.name === 'maxNotesCount' ? `留空则使用后台管理的默认值（上限 ${crawlerMaxLimit} 篇）` :
+                        field.name === 'maxCommentsCount' ? `留空则使用后台管理的默认值（上限 ${crawlerMaxCommentsLimit} 条）` :
+                        field.name === 'maxSubCommentsCount' ? `留空则使用后台管理的默认值（上限 ${crawlerMaxSubCommentsLimit} 条）` :
+                        fieldConfig.placeholder
+                      }
                       style={{ width: '100%' }}
                     />
                   ) : isBooleanField ? (

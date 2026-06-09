@@ -78,7 +78,7 @@ const IP_PROXY_PROVIDERS = [
 ]
 
 interface CrawlerFormValues {
-  maxNotesCount: number; maxConcurrency: number; sleepSecMin: number; sleepSecMax: number
+  maxNotesCount: number; maxCommentsCount: number; maxSubCommentsCount: number; maxConcurrency: number; sleepSecMin: number; sleepSecMax: number
   enableIPProxy: boolean; ipProxyPoolCount: number; ipProxyProvider: string
   proxyKdlSecretId: string; proxyKdlSignature: string
   proxyKdlUsername: string; proxyKdlPassword: string; proxyWandouAppKey: string
@@ -129,7 +129,7 @@ const CrawlerConfigPage: React.FC = () => {
     try {
       const cfg = await adminCrawlerApi.getConfig()
       crawlerForm.setFieldsValue({
-        maxNotesCount: cfg.maxNotesCount, maxConcurrency: cfg.maxConcurrency,
+        maxNotesCount: cfg.maxNotesCount, maxCommentsCount: cfg.maxCommentsCount, maxSubCommentsCount: cfg.maxSubCommentsCount, maxConcurrency: cfg.maxConcurrency,
         sleepSecMin: cfg.sleepSecMin, sleepSecMax: cfg.sleepSecMax,
         enableIPProxy: cfg.enableIPProxy, ipProxyPoolCount: cfg.ipProxyPoolCount,
         ipProxyProvider: cfg.ipProxyProvider || 'kuaidaili',
@@ -328,7 +328,17 @@ const CrawlerConfigPage: React.FC = () => {
                 <Divider orientation="left" plain style={{ marginTop: 0, color: '#888', fontSize: 12 }}>爬取行为</Divider>
                 <Row gutter={16}>
                   <Col span={6}>
-                    <Form.Item label="最大爬取数量" name="maxNotesCount" tooltip="每次任务最多爬取的内容条数">
+                    <Form.Item label="最大爬取数量" name="maxNotesCount" tooltip="每次任务最多爬取的内容条数，工作流节点不能超过此上限">
+                      <InputNumber min={1} max={500} style={{ width: '100%' }} addonAfter="条" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="最大一级评论数" name="maxCommentsCount" tooltip="每条内容最多爬取的一级评论数，工作流节点不能超过此上限">
+                      <InputNumber min={1} max={1000} style={{ width: '100%' }} addonAfter="条" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={6}>
+                    <Form.Item label="最大二级评论数" name="maxSubCommentsCount" tooltip="每条一级评论最多爬取的二级评论数，工作流节点不能超过此上限">
                       <InputNumber min={1} max={500} style={{ width: '100%' }} addonAfter="条" />
                     </Form.Item>
                   </Col>

@@ -275,6 +275,14 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
                 rich_help_panel="Comment Configuration",
             ),
         ] = config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES,
+        max_sub_comments_count_singlenotes: Annotated[
+            int,
+            typer.Option(
+                "--max_sub_comments_count_singlenotes",
+                help="Maximum number of second-level comments to crawl per first-level comment",
+                rich_help_panel="Comment Configuration",
+            ),
+        ] = config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
         max_concurrency_num: Annotated[
             int,
             typer.Option(
@@ -406,6 +414,7 @@ async def parse_cmd(argv: Optional[Sequence[str]] = None):
         config.SAVE_DATA_OPTION = save_data_option.value
         config.COOKIES = cookies
         config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = max_comments_count_singlenotes
+        config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES = max_sub_comments_count_singlenotes
         config.MAX_CONCURRENCY_NUM = max_concurrency_num
         config.SAVE_DATA_PATH = save_data_path
         config.ENABLE_IP_PROXY = enable_ip_proxy_value

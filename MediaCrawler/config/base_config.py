@@ -107,11 +107,14 @@ ENABLE_GET_MEIDAS = False
 ENABLE_GET_COMMENTS = True
 
 # Control the number of crawled first-level comments (single video/post)
-CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = 10
+CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES = 50
 
 # Whether to enable the mode of crawling second-level comments. By default, crawling of second-level comments is not enabled.
 # If the old version of the project uses db, you need to refer to schema/tables.sql line 287 to add table fields.
 ENABLE_GET_SUB_COMMENTS = False
+
+# Control the number of crawled second-level comments per first-level comment (single video/post)
+CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES = 20
 
 # word cloud related
 # Whether to enable generating comment word clouds

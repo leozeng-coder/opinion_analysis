@@ -19,7 +19,7 @@
 # bilili platform configuration
 
 # Control the number of videos/posts crawled per day
-MAX_NOTES_PER_DAY = 1
+MAX_NOTES_PER_DAY = 10
 
 # Specify Bilibili video URL list (supports complete URL or BV number)
 # Example:

@@ -44,7 +44,7 @@ export const workflowApi = {
 
   // 获取爬虫配置上限（供工作流编辑器动态限制用）
   getCrawlerLimits: () =>
-    request.get<{ maxNotesCount: number }>('/admin/system/crawler/limits'),
+    request.get<{ maxNotesCount: number; maxCommentsCount: number; maxSubCommentsCount: number }>('/admin/system/crawler/limits'),
 }
 
 export const reportApi = {

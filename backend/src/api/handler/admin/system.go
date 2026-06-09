@@ -572,14 +572,18 @@ func (h *SystemHandler) GetCrawlerLimits(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{
-		"maxNotesCount": cfg.MaxNotesCount,
+		"maxNotesCount":       cfg.MaxNotesCount,
+		"maxCommentsCount":    cfg.MaxCommentsCount,
+		"maxSubCommentsCount": cfg.MaxSubCommentsCount,
 	})
 }
 
 // updateCrawlerReq 使用指针字段实现部分更新：nil 表示不修改。
 type updateCrawlerReq struct {
-	MaxNotesCount     *int    `json:"maxNotesCount"`
-	MaxConcurrency    *int    `json:"maxConcurrency"`
+	MaxNotesCount       *int    `json:"maxNotesCount"`
+	MaxCommentsCount    *int    `json:"maxCommentsCount"`
+	MaxSubCommentsCount *int    `json:"maxSubCommentsCount"`
+	MaxConcurrency      *int    `json:"maxConcurrency"`
 	SleepSecMin       *int    `json:"sleepSecMin"`
 	SleepSecMax       *int    `json:"sleepSecMax"`
 	EnableIPProxy     *bool   `json:"enableIPProxy"`
@@ -620,6 +624,20 @@ func (h *SystemHandler) UpdateCrawlerConfig(c *gin.Context) {
 			return
 		}
 		merged.MaxNotesCount = *req.MaxNotesCount
+	}
+	if req.MaxCommentsCount != nil {
+		if *req.MaxCommentsCount < 1 || *req.MaxCommentsCount > 1000 {
+			response.Fail(c, 400, "maxCommentsCount 应在 1~1000 之间")
+			return
+		}
+		merged.MaxCommentsCount = *req.MaxCommentsCount
+	}
+	if req.MaxSubCommentsCount != nil {
+		if *req.MaxSubCommentsCount < 1 || *req.MaxSubCommentsCount > 500 {
+			response.Fail(c, 400, "maxSubCommentsCount 应在 1~500 之间")
+			return
+		}
+		merged.MaxSubCommentsCount = *req.MaxSubCommentsCount
 	}
 	if req.MaxConcurrency != nil {
 		if *req.MaxConcurrency < 1 || *req.MaxConcurrency > 10 {
