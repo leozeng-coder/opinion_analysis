@@ -65,9 +65,15 @@ type htmlData struct {
 	TopicBubbleJSON   template.JS
 	TagCloudJSON      template.JS
 	ChartVariantJSON  template.JS
+	HasCommentAnalysis bool
+	CommentSentJSON    template.JS
+	CommentTopicJSON   template.JS
+	HotCommentsJSON    template.JS
+	CommentTrendJSON   template.JS
+	CommentPlatformJSON template.JS
 }
 
-func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummaries map[string]string, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, htmlTheme string) (string, error) {
+func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummaries map[string]string, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, htmlTheme string, commentAnalysis *CommentAnalysis) (string, error) {
 	theme := pickReportTheme(htmlTheme)
 
 	var conclusion string
@@ -151,6 +157,21 @@ func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummarie
 		TopicBubbleJSON:   template.JS(buildTopicBubbleJSON(stats.TopGroups, stats.TopicSentiment)),
 		TagCloudJSON:      template.JS(buildTopTagsJSON(stats.TagFreq, 25)),
 		ChartVariantJSON:  template.JS(mustJSON(theme.Variant)),
+	}
+
+	if commentAnalysis != nil {
+		d.HasCommentAnalysis = true
+		d.CommentSentJSON = template.JS(mustJSON(commentAnalysis.OverallSentiment))
+		d.CommentTopicJSON = template.JS(mustJSON(commentAnalysis.TopicComments))
+		d.HotCommentsJSON = template.JS(mustJSON(commentAnalysis.HotComments))
+		d.CommentTrendJSON = template.JS(mustJSON(commentAnalysis.DailyTrend))
+		d.CommentPlatformJSON = template.JS(mustJSON(commentAnalysis.PlatformCount))
+	} else {
+		d.CommentSentJSON = template.JS("null")
+		d.CommentTopicJSON = template.JS("null")
+		d.HotCommentsJSON = template.JS("null")
+		d.CommentTrendJSON = template.JS("null")
+		d.CommentPlatformJSON = template.JS("null")
 	}
 
 	tmpl, err := template.New("report").Funcs(template.FuncMap{

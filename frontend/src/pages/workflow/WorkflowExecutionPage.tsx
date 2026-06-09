@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Table, Button, Tag, Space, message, Card, Modal, Timeline, Spin, Popconfirm, Alert } from 'antd'
-import { ArrowLeftOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, ExclamationCircleOutlined, StopOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, ExclamationCircleOutlined, StopOutlined, DownloadOutlined, FileTextOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import PageHeader from '@/components/common/PageHeader'
-import { workflowApi } from '@/api/workflow'
+import { workflowApi, reportApi } from '@/api/workflow'
 import { WorkflowExecution, WorkflowNodeExecution } from '@/types'
 import { useAuthStore } from '@/store/auth'
 
@@ -23,6 +23,7 @@ const WorkflowExecutionPage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false)
   const [selectedExecution, setSelectedExecution] = useState<WorkflowExecution | null>(null)
   const [nodeLogs, setNodeLogs] = useState<WorkflowNodeExecution[]>([])
+  const [regenerating, setRegenerating] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -82,6 +83,20 @@ const WorkflowExecutionPage: React.FC = () => {
       URL.revokeObjectURL(url)
     } catch (e: any) {
       message.error(e?.message || '下载失败')
+    }
+  }
+
+  const handleRegenerateReport = async (execution: WorkflowExecution) => {
+    if (!execution.id) return
+    setRegenerating(true)
+    try {
+      const res = await reportApi.regenerate({ executionId: execution.id })
+      message.success(`报告重新生成成功（${res.articleCount} 篇文章）`)
+      downloadReport(res.reportId, res.format)
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || e?.message || '重新生成失败')
+    } finally {
+      setRegenerating(false)
     }
   }
 
@@ -290,14 +305,24 @@ const WorkflowExecutionPage: React.FC = () => {
                 message={`AI 分析报告已生成（${l.output!.reportFormat || 'markdown'} 格式）`}
                 description={`节点：${l.nodeId}`}
                 action={
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<DownloadOutlined />}
-                    onClick={() => downloadReport(l.output!.reportId, l.output!.reportFormat)}
-                  >
-                    下载报告
-                  </Button>
+                  <Space direction="vertical" size={4}>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      onClick={() => downloadReport(l.output!.reportId, l.output!.reportFormat)}
+                    >
+                      下载报告
+                    </Button>
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={regenerating}
+                      onClick={() => handleRegenerateReport(selectedExecution!)}
+                    >
+                      重新生成
+                    </Button>
+                  </Space>
                 }
               />
             ))}

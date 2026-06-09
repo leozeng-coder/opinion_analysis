@@ -46,3 +46,9 @@ export const workflowApi = {
   getCrawlerLimits: () =>
     request.get<{ maxNotesCount: number }>('/admin/system/crawler/limits'),
 }
+
+export const reportApi = {
+  // 重新生成报告（涉及多轮 LLM 调用，需要较长超时）
+  regenerate: (data: { executionId: number; format?: string; htmlTheme?: string }) =>
+    request.post<{ reportId: string; format: string; articleCount: number; downloadUrl: string }>('/reports/regenerate', data, { timeout: 180000 }),
+}

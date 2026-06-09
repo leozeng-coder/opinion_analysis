@@ -124,14 +124,20 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	}
 	s.db.WithContext(ctx).Model(&model.ArticleComment{}).Where("article_id IN ?", articleIDsUint).Count(&commentCount)
 
+	// Step1: 查询全部评论用于分析
+	var comments []model.ArticleComment
+	s.db.WithContext(ctx).Where("article_id IN ?", articleIDsUint).Order("like_count DESC").Find(&comments)
+
 	// Step1: 程序统计
 	stats := s.computeStats(articles, int(commentCount), sampleSize, maxGroups)
 
 	// Step2&3: 分层 LLM 分析
 	cfg, apiKeySet := s.taggerSvc.GetConfig()
 	groupSummaries := make(map[string]string, len(stats.TopGroups))
+	var commentAnalysis *CommentAnalysis
 	if apiKeySet {
 		groupSummaries = s.summarizeGroups(ctx, stats.TopGroups, cfg)
+		commentAnalysis = s.analyzeComments(ctx, comments, articles, stats.TopGroups, cfg)
 	}
 
 	// Step4: 生成最终报告
@@ -139,9 +145,9 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	var genErr error
 	switch format {
 	case FormatHTML:
-		content, genErr = s.buildHTML(ctx, stats, groupSummaries, crawlerRunID, platforms, topics, cfg, apiKeySet, htmlTheme)
+		content, genErr = s.buildHTML(ctx, stats, groupSummaries, crawlerRunID, platforms, topics, cfg, apiKeySet, htmlTheme, commentAnalysis)
 	default:
-		content, genErr = s.buildMarkdown(ctx, stats, groupSummaries, crawlerRunID, platforms, topics, cfg, apiKeySet)
+		content, genErr = s.buildMarkdown(ctx, stats, groupSummaries, crawlerRunID, platforms, topics, cfg, apiKeySet, commentAnalysis)
 	}
 	if genErr != nil {
 		return "", genErr
@@ -398,7 +404,7 @@ func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, cfg 
 		go func(grp groupStats) {
 			defer wg.Done()
 			prompt := buildGroupPrompt(grp)
-			summary, err := callLLM(ctx, prompt, cfg, 300)
+			summary, err := callLLM(ctx, prompt, cfg, 500)
 			if err != nil {
 				log.Printf("[ReportService] group LLM failed for topic=%s: %v", grp.Topic, err)
 				summary = fmt.Sprintf("（话题「%s」共 %d 篇，LLM分析暂不可用）", grp.Topic, grp.Count)
@@ -414,17 +420,21 @@ func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, cfg 
 
 func buildGroupPrompt(grp groupStats) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("请对以下「%s」话题的舆情内容做一个简洁分析（150字以内），说明该话题的主要观点、情感倾向和值得关注的内容。\n\n", grp.Topic))
+	sb.WriteString(fmt.Sprintf("你是资深舆情分析师。请对以下「%s」话题的舆情做深度分析（250-350字），要求：\n", grp.Topic))
+	sb.WriteString("1. 总结该话题的核心事件/议题是什么\n")
+	sb.WriteString("2. 各方主要观点和立场分歧\n")
+	sb.WriteString("3. 情感倾向的成因分析（为什么正面/负面）\n")
+	sb.WriteString("4. 对决策者的建议：需要关注什么风险、可以采取什么行动\n\n")
 	sb.WriteString(fmt.Sprintf("话题文章共 %d 篇，以下是部分代表性样本：\n", grp.Count))
 	for i, a := range grp.Articles {
-		sb.WriteString(fmt.Sprintf("%d. [%s][%s] %s\n", i+1, a.Platform, a.Sentiment, a.Title))
+		sb.WriteString(fmt.Sprintf("%d. [%s][%s][评分%.2f] %s\n", i+1, a.Platform, a.Sentiment, a.SentScore, a.Title))
 	}
-	sb.WriteString("\n请直接输出分析内容，不要加标题或格式符号。")
+	sb.WriteString("\n请直接输出分析内容，使用自然段落，不要加标题或markdown格式符号。")
 	return sb.String()
 }
 
 // buildMarkdown 生成 Markdown 报告（含最终 LLM 综合分析）
-func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSummaries map[string]string, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool) (string, error) {
+func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSummaries map[string]string, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, commentAnalysis *CommentAnalysis) (string, error) {
 	var sb strings.Builder
 
 	timeRange := formatTimeRange(stats.TimeRange)
@@ -492,6 +502,64 @@ func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSumm
 		sb.WriteString("\n")
 	}
 
+	// 评论深度分析
+	if commentAnalysis != nil {
+		sb.WriteString("## 评论深度分析\n\n")
+
+		// 情感分布
+		sb.WriteString("### 评论情感分布\n\n")
+		cs := commentAnalysis.OverallSentiment
+		csTotal := cs.Positive + cs.Neutral + cs.Negative
+		if csTotal > 0 {
+			sb.WriteString(fmt.Sprintf("- 正面：**%d** 条（%.1f%%）\n", cs.Positive, cs.PosRate))
+			sb.WriteString(fmt.Sprintf("- 中性：**%d** 条（%.1f%%）\n", cs.Neutral, cs.NeuRate))
+			sb.WriteString(fmt.Sprintf("- 负面：**%d** 条（%.1f%%）\n\n", cs.Negative, cs.NegRate))
+		}
+
+		// 平台分布
+		if len(commentAnalysis.PlatformCount) > 0 {
+			sb.WriteString("### 评论平台分布\n\n")
+			sb.WriteString("| 平台 | 评论数 |\n|------|--------|\n")
+			for plat, cnt := range commentAnalysis.PlatformCount {
+				sb.WriteString(fmt.Sprintf("| %s | %d |\n", plat, cnt))
+			}
+			sb.WriteString("\n")
+		}
+
+		// 话题评论观点
+		if len(commentAnalysis.TopicComments) > 0 {
+			sb.WriteString("### 各话题评论观点\n\n")
+			for _, tc := range commentAnalysis.TopicComments {
+				sb.WriteString(fmt.Sprintf("#### %s（%d 条评论）\n\n", tc.Topic, tc.CommentCount))
+				tcTotal := tc.Sentiment.Positive + tc.Sentiment.Neutral + tc.Sentiment.Negative
+				if tcTotal > 0 {
+					sb.WriteString(fmt.Sprintf("情感：正面 %d / 中性 %d / 负面 %d\n\n", tc.Sentiment.Positive, tc.Sentiment.Neutral, tc.Sentiment.Negative))
+				}
+				if len(tc.KeyOpinions) > 0 {
+					sb.WriteString("代表性观点：\n")
+					for _, op := range tc.KeyOpinions {
+						sb.WriteString(fmt.Sprintf("- %s\n", op))
+					}
+					sb.WriteString("\n")
+				}
+			}
+		}
+
+		// 热门评论
+		if len(commentAnalysis.HotComments) > 0 {
+			sb.WriteString("### 热门评论 Top 10\n\n")
+			sb.WriteString("| # | 内容 | 平台 | 点赞 | 情感 |\n|---|------|------|------|------|\n")
+			for i, hc := range commentAnalysis.HotComments {
+				content := hc.Content
+				if len([]rune(content)) > 40 {
+					content = string([]rune(content)[:40]) + "..."
+				}
+				sb.WriteString(fmt.Sprintf("| %d | %s | %s | %d | %s |\n", i+1, content, hc.Platform, hc.LikeCount, sentimentLabel(hc.Sentiment)))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
 	// 高影响力内容
 	sb.WriteString("## 高影响力内容 Top 10\n\n")
 	sb.WriteString("| # | 标题 | 平台 | 情感 |\n|---|------|------|------|\n")
@@ -524,18 +592,22 @@ func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSumm
 // buildConclusion 最终综合 LLM 调用
 func (s *Service) buildConclusion(ctx context.Context, stats crawlStats, groupSummaries map[string]string, cfg config.TaggerConfig) (string, error) {
 	var sb strings.Builder
-	sb.WriteString("你是专业舆情分析师。请基于以下本次爬取数据的统计摘要和各话题分析，写一份200字以内的综合结论，包括：整体舆情态势、主要风险信号、建议关注点。\n\n")
+	sb.WriteString("你是专业舆情分析师，为决策层撰写结论。请基于以下数据写一份300-400字的综合研判报告，包括：\n")
+	sb.WriteString("1. 整体舆情态势（量级、热度走向、情感结构）\n")
+	sb.WriteString("2. 核心风险信号（哪些话题/平台有负面发酵趋势）\n")
+	sb.WriteString("3. 机遇与正面信号（可借势传播的内容）\n")
+	sb.WriteString("4. 行动建议（优先级排序的具体措施）\n\n")
 	sb.WriteString(fmt.Sprintf("统计：文章%d篇，评论%d条，正面%.1f%%，负面%.1f%%\n",
 		stats.ArticleCount, stats.CommentCount,
 		float64(stats.SentimentDist["positive"])/float64(max1(stats.ArticleCount))*100,
 		float64(stats.SentimentDist["negative"])/float64(max1(stats.ArticleCount))*100,
 	))
-	sb.WriteString("各话题小结：\n")
+	sb.WriteString("各话题研判：\n")
 	for topic, summary := range groupSummaries {
-		sb.WriteString(fmt.Sprintf("- %s：%s\n", topic, truncate(summary, 100)))
+		sb.WriteString(fmt.Sprintf("- %s：%s\n", topic, truncate(summary, 150)))
 	}
-	sb.WriteString("\n请直接输出结论段落，不要加标题。")
-	return callLLM(ctx, sb.String(), cfg, 400)
+	sb.WriteString("\n请直接输出结论，使用自然段落，不要加标题或markdown格式。")
+	return callLLM(ctx, sb.String(), cfg, 600)
 }
 
 func max1(n int) int {

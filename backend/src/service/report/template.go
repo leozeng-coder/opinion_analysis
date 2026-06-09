@@ -57,6 +57,9 @@ body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;b
 .section-line{flex:1;height:1px;background:linear-gradient(90deg,var(--primary) 0%,transparent 100%);border-radius:2px;opacity:0.25;margin-left:4px;}
 /* ── Grid layouts ── */
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.grid-1{display:grid;grid-template-columns:1fr;gap:20px;}
+.chart-grid{margin-bottom:16px;}
+.topic-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;}
 /* ── Chart box ── */
 .chart-box{background:rgba(255,255,255,0.95);border-radius:var(--radius);padding:20px;box-shadow:0 2px 12px rgba(0,0,0,0.05),0 1px 3px rgba(0,0,0,0.03);border:1px solid rgba(255,255,255,0.85);}
@@ -89,7 +92,7 @@ body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;b
 .sent-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
 .topic-summary{font-size:13px;color:var(--text-secondary);line-height:1.55;}
 /* ── Tag cloud ── */
-.tag-cloud-wrap{display:flex;flex-wrap:wrap;gap:10px 18px;padding:12px 4px;line-height:2;}
+.tag-cloud-wrap{position:relative;min-height:280px;padding:12px 4px;}
 .tag-chip{display:inline-block;padding:2px 12px;border-radius:20px;background:rgba(0,0,0,0.05);cursor:default;transition:transform 0.15s,background 0.15s;}
 .tag-chip:hover{transform:scale(1.12);background:rgba(0,0,0,0.10);}
 /* ── Table ── */
@@ -114,7 +117,7 @@ body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;b
 /* ── Footer ── */
 .footer{text-align:center;padding:24px 0 8px;border-top:1px solid rgba(0,0,0,0.08);color:var(--text-secondary);font-size:12px;margin-top:16px;}
 /* ── Responsive ── */
-@media(max-width:960px){.grid-2,.topic-card-grid{grid-template-columns:1fr;}.grid-3{grid-template-columns:1fr 1fr;}}
+@media(max-width:960px){.grid-2,.topic-card-grid,.topic-grid{grid-template-columns:1fr;}.grid-3{grid-template-columns:1fr 1fr;}}
 @media(max-width:900px){.kpi-grid{grid-template-columns:repeat(3,1fr);}}
 @media(max-width:600px){.kpi-grid{grid-template-columns:1fr 1fr;}.grid-3{grid-template-columns:1fr;}.hero{padding:28px 24px 24px;}.hero-title{font-size:21px;}}
 </style>
@@ -298,6 +301,53 @@ body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;b
   </div>
 </div>
 
+<!-- ══ Section: 评论深度分析 ══ -->
+{{if .HasCommentAnalysis}}
+<div class="section">
+  <div class="section-header">
+    <span class="section-icon">💬</span>
+    <span class="section-title">评论深度分析</span>
+    <div class="section-line"></div>
+  </div>
+  <div class="chart-grid grid-2">
+    <div class="chart-box">
+      <h4>评论情感分布</h4>
+      <div id="chart-comment-sent" style="height:240px;"></div>
+    </div>
+    <div class="chart-box">
+      <h4>评论平台分布</h4>
+      <div id="chart-comment-plat" style="height:240px;"></div>
+    </div>
+  </div>
+  <div class="chart-grid grid-1">
+    <div class="chart-box">
+      <h4>评论趋势</h4>
+      <div id="chart-comment-trend" style="height:220px;"></div>
+    </div>
+  </div>
+  <div class="chart-box" style="margin-top:16px;">
+    <h4>话题评论观点</h4>
+    <div id="comment-topic-cards" class="topic-grid"></div>
+  </div>
+  <div class="chart-box" style="margin-top:16px;">
+    <h4>热门评论 Top 10</h4>
+    <table class="report-table" id="hot-comments-table">
+      <thead>
+        <tr>
+          <th style="width:36px;">#</th>
+          <th>评论内容</th>
+          <th style="width:80px;">用户</th>
+          <th style="width:80px;">平台</th>
+          <th style="width:60px;">点赞</th>
+          <th style="width:70px;">情感</th>
+        </tr>
+      </thead>
+      <tbody id="hot-comments-tbody"></tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
 <!-- ══ Section: 高影响力内容 Top 10 ══ -->
 <div class="section">
   <div class="section-header">
@@ -346,7 +396,7 @@ body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;b
 'use strict';
 var variant      = {{.ChartVariantJSON}};
 var chartColors  = {{.ChartColorsJSON}};
-var sentColors   = ['{{.Theme.SentPos}}','{{.Theme.SentNeu}}','{{.Theme.SentNeg}}'];
+var sentColors   = [softenColor('{{.Theme.SentPos}}',0.15),softenColor('{{.Theme.SentNeu}}',0.10),softenColor('{{.Theme.SentNeg}}',0.15)];
 var platformData = {{.PlatformJSON}};
 var sentimentData= {{.SentimentJSON}};
 var topTagsData  = {{.TopTagsJSON}};
@@ -358,16 +408,21 @@ var radarData        = {{.RadarJSON}};
 var topArticlesData  = {{.TopArticlesJSON}};
 var topicBubbleData  = {{.TopicBubbleJSON}};
 var tagCloudData     = {{.TagCloudJSON}};
+var commentSentData  = {{.CommentSentJSON}};
+var commentTopicData = {{.CommentTopicJSON}};
+var hotCommentsData  = {{.HotCommentsJSON}};
+var commentTrendData = {{.CommentTrendJSON}};
+var commentPlatData  = {{.CommentPlatformJSON}};
 
 var allCharts = [];
 
-// 将颜色轻微淡化（混入15%白色），使图表色更淡雅
+// 将颜色轻微淡化（混入25%白色），使图表色更淡雅
 function softenColor(hex,amt){
   var r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
   r=Math.round(r+(255-r)*amt); g=Math.round(g+(255-g)*amt); b=Math.round(b+(255-b)*amt);
   return '#'+[r,g,b].map(function(v){return v.toString(16).padStart(2,'0');}).join('');
 }
-var softColors = chartColors.map(function(c){ return /^#[0-9a-fA-F]{6}$/.test(c)?softenColor(c,0.18):c; });
+var softColors = chartColors.map(function(c){ return /^#[0-9a-fA-F]{6}$/.test(c)?softenColor(c,0.25):c; });
 
 function mkChart(id){ var el=document.getElementById(id); if(!el)return null; var c=echarts.init(el,null,{renderer:'canvas'}); allCharts.push(c); return c; }
 
@@ -567,25 +622,193 @@ function mkChart(id){ var el=document.getElementById(id); if(!el)return null; va
   });
 })();
 
-/* ── Tag Cloud ── */
+/* ── Comment Sentiment Pie ── */
+(function(){
+  if(!commentSentData)return;
+  var c = mkChart('chart-comment-sent'); if(!c)return;
+  var data=[
+    {name:'正面',value:commentSentData.positive,itemStyle:{color:sentColors[0]}},
+    {name:'中性',value:commentSentData.neutral,itemStyle:{color:sentColors[1]}},
+    {name:'负面',value:commentSentData.negative,itemStyle:{color:sentColors[2]}}
+  ];
+  c.setOption({
+    tooltip:{trigger:'item',formatter:'{b}: {c} ({d}%)'},
+    legend:{orient:'horizontal',bottom:0,textStyle:{fontSize:11}},
+    series:[{
+      type:'pie',radius:['42%','70%'],
+      itemStyle:{borderRadius:8,borderColor:'#fff',borderWidth:2},
+      label:{formatter:function(p){return p.name+'\n'+p.percent.toFixed(1)+'%';},fontSize:11},
+      data:data
+    }]
+  });
+})();
+
+/* ── Comment Platform Bar ── */
+(function(){
+  if(!commentPlatData)return;
+  var c = mkChart('chart-comment-plat'); if(!c)return;
+  var names=[]; var vals=[];
+  for(var k in commentPlatData){ names.push(k); vals.push(commentPlatData[k]); }
+  var paired=names.map(function(n,i){return{n:n,v:vals[i]};});
+  paired.sort(function(a,b){return b.v-a.v;});
+  names=paired.map(function(p){return p.n;});
+  vals=paired.map(function(p){return p.v;});
+  c.setOption({
+    tooltip:{trigger:'axis'},
+    grid:{top:10,bottom:10,left:'3%',right:'8%',containLabel:true},
+    xAxis:{type:'value',axisLabel:{fontSize:10}},
+    yAxis:{type:'category',data:names,axisLabel:{fontSize:11}},
+    series:[{
+      type:'bar',data:vals.map(function(v,i){return{value:v,itemStyle:{color:softColors[i%softColors.length],borderRadius:[0,8,8,0]}};}),
+      label:{show:true,position:'right',fontSize:10}
+    }]
+  });
+})();
+
+/* ── Comment Trend ── */
+(function(){
+  if(!commentTrendData||!commentTrendData.length)return;
+  var c = mkChart('chart-comment-trend'); if(!c)return;
+  var dates=commentTrendData.map(function(d){return d.date;});
+  c.setOption({
+    tooltip:{trigger:'axis'},
+    legend:{bottom:0,textStyle:{fontSize:10}},
+    grid:{top:10,bottom:50,left:'3%',right:'3%',containLabel:true},
+    xAxis:{type:'category',data:dates,axisLabel:{fontSize:9,rotate:30}},
+    yAxis:{type:'value',axisLabel:{fontSize:10}},
+    series:[
+      {name:'正面',type:'line',smooth:true,stack:'ct',areaStyle:{opacity:0.35},data:commentTrendData.map(function(d){return d.positive;}),itemStyle:{color:sentColors[0]},lineStyle:{color:sentColors[0]}},
+      {name:'中性',type:'line',smooth:true,stack:'ct',areaStyle:{opacity:0.35},data:commentTrendData.map(function(d){return d.neutral;}),itemStyle:{color:sentColors[1]},lineStyle:{color:sentColors[1]}},
+      {name:'负面',type:'line',smooth:true,stack:'ct',areaStyle:{opacity:0.35},data:commentTrendData.map(function(d){return d.negative;}),itemStyle:{color:sentColors[2]},lineStyle:{color:sentColors[2]}}
+    ]
+  });
+})();
+
+/* ── Comment Topic Opinion Cards ── */
+(function(){
+  var el=document.getElementById('comment-topic-cards'); if(!el)return;
+  if(!commentTopicData||!commentTopicData.length)return;
+  function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  commentTopicData.forEach(function(t){
+    var card=document.createElement('div'); card.className='topic-card';
+    var sentBar='<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin:8px 0;">';
+    var total=t.sentiment.positive+t.sentiment.neutral+t.sentiment.negative;
+    if(total>0){
+      sentBar+='<div style="width:'+((t.sentiment.positive/total*100).toFixed(1))+'%;background:'+sentColors[0]+';"></div>';
+      sentBar+='<div style="width:'+((t.sentiment.neutral/total*100).toFixed(1))+'%;background:'+sentColors[1]+';"></div>';
+      sentBar+='<div style="width:'+((t.sentiment.negative/total*100).toFixed(1))+'%;background:'+sentColors[2]+';"></div>';
+    }
+    sentBar+='</div>';
+    var sentLegend='<div style="display:flex;gap:12px;font-size:11px;color:var(--text-secondary);margin-bottom:8px;">';
+    if(total>0){
+      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[0]+';display:inline-block;"></span>正面 '+t.sentiment.positive+'</span>';
+      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[1]+';display:inline-block;"></span>中性 '+t.sentiment.neutral+'</span>';
+      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[2]+';display:inline-block;"></span>负面 '+t.sentiment.negative+'</span>';
+    }
+    sentLegend+='</div>';
+    var opinions='';
+    if(t.keyOpinions&&t.keyOpinions.length){
+      opinions='<div style="margin:8px 0 0;padding:10px 14px;background:rgba(0,0,0,0.025);border-radius:8px;">';
+      opinions+='<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">核心观点</div>';
+      opinions+='<ul style="margin:0;padding-left:16px;font-size:12px;color:var(--text-primary);line-height:1.8;">';
+      t.keyOpinions.forEach(function(o){opinions+='<li style="margin:2px 0;">'+escHtml(o)+'</li>';});
+      opinions+='</ul></div>';
+    }
+    card.innerHTML='<div style="font-weight:600;font-size:14px;color:var(--text-primary);display:flex;align-items:center;gap:8px;">'+escHtml(t.topic)+
+      '<span style="font-size:11px;background:var(--primary);color:#fff;border-radius:12px;padding:1px 9px;font-weight:500;">'+t.commentCount+' 条评论</span></div>'+
+      sentBar+sentLegend+opinions;
+    el.appendChild(card);
+  });
+})();
+
+/* ── Hot Comments Table ── */
+(function(){
+  var tbody=document.getElementById('hot-comments-tbody'); if(!tbody)return;
+  if(!hotCommentsData||!hotCommentsData.length)return;
+  function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  hotCommentsData.forEach(function(c,i){
+    var cls=c.sentiment==='positive'?'badge-pos':(c.sentiment==='negative'?'badge-neg':'badge-neu');
+    var sentLabel=c.sentiment==='positive'?'正面':(c.sentiment==='negative'?'负面':'中性');
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td style="color:var(--text-secondary);font-size:12px;">'+(i+1)+'</td>'+
+      '<td style="max-width:400px;word-break:break-all;font-size:13px;">'+escHtml(c.content)+'</td>'+
+      '<td style="font-size:12px;">'+escHtml(c.nickname)+'</td>'+
+      '<td style="font-size:12px;">'+escHtml(c.platform)+'</td>'+
+      '<td style="font-size:12px;font-weight:600;">'+c.likeCount+'</td>'+
+      '<td><span class="badge '+cls+'">'+sentLabel+'</span></td>';
+    tbody.appendChild(tr);
+  });
+})();
+
+/* ── Tag Cloud (spiral placement, cloud-shaped) ── */
 (function(){
   var el = document.getElementById('tag-cloud'); if(!el)return;
   if(!tagCloudData||!tagCloudData.length)return;
+  el.style.position='relative';
+  el.style.height='280px';
+  el.style.overflow='hidden';
+  el.style.display='block';
+  var W=el.clientWidth||700, H=280;
   var maxVal = Math.max.apply(null,tagCloudData.map(function(d){return d.value;}));
+  var minVal = Math.min.apply(null,tagCloudData.map(function(d){return d.value;}));
   var tagColors = softColors.length>=5 ? softColors : ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
-  tagCloudData.forEach(function(d,i){
-    var ratio = maxVal>0 ? d.value/maxVal : 0.5;
-    var fontSize = Math.round(12 + ratio*18);
-    var opacity  = 0.55 + ratio*0.45;
-    var color    = tagColors[i%tagColors.length];
-    var span = document.createElement('span');
-    span.className='tag-chip';
+  var sorted = tagCloudData.slice().sort(function(a,b){return b.value-a.value;});
+  var placed = [];
+  var GAP = 10;
+  function collides(x,y,w,h){
+    for(var i=0;i<placed.length;i++){
+      var p=placed[i];
+      if(!(x+w+GAP<p.x||x>p.x+p.w+GAP||y+h+GAP<p.y||y>p.y+p.h+GAP)) return true;
+    }
+    return false;
+  }
+  // Hidden element for measuring text width
+  var measurer=document.createElement('span');
+  measurer.style.position='absolute';measurer.style.visibility='hidden';measurer.style.whiteSpace='nowrap';
+  measurer.style.fontFamily='PingFang SC,Hiragino Sans GB,Microsoft YaHei,sans-serif';
+  document.body.appendChild(measurer);
+  sorted.forEach(function(d,i){
+    var ratio = maxVal>minVal ? (d.value-minVal)/(maxVal-minVal) : 0.5;
+    var fontSize = Math.round(14 + ratio*26);
+    var fontWeight = ratio>0.6?'700':'500';
+    var opacity = 0.6 + ratio*0.4;
+    var color = tagColors[i%tagColors.length];
+    // Measure real text width
+    measurer.style.fontSize=fontSize+'px';
+    measurer.style.fontWeight=fontWeight;
+    measurer.textContent=d.name;
+    var tw = measurer.offsetWidth+4;
+    var th = fontSize+8;
+    // Spiral search from center
+    var angle=0, radius=0;
+    var px, py, found=false;
+    for(var tries=0;tries<800;tries++){
+      px=W/2+radius*Math.cos(angle)-tw/2;
+      py=H/2+radius*Math.sin(angle)*0.65-th/2;
+      if(px>=0&&py>=0&&px+tw<=W&&py+th<=H&&!collides(px,py,tw,th)){
+        found=true; break;
+      }
+      angle+=0.35; radius+=0.8;
+    }
+    if(!found) return;
+    placed.push({x:px,y:py,w:tw,h:th});
+    var span=document.createElement('span');
     span.textContent=d.name;
+    span.style.position='absolute';
+    span.style.left=px+'px';
+    span.style.top=py+'px';
     span.style.fontSize=fontSize+'px';
+    span.style.fontWeight=fontWeight;
     span.style.color=color;
     span.style.opacity=opacity;
+    span.style.cursor='default';
+    span.style.whiteSpace='nowrap';
+    span.style.transition='transform 0.15s';
+    span.onmouseover=function(){this.style.transform='scale(1.12)';};
+    span.onmouseout=function(){this.style.transform='scale(1)';};
     el.appendChild(span);
   });
+  document.body.removeChild(measurer);
 })();
 
 /* ── Top Articles Table ── */

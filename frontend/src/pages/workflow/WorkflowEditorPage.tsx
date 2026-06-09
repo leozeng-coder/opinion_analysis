@@ -41,7 +41,7 @@ import {
 } from '@ant-design/icons'
 import PageHeader from '@/components/common/PageHeader'
 import { useAuthStore } from '@/store/auth'
-import { workflowApi } from '@/api/workflow'
+import { workflowApi, reportApi } from '@/api/workflow'
 import { crawlerApi } from '@/api/crawler'
 import { alertApi } from '@/api/alert'
 import { topicApi } from '@/api/topic'
@@ -1197,6 +1197,7 @@ const WorkflowEditorPage: React.FC = () => {
   const [detailExecution, setDetailExecution] = useState<WorkflowExecution | null>(null)
   const [detailLogs, setDetailLogs] = useState<WorkflowNodeExecution[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const consoleEndRef = useRef<HTMLDivElement>(null)
@@ -1441,6 +1442,20 @@ const WorkflowEditorPage: React.FC = () => {
       URL.revokeObjectURL(url)
     } catch (e: any) {
       message.error(e?.message || '下载失败')
+    }
+  }
+
+  const handleRegenerateReport = async () => {
+    if (!detailExecution?.id) return
+    setRegenerating(true)
+    try {
+      const res = await reportApi.regenerate({ executionId: detailExecution.id })
+      message.success(`报告重新生成成功（${res.articleCount} 篇文章）`)
+      downloadReport(res.reportId, res.format)
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || e?.message || '重新生成失败')
+    } finally {
+      setRegenerating(false)
     }
   }
 
@@ -2362,14 +2377,24 @@ const WorkflowEditorPage: React.FC = () => {
                 message={`AI 分析报告已生成（${l.output!.reportFormat || 'markdown'} 格式）`}
                 description={`ID: ${String(l.output!.reportId).slice(0, 8)}...`}
                 action={
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<DownloadOutlined />}
-                    onClick={() => downloadReport(l.output!.reportId, l.output!.reportFormat)}
-                  >
-                    下载报告
-                  </Button>
+                  <Space direction="vertical" size={4}>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<DownloadOutlined />}
+                      onClick={() => downloadReport(l.output!.reportId, l.output!.reportFormat)}
+                    >
+                      下载报告
+                    </Button>
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={regenerating}
+                      onClick={handleRegenerateReport}
+                    >
+                      重新生成
+                    </Button>
+                  </Space>
                 }
               />
             ))}

@@ -87,7 +87,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	aiChatH := userhandler.NewAIChatHandler(taggerSvc, ragClient)
 	chatSessionH := userhandler.NewChatSessionHandler(store, taggerSvc, ragClient)
 	dashboardH := userhandler.NewDashboardHandler(store)
-	reportH := userhandler.NewReportHandler(reportSvc)
+	reportH := userhandler.NewReportHandler(reportSvc, db)
 
 	// MediaCrawler 代理处理器
 	mediaCrawlerURL := config.Cfg.Crawler.ApiURL
@@ -345,6 +345,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 			{
 				reports.GET("/:reportId", reportH.Info)
 				reports.GET("/:reportId/download", reportH.Download)
+				reports.POST("/regenerate", reportH.Regenerate)
 			}
 
 			// 工作流路由（需要认证）
