@@ -194,8 +194,8 @@ const PlatformSyncPage: React.FC = () => {
         }
       >
         <Alert
-          message="自动同步说明"
-          description="MediaCrawler 爬虫完成后会自动触发数据同步，无需手动配置。此处提供手动同步功能用于紧急情况，支持多选平台批量同步并实时查看进度。"
+          message="数据同步说明"
+          description="平台数据同步请在工作流中使用 platform_sync 节点，或通过此处手动触发（支持多选平台批量同步并实时查看进度）。"
           type="info"
           showIcon
           style={{ marginBottom: 16 }}

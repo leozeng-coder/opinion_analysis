@@ -115,15 +115,6 @@ async def main() -> None:
     # Only for JSON save mode
     await _generate_wordcloud_if_needed()
 
-    # 自动触发数据同步到 articles 表
-    try:
-        from tools.auto_sync import trigger_sync_after_crawl
-        print(f"\n[Main] 爬虫完成，开始自动同步数据...")
-        trigger_sync_after_crawl(config.PLATFORM)
-    except Exception as e:
-        print(f"[Main] 自动同步失败: {e}")
-        print(f"[Main] 提示: 可以稍后在后台管理系统手动触发同步")
-
 
 async def async_cleanup() -> None:
     global crawler

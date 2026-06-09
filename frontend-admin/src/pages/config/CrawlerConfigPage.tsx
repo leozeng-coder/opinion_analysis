@@ -311,8 +311,8 @@ const CrawlerConfigPage: React.FC = () => {
               <Button icon={<SyncOutlined />} onClick={handleSyncAll} loading={syncing}>同步所有平台</Button>
             </Space>}
           >
-            <Alert className={ui.infoBanner} message="自动同步说明"
-              description="MediaCrawler 爬虫完成后会自动触发数据同步。此处提供手动同步功能用于紧急情况，支持多平台批量同步。"
+            <Alert className={ui.infoBanner} message="数据同步说明"
+              description="平台数据同步请在工作流中使用 platform_sync 节点，或通过此处手动触发（支持多平台批量同步）。"
               type="info" showIcon style={{ marginBottom: 16 }} />
             <Table columns={syncColumns} dataSource={platforms} rowKey="code"
               pagination={false} />
