@@ -7,6 +7,11 @@ import (
 	"opinion-analysis/src/model"
 )
 
+// GetOffset 读取平台同步偏移量（不存在则返回 0，即首次全量扫描）。
+func (s *PlatformSyncService) GetOffset(platform string) uint {
+	return s.getOffset(platform)
+}
+
 // getOffset 读取平台同步偏移量（不存在则返回 0，即首次全量扫描）。
 func (s *PlatformSyncService) getOffset(platform string) uint {
 	var off model.PlatformSyncOffset

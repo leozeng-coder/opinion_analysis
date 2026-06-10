@@ -265,7 +265,7 @@ export interface WorkflowNodeExecution {
   id: number
   executionId: number
   nodeId: string
-  status: 'running' | 'success' | 'failed' | 'partial_success' | 'cancelled'
+  status: 'running' | 'success' | 'failed' | 'partial_success' | 'cancelled' | 'inherited'
   startedAt: string
   finishedAt?: string
   input?: Record<string, any>

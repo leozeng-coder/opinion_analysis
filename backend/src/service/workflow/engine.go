@@ -86,6 +86,7 @@ func (e *Engine) registerNodes() {
 	MustRegisterNode(crawlerNodes.NewRunNode(e.db, e.store.Crawler, e.store.System))
 	MustRegisterNode(crawlerNodes.NewScheduleNode(e.store.Crawler))
 	MustRegisterNode(crawlerNodes.NewStatusNode(e.store.Crawler))
+	MustRegisterNode(crawlerNodes.NewDataPatchNode(e.db))
 
 	// 处理类节点
 	MustRegisterNode(processorNodes.NewPlatformSyncNode(e.db))
@@ -627,12 +628,17 @@ func (e *Engine) ExecuteFromNode(ctx context.Context, workflowID int64, fromNode
 			continue
 		}
 		prev, ok := prevNodeMap[nodeID]
-		if !ok || prev.Status == "skipped" || prev.Status == "cancelled" {
+		if !ok || prev.Status == "skipped" {
 			// 无记录或被跳过：仍标记 outgoingActive=true（force 模式），
 			// 让 fromNodeID 能正常开始执行。输出用空 map。
 			outgoingActive[nodeID] = true
 			nodeOutputs[nodeID] = map[string]interface{}{}
 			continue
+		}
+		if prev.Status == "cancelled" || prev.Status == "failed" {
+			errMsg := fmt.Sprintf("上游节点 %s 状态为 %s，无法重跑下游节点；请先修复上游节点或使用补数节点", nodeID, prev.Status)
+			e.updateExecutionStatus(execution.ID, "failed", errMsg)
+			return nil, fmt.Errorf(errMsg)
 		}
 		// fullOutput = merge(storedInput, storedDelta)
 		var storedInput, storedDelta map[string]interface{}

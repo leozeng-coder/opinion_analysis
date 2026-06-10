@@ -38,6 +38,7 @@ import {
   CodeOutlined,
   DownloadOutlined,
   FileTextOutlined,
+  UnlockOutlined,
 } from '@ant-design/icons'
 import PageHeader from '@/components/common/PageHeader'
 import { useAuthStore } from '@/store/auth'
@@ -261,6 +262,31 @@ export const NODE_REGISTRY = {
       { name: 'enabled', label: '启用', type: 'boolean', required: true },
     ],
   },
+  data_patch: {
+    label: '补数',
+    description: '计算平台源表与中心表的差集，将未同步的数据 ID 传给下游平台同步节点补录',
+    color: '#4096ff',
+    icon: '🔧',
+    configSchema: [
+      {
+        name: 'platforms',
+        label: '平台',
+        type: 'select-multiple',
+        required: true,
+        options: [
+          { label: '小红书', value: 'xhs' },
+          { label: '微博', value: 'wb' },
+          { label: '抖音', value: 'dy' },
+          { label: '快手', value: 'ks' },
+          { label: 'B站', value: 'bili' },
+          { label: '百度贴吧', value: 'tieba' },
+          { label: '知乎', value: 'zhihu' },
+        ],
+        placeholder: '选择需要补数的平台',
+      },
+      { name: 'topics', label: '话题', type: 'tags', required: false, placeholder: '指定同步话题（可选）' },
+    ],
+  },
   data_filter: {
     label: '数据过滤',
     description: '对上游文章做正则/AI 过滤（先正则后 AI），仅传递保留项',
@@ -336,7 +362,7 @@ export const NODE_REGISTRY = {
           { label: '🔥 暮光橙', value: '暮光橙' },
           { label: '🌿 翡翠绿', value: '翡翠绿' },
           { label: '🔮 紫夜', value: '紫夜' },
-          { label: '🌊 青墨', value: '青墨' },
+          { label: '🖋️ 青墨', value: '青墨' },
           { label: '🌸 玫瑰金', value: '玫瑰金' },
           { label: '🌌 星辰灰', value: '星辰灰' },
           { label: '✨ 琥珀金', value: '琥珀金' },
@@ -500,6 +526,7 @@ const CONDITION_FIELD_SUGGESTIONS = [
 // 节点分类
 const NODE_CATEGORY: Record<string, 'source' | 'sync' | 'process' | 'ops'> = {
   crawler_run:      'source',
+  data_patch:       'source',
   platform_sync:    'sync',
   data_filter:      'process',
   ai_tagger:        'process',
@@ -993,6 +1020,8 @@ const summarizeNodeOutput = (type: string | undefined, output?: Record<string, a
     case 'analysis_report':
       if (output.reportId) return `报告已生成（${output.reportFormat || 'markdown'}），ID: ${String(output.reportId).slice(0, 8)}...`
       return '报告生成中'
+    case 'data_patch':
+      return `发现缺失数据 ${(output.missingCount as number) || 0} 条，待补录`
     default:
       return ''
   }
@@ -1228,14 +1257,15 @@ const WorkflowEditorPage: React.FC = () => {
   const [regenerating, setRegenerating] = useState(false)
 
   // 当前控制台显示的是哪次执行的日志（用于右键重跑的参考）
-  // null 表示实时执行中的 currentExecution，非 null 表示用户复现了某次历史执行
+  // null 表示实时执行中的 currentExecution，非 null 表示用户查看了某次历史执行
   const [replayExecId, setReplayExecId] = useState<number | null>(null)
 
-  // 画布锁定：执行中或复现历史时，禁止编辑
+  // 画布锁定：执行中或查看历史时，禁止编辑
   const isLocked = isExecuting || replayExecId !== null
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const consoleEndRef = useRef<HTMLDivElement>(null)
+  const panelContentRef = useRef<HTMLDivElement>(null)
   const currentExecIdRef = useRef<number | null>(null)
   const autoRunHandledRef = useRef(false)
   const cacheRestoredRef = useRef(false)
@@ -1403,10 +1433,18 @@ const WorkflowEditorPage: React.FC = () => {
     [pollOnce, stopPolling]
   )
 
-  // 进入终态后自动滚动到底部
+  // 切换到历史模式时滚动到顶部
   useEffect(() => {
+    if (consoleMode === 'history' && panelContentRef.current) {
+      panelContentRef.current.scrollTop = 0
+    }
+  }, [consoleMode])
+
+  // 进入终态后自动滚动到底部（仅控制台模式）
+  useEffect(() => {
+    if (consoleMode !== 'console') return
     consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [nodeLogs, crawlerLogs, currentExecution])
+  }, [nodeLogs, crawlerLogs, currentExecution, consoleMode])
 
   // 控制台内容变化时写入浏览器缓存（仅在有执行记录时；清空由按钮显式处理）
   useEffect(() => {
@@ -1506,7 +1544,7 @@ const WorkflowEditorPage: React.FC = () => {
     setContextMenu({ x: event.clientX, y: event.clientY, node })
   }, [])
 
-  // 复现某次历史执行：把那次执行的日志加载到控制台，节点画布显示对应状态
+  // 查看某次历史执行：把那次执行的日志加载到控制台，节点画布显示对应状态
   const handleReplayExecution = useCallback(async (execution: WorkflowExecution) => {
     setDetailVisible(false)
     setCurrentExecution(execution)
@@ -1526,11 +1564,14 @@ const WorkflowEditorPage: React.FC = () => {
   // 从指定节点重跑，以 execId 作为前序状态参考
   const handleExecuteFromNode = useCallback(async (nodeId: string, execId: number) => {
     setContextMenu(null)
-    setDetailVisible(false)
-    if (!isEdit || !id) return
+    if (!isEdit || !id) {
+      message.warning('请先保存工作流后再执行')
+      return
+    }
     setExecuting(true)
     try {
       const exec = await workflowApi.executeFromNode(Number(id), nodeId, execId)
+      setDetailVisible(false)
       message.success(`已从节点重跑（执行 #${exec.id}）`)
       resetConsoleCacheCleared(id)
       setIsExecuting(true)
@@ -1541,18 +1582,19 @@ const WorkflowEditorPage: React.FC = () => {
       setConsoleMode('console')
       startMonitor(exec.id)
     } catch (error: any) {
-      message.error(error?.message || '重跑失败')
+      const msg = error?.response?.data?.message || error?.message || '重跑失败'
+      message.error(msg)
     } finally {
       setExecuting(false)
     }
   }, [isEdit, id, startMonitor])
 
-  // 右键菜单触发：优先使用当前复现/实时执行的 execId
+  // 右键菜单触发：优先使用当前查看/实时执行的 execId
   const handleContextMenuRerun = useCallback((node: Node) => {
     const execId = replayExecId ?? (currentExecution?.status !== 'running' ? currentExecution?.id : null)
       ?? history.find((e) => e.status !== 'running')?.id
     if (!execId) {
-      message.warning('没有可参考的历史执行记录，请先执行一次工作流，或在历史记录中点击「复现」')
+      message.warning('没有可参考的历史执行记录，请先执行一次工作流，或在历史记录中双击进入')
       setContextMenu(null)
       return
     }
@@ -1901,22 +1943,11 @@ const WorkflowEditorPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 140,
+      width: 80,
       render: (_: any, r: WorkflowExecution) => (
-        <Space size={0}>
-          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewHistoryDetail(r)}>
-            详情
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<SyncOutlined />}
-            disabled={r.status === 'running'}
-            onClick={() => handleReplayExecution(r)}
-          >
-            复现
-          </Button>
-        </Space>
+        <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewHistoryDetail(r)}>
+          详情
+        </Button>
       ),
     },
   ]
@@ -1924,7 +1955,7 @@ const WorkflowEditorPage: React.FC = () => {
   return (
     <div style={{ height: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <PageHeader
-        title={replayExecId ? `复现执行 #${replayExecId}（只读）` : isEdit ? '编辑工作流' : '新建工作流'}
+        title={replayExecId ? `执行记录 #${replayExecId}（只读）` : isEdit ? '编辑工作流' : '新建工作流'}
         extra={
           <Space>
             <Button
@@ -1960,14 +1991,6 @@ const WorkflowEditorPage: React.FC = () => {
                   执行
                 </Button>
               ))}
-            {replayExecId && !isExecuting && (
-              <Button
-                icon={<StopOutlined />}
-                onClick={() => { setReplayExecId(null); setNodeLogs([]); setCrawlerLogs([]) }}
-              >
-                退出复现
-              </Button>
-            )}
             <Button
               icon={<CodeOutlined />}
               type={consoleMode === 'hidden' ? 'default' : 'primary'}
@@ -1976,6 +1999,14 @@ const WorkflowEditorPage: React.FC = () => {
             >
               {consoleMode === 'hidden' ? '控制台' : '隐藏控制台'}
             </Button>
+            {replayExecId && !isExecuting && (
+              <Button
+                icon={<CloseOutlined />}
+                onClick={() => { setReplayExecId(null); setNodeLogs([]); setCrawlerLogs([]) }}
+              >
+                退出记录
+              </Button>
+            )}
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/workflows')}>
               返回
             </Button>
@@ -2370,6 +2401,11 @@ const WorkflowEditorPage: React.FC = () => {
                 </>
               ) : (
                 <>
+                  {currentExecution && (
+                    <Button size="small" type="text" icon={<UnlockOutlined />} onClick={() => setConsoleMode('console')}>
+                      返回实时
+                    </Button>
+                  )}
                   <Button
                     size="small"
                     type="text"
@@ -2379,11 +2415,6 @@ const WorkflowEditorPage: React.FC = () => {
                   >
                     刷新
                   </Button>
-                  {currentExecution && (
-                    <Button size="small" type="text" onClick={() => setConsoleMode('console')}>
-                      返回实时
-                    </Button>
-                  )}
                 </>
               )}
               <Tooltip title={consoleMode === 'console' ? '关闭（查看历史记录）' : '收起面板'}>
@@ -2393,7 +2424,7 @@ const WorkflowEditorPage: React.FC = () => {
           </div>
 
           {/* 面板内容 */}
-          <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <div ref={panelContentRef} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             {consoleMode === 'console' ? (
               <div
                 style={{
@@ -2446,6 +2477,10 @@ const WorkflowEditorPage: React.FC = () => {
                 loading={historyLoading}
                 pagination={false}
                 style={{ padding: '0 8px' }}
+                onRow={(r) => ({
+                  onDoubleClick: () => { if (r.status !== 'running') handleReplayExecution(r) },
+                  style: { cursor: r.status !== 'running' ? 'pointer' : 'default' },
+                })}
               />
             )}
           </div>
