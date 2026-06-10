@@ -27,6 +27,8 @@ type TopicCommentView struct {
 	CommentCount int              `json:"commentCount"`
 	Sentiment    CommentSentiment `json:"sentiment"`
 	KeyOpinions  []string         `json:"keyOpinions"`
+	DeepInsights []string         `json:"deepInsights"` // 深度解析：趋势、矛盾、隐含诉求等
+	MainEmotions []string         `json:"mainEmotions"` // 主要情绪标签
 }
 
 type HotComment struct {
@@ -53,7 +55,7 @@ type CommentAnalysis struct {
 	PlatformCount      map[string]int     `json:"platformCount"`
 }
 
-func (s *Service) analyzeComments(ctx context.Context, comments []model.ArticleComment, articles []model.Article, topGroups []groupStats, cfg config.TaggerConfig) *CommentAnalysis {
+func (s *Service) analyzeComments(ctx context.Context, comments []model.ArticleComment, articles []model.Article, topGroups []groupStats, cfg config.TaggerConfig, maxTopicCards int, commentSampleSize int) *CommentAnalysis {
 	if len(comments) == 0 {
 		return nil
 	}
@@ -74,10 +76,17 @@ func (s *Service) analyzeComments(ctx context.Context, comments []model.ArticleC
 		}
 	}
 
-	// 按日统计趋势
+	// 按日统计趋势 — 使用文章发布日期（评论的 published_at 通常等于爬取日期，不可靠）
 	dailyMap := make(map[string]*commentTrendPoint)
 	for _, c := range comments {
-		dateKey := c.PublishedAt.Format("01-02")
+		var dateKey string
+		if a, ok := articleMap[c.ArticleID]; ok && !a.PublishedAt.IsZero() {
+			dateKey = a.PublishedAt.Format("01-02")
+		} else if !c.PublishedAt.IsZero() {
+			dateKey = c.PublishedAt.Format("01-02")
+		} else {
+			dateKey = c.CreatedAt.Format("01-02")
+		}
 		if dailyMap[dateKey] == nil {
 			dailyMap[dateKey] = &commentTrendPoint{Date: dateKey}
 		}
@@ -122,18 +131,17 @@ func (s *Service) analyzeComments(ctx context.Context, comments []model.ArticleC
 		}
 	}
 
-	// 按话题分组评论
+	// 按话题分组评论 — 使用所有文章的全部 AI 标签，不局限于 topGroups
 	topicArticles := make(map[string][]uint)
-	for _, g := range topGroups {
-		for _, a := range articles {
-			if a.AITags != nil && *a.AITags != "" {
-				var tags []string
-				if json.Unmarshal([]byte(*a.AITags), &tags) == nil {
-					for _, tag := range tags {
-						if tag == g.Topic {
-							topicArticles[g.Topic] = append(topicArticles[g.Topic], a.ID)
-							break
-						}
+	for _, a := range articles {
+		if a.AITags != nil && *a.AITags != "" {
+			var tags []string
+			if json.Unmarshal([]byte(*a.AITags), &tags) == nil {
+				seen := make(map[string]bool)
+				for _, tag := range tags {
+					if !seen[tag] {
+						topicArticles[tag] = append(topicArticles[tag], a.ID)
+						seen[tag] = true
 					}
 				}
 			}
@@ -151,6 +159,25 @@ func (s *Service) analyzeComments(ctx context.Context, comments []model.ArticleC
 			}
 		}
 	}
+
+	// 按评论数排序，取评论最多的前 maxTopicCards 个话题
+	type topicCount struct {
+		topic string
+		count int
+	}
+	var tcs []topicCount
+	for t, cs := range topicComments {
+		tcs = append(tcs, topicCount{t, len(cs)})
+	}
+	sort.Slice(tcs, func(i, j int) bool { return tcs[i].count > tcs[j].count })
+	filtered := make(map[string][]model.ArticleComment, maxTopicCards)
+	for i, tc := range tcs {
+		if i >= maxTopicCards {
+			break
+		}
+		filtered[tc.topic] = topicComments[tc.topic]
+	}
+	topicComments = filtered
 
 	// 并发 LLM 分析
 	var wg sync.WaitGroup
@@ -171,7 +198,7 @@ func (s *Service) analyzeComments(ctx context.Context, comments []model.ArticleC
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		views := s.llmTopicCommentOpinions(ctx, topicComments, articleMap, cfg)
+		views := s.llmTopicCommentOpinions(ctx, topicComments, articleMap, cfg, commentSampleSize)
 		mu.Lock()
 		result.TopicComments = views
 		mu.Unlock()
@@ -280,7 +307,7 @@ func (s *Service) llmCommentSentiment(ctx context.Context, sample []model.Articl
 	return sent, hot
 }
 
-func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map[string][]model.ArticleComment, articleMap map[uint]model.Article, cfg config.TaggerConfig) []TopicCommentView {
+func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map[string][]model.ArticleComment, articleMap map[uint]model.Article, cfg config.TaggerConfig, commentSampleSize int) []TopicCommentView {
 	var views []TopicCommentView
 
 	for topic, comments := range topicComments {
@@ -294,8 +321,8 @@ func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map
 		copy(sorted, comments)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].LikeCount > sorted[j].LikeCount })
 		sample := sorted
-		if len(sample) > 18 {
-			sample = sample[:18]
+		if len(sample) > commentSampleSize {
+			sample = sample[:commentSampleSize]
 		}
 
 		if len(sample) == 0 {
@@ -304,11 +331,13 @@ func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("你是资深舆情分析师。以下是「%s」话题下的用户评论样本。请：\n", topic))
-		sb.WriteString("1. 判断整体情感倾向分布（positive/neutral/negative各占比）\n")
-		sb.WriteString("2. 提炼5-8个代表性观点，每个观点要具体、有信息量（20-30字，说明谁持什么立场、关注什么问题）\n")
-		sb.WriteString("3. 观点要覆盖不同立场，让决策者能快速了解用户真实想法\n")
-		sb.WriteString("以JSON返回：{\"pos\":正面数,\"neu\":中性数,\"neg\":负面数,\"opinions\":[\"观点1\",\"观点2\",...]}\n\n")
+		sb.WriteString(fmt.Sprintf("你是资深舆情分析师。以下是「%s」话题下的用户评论样本（按点赞数排序，共%d条）。请：\n", topic, len(sample)))
+		sb.WriteString("1. 统计样本中正面/中性/负面评论各有多少条（填整数，如 pos=10 表示10条正面）\n")
+		sb.WriteString("2. 提炼5-8个代表性观点，每个观点要具体有信息量（20-30字，说明谁持什么立场、关注什么问题）\n")
+		sb.WriteString("3. 深度解析（3-5条，深挖用户评论背后的隐含诉求、矛盾焦点、趋势信号，如「大量用户抱怨XXX说明……」「评论中的对立情绪源于……」）\n")
+		sb.WriteString("4. 归纳主要情绪标签（3-5个，如：愤怒、期待、失望、兴奋、疑惑）\n")
+		sb.WriteString("观点要覆盖不同立场，让决策者能快速了解用户真实想法。\n")
+		sb.WriteString("以JSON返回（pos/neu/neg必须是整数）：{\"pos\":正面条数,\"neu\":中性条数,\"neg\":负面条数,\"opinions\":[\"观点1\",...],\"deepInsights\":[\"解析1\",...],\"mainEmotions\":[\"情绪1\"...]}\n\n")
 		for i, c := range sample {
 			content := c.Content
 			if len([]rune(content)) > 80 {
@@ -324,11 +353,14 @@ func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map
 			continue
 		}
 
+		// 用 float64 接收，避免 LLM 有时返回浮点比例（如 0.6）导致 int 解析失败
 		var parsed struct {
-			Pos      int      `json:"pos"`
-			Neu      int      `json:"neu"`
-			Neg      int      `json:"neg"`
-			Opinions []string `json:"opinions"`
+			Pos          float64  `json:"pos"`
+			Neu          float64  `json:"neu"`
+			Neg          float64  `json:"neg"`
+			Opinions     []string `json:"opinions"`
+			DeepInsights []string `json:"deepInsights"`
+			MainEmotions []string `json:"mainEmotions"`
 		}
 		resp = strings.TrimSpace(resp)
 		if idx := strings.Index(resp, "{"); idx >= 0 {
@@ -343,18 +375,28 @@ func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map
 			continue
 		}
 
-		total := parsed.Pos + parsed.Neu + parsed.Neg
-		view.Sentiment = CommentSentiment{
-			Positive: parsed.Pos,
-			Neutral:  parsed.Neu,
-			Negative: parsed.Neg,
-		}
-		if total > 0 {
-			view.Sentiment.PosRate = float64(parsed.Pos) / float64(total) * 100
-			view.Sentiment.NeuRate = float64(parsed.Neu) / float64(total) * 100
-			view.Sentiment.NegRate = float64(parsed.Neg) / float64(total) * 100
+		sampleTotal := parsed.Pos + parsed.Neu + parsed.Neg
+		if sampleTotal > 0 {
+			// 用样本比例推算实际评论数的情感分布
+			scale := float64(view.CommentCount) / sampleTotal
+			scaledPos := int(parsed.Pos*scale + 0.5)
+			scaledNeu := int(parsed.Neu*scale + 0.5)
+			scaledNeg := view.CommentCount - scaledPos - scaledNeu
+			if scaledNeg < 0 {
+				scaledNeg = 0
+			}
+			view.Sentiment = CommentSentiment{
+				Positive: scaledPos,
+				Neutral:  scaledNeu,
+				Negative: scaledNeg,
+				PosRate:  parsed.Pos / sampleTotal * 100,
+				NeuRate:  parsed.Neu / sampleTotal * 100,
+				NegRate:  parsed.Neg / sampleTotal * 100,
+			}
 		}
 		view.KeyOpinions = parsed.Opinions
+		view.DeepInsights = parsed.DeepInsights
+		view.MainEmotions = parsed.MainEmotions
 		views = append(views, view)
 	}
 

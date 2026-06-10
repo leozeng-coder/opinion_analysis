@@ -215,6 +215,8 @@ body{
 .topic-card:hover{transform:translateY(-3px);box-shadow:0 14px 36px rgba(31,38,135,0.10);}
 .topic-name{font-size:15px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;letter-spacing:-0.01em;}
 .topic-count-badge{font-size:11px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;border-radius:12px;padding:2px 10px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.08);}
+.topic-old-badge{font-size:10px;background:#fef3c7;color:#b45309;border:1px solid #fbbf24;border-radius:10px;padding:2px 8px;font-weight:600;}
+.topic-date-range{font-size:11px;color:var(--text-secondary);margin:4px 0 8px;opacity:0.8;}
 .sent-bar{height:8px;border-radius:4px;display:flex;overflow:hidden;margin:10px 0;box-shadow:inset 0 1px 2px rgba(0,0,0,0.06);}
 .sent-bar-pos{background:linear-gradient(90deg,var(--sent-pos),color-mix(in srgb,var(--sent-pos) 80%,#fff));}
 .sent-bar-neu{background:linear-gradient(90deg,var(--sent-neu),color-mix(in srgb,var(--sent-neu) 80%,#fff));}
@@ -466,7 +468,9 @@ body{
       <div class="topic-name">
         {{.Topic}}
         <span class="topic-count-badge">{{.Count}} 篇</span>
+        {{if .HasOldWarning}}<span class="topic-old-badge">⚠️ 旧数据</span>{{end}}
       </div>
+      {{if .DateRange}}<div class="topic-date-range">📅 {{.DateRange}}</div>{{end}}
       <div class="sent-bar">
         <div class="sent-bar-pos" style="width:{{printf "%.1f" .PosRate}}%;"></div>
         <div class="sent-bar-neu" style="width:{{printf "%.1f" .NeuRate}}%;"></div>
@@ -548,6 +552,21 @@ body{
 </div>
 {{end}}
 
+<!-- ══ Section: 重点文章精读 ══ -->
+{{if .HasDeepAnalysis}}
+<div class="section" id="section-deep-articles">
+  <div class="section-header">
+    <span class="section-icon">📖</span>
+    <div class="section-title-group">
+      <span class="section-title">重点文章精读</span>
+      <div class="section-title-underline"></div>
+    </div>
+    <div class="section-line"></div>
+  </div>
+  <div id="deep-article-list"></div>
+</div>
+{{end}}
+
 <!-- ══ Section: 高影响力内容 Top 10 ══ -->
 <div class="section">
   <div class="section-header">
@@ -624,6 +643,7 @@ var commentTopicData = {{.CommentTopicJSON}};
 var hotCommentsData  = {{.HotCommentsJSON}};
 var commentTrendData = {{.CommentTrendJSON}};
 var commentPlatData  = {{.CommentPlatformJSON}};
+var articleDeepData  = {{.ArticleDeepJSON}};
 
 var allCharts = [];
 
@@ -899,13 +919,15 @@ function renderRiskMatrix(){
   var W = container.clientWidth||800;
   var H = 380;
   var pad = {top:40, right:50, bottom:60, left:64};
-  var maxCount = Math.max.apply(null, topicBubbleData.map(function(d){return d.value[1];}));
-  if(maxCount<1) maxCount=1;
+  var maxWS = Math.max.apply(null, topicBubbleData.map(function(d){return d.value[1];}));
+  if(maxWS<0.01) maxWS=0.01;
+  var maxArtCount = Math.max.apply(null, topicBubbleData.map(function(d){return d.value[2];}));
+  if(maxArtCount<1) maxArtCount=1;
   var maxNeg = Math.max(50, Math.ceil(Math.max.apply(null, topicBubbleData.map(function(d){return d.value[0];}))/10)*10);
   function xScale(v){ return pad.left + (v/maxNeg) * (W-pad.left-pad.right); }
-  function yScale(v){ return H - pad.bottom - (v/maxCount) * (H-pad.top-pad.bottom); }
-  // 缩小气泡：最大半径 32，基础 13
-  function rScale(c){ return Math.max(14, Math.min(32, 13 + Math.sqrt(c/maxCount)*19)); }
+  function yScale(v){ return H - pad.bottom - (v/maxArtCount) * (H-pad.top-pad.bottom); }
+  // 气泡大小按时效热度(weightedScore)：最大半径 38，基础 13
+  function rScale(c){ return Math.max(14, Math.min(38, 13 + Math.sqrt(c/maxWS)*25)); }
 
   var posColor = softenColor(rawSentPos, 0.05);
   var midColor = '#f59e0b';
@@ -917,7 +939,7 @@ function renderRiskMatrix(){
   // 计算位置（先算好，用于防溢出裁剪）
   // 若多个气泡位置重叠（坐标完全相同），加小偏移让它们分开
   var rawPos = topicBubbleData.map(function(d){
-    return {cx: xScale(d.value[0]), cy: yScale(d.value[1])};
+    return {cx: xScale(d.value[0]), cy: yScale(d.value[2])};
   });
   var bubblePos = topicBubbleData.map(function(d,i){
     var r  = rScale(d.value[1]);
@@ -1008,7 +1030,7 @@ function renderRiskMatrix(){
   }
   // y ticks
   for(var yi=0; yi<=5; yi++){
-    var yv = yi*maxCount/5;
+    var yv = yi*maxArtCount/5;
     var yp = yScale(yv);
     svgStr += '<line x1="'+(pad.left-5)+'" y1="'+yp+'" x2="'+pad.left+'" y2="'+yp+'" stroke="#94a3b8" stroke-width="1"/>';
     svgStr += '<text x="'+(pad.left-10)+'" y="'+(yp+4)+'" text-anchor="end" font-size="11" fill="#64748b" font-family="Inter,sans-serif">'+yv.toFixed(0)+'</text>';
@@ -1071,7 +1093,7 @@ function renderRiskMatrix(){
     var xSign = nearRight  ? -1 : 1;   // 气泡靠右则全部往左（BL/TL优先）
     var tags = [
       {dx:-xSign, dy:-ySign, text: escHtml(d.name),               color:'#e2e8f0', weight:'700'},
-      {dx: xSign, dy:-ySign, text: d.value[1]+' 篇',              color:'#bae6fd', weight:'500'},
+      {dx: xSign, dy:-ySign, text: d.value[2]+' 篇',              color:'#bae6fd', weight:'500'},
       {dx:-xSign, dy: ySign, text: d.value[0].toFixed(1)+'% 负面', color:'#fca5a5', weight:'500'},
       {dx: xSign, dy: ySign, text: riskLevel,                      color:riskColor, weight:'600'}
     ];
@@ -1218,41 +1240,64 @@ renderRiskMatrix();
   c.setOption(opt);
 })();
 
-/* ── Comment Topic Opinion Cards ── */
+/* ── Comment Topic Cards: PlayerNeeds + MainEmotions ── */
 (function(){
   var el=document.getElementById('comment-topic-cards'); if(!el)return;
   if(!commentTopicData||!commentTopicData.length)return;
   commentTopicData.forEach(function(t){
     var card=document.createElement('div'); card.className='topic-card';
+    // 优先用预计算的 rate 字段（Go 端已按样本比例换算）；若全为 0 则从 counts 派生
+    var pr=t.sentiment.posRate||0, nr=t.sentiment.neuRate||0, negr=t.sentiment.negRate||0;
+    if((pr+nr+negr)===0){
+      var raw=t.sentiment.positive+t.sentiment.neutral+t.sentiment.negative;
+      if(raw>0){ pr=t.sentiment.positive/raw*100; nr=t.sentiment.neutral/raw*100; negr=t.sentiment.negative/raw*100; }
+    }
+    var hasSent=(pr+nr+negr)>0;
     var sentBar='<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin:8px 0;box-shadow:inset 0 1px 2px rgba(0,0,0,0.06);">';
-    var total=t.sentiment.positive+t.sentiment.neutral+t.sentiment.negative;
-    if(total>0){
-      sentBar+='<div style="width:'+((t.sentiment.positive/total*100).toFixed(1))+'%;background:linear-gradient(90deg,'+sentColors[0]+','+softenColor(sentColors[0],0.3)+');"></div>';
-      sentBar+='<div style="width:'+((t.sentiment.neutral/total*100).toFixed(1))+'%;background:linear-gradient(90deg,'+sentColors[1]+','+softenColor(sentColors[1],0.3)+');"></div>';
-      sentBar+='<div style="width:'+((t.sentiment.negative/total*100).toFixed(1))+'%;background:linear-gradient(90deg,'+sentColors[2]+','+softenColor(sentColors[2],0.3)+');"></div>';
+    if(hasSent){
+      sentBar+='<div style="width:'+pr.toFixed(1)+'%;background:linear-gradient(90deg,'+sentColors[0]+','+softenColor(sentColors[0],0.3)+');"></div>';
+      sentBar+='<div style="width:'+nr.toFixed(1)+'%;background:linear-gradient(90deg,'+sentColors[1]+','+softenColor(sentColors[1],0.3)+');"></div>';
+      sentBar+='<div style="width:'+negr.toFixed(1)+'%;background:linear-gradient(90deg,'+sentColors[2]+','+softenColor(sentColors[2],0.3)+');"></div>';
+    } else {
+      sentBar+='<div style="width:100%;background:rgba(0,0,0,0.08);"></div>';
     }
     sentBar+='</div>';
     var sentLegend='<div style="display:flex;gap:12px;font-size:11px;color:var(--text-secondary);margin-bottom:10px;">';
-    if(total>0){
-      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[0]+';display:inline-block;box-shadow:0 0 0 2px rgba(255,255,255,0.6);"></span>正面 '+t.sentiment.positive+'</span>';
-      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[1]+';display:inline-block;box-shadow:0 0 0 2px rgba(255,255,255,0.6);"></span>中性 '+t.sentiment.neutral+'</span>';
-      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[2]+';display:inline-block;box-shadow:0 0 0 2px rgba(255,255,255,0.6);"></span>负面 '+t.sentiment.negative+'</span>';
+    if(hasSent){
+      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[0]+';display:inline-block;"></span>正面 '+t.sentiment.positive+'条 ('+pr.toFixed(0)+'%)</span>';
+      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[1]+';display:inline-block;"></span>中性 '+t.sentiment.neutral+'条 ('+nr.toFixed(0)+'%)</span>';
+      sentLegend+='<span style="display:flex;align-items:center;gap:3px;"><span style="width:7px;height:7px;border-radius:50%;background:'+sentColors[2]+';display:inline-block;"></span>负面 '+t.sentiment.negative+'条 ('+negr.toFixed(0)+'%)</span>';
+    } else {
+      sentLegend+='<span style="opacity:0.5;">情感数据待分析</span>';
     }
     sentLegend+='</div>';
     var opinions='';
     if(t.keyOpinions&&t.keyOpinions.length){
-      opinions='<div style="margin:8px 0 0;padding:12px 16px;background:linear-gradient(135deg,rgba(0,0,0,0.025),rgba(0,0,0,0.01));border-radius:12px;border:1px solid rgba(0,0,0,0.04);">';
-      opinions+='<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;letter-spacing:0.05em;text-transform:uppercase;display:flex;align-items:center;gap:6px;"><span style="width:3px;height:10px;border-radius:1.5px;background:linear-gradient(180deg,var(--primary),var(--accent));"></span>核心观点</div>';
-      opinions+='<ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--text-primary);line-height:1.85;">';
-      t.keyOpinions.forEach(function(o){opinions+='<li style="margin:3px 0;">'+escHtml(o)+'</li>';});
+      opinions+='<div style="margin:8px 0 0;padding:10px 14px;background:rgba(0,0,0,0.025);border-radius:10px;border:1px solid rgba(0,0,0,0.04);">';
+      opinions+='<div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">核心观点</div>';
+      opinions+='<ul style="margin:0;padding-left:16px;font-size:12.5px;line-height:1.85;">';
+      t.keyOpinions.forEach(function(o){opinions+='<li style="margin:2px 0;">'+escHtml(o)+'</li>';});
       opinions+='</ul></div>';
     }
-    card.innerHTML='<div style="font-weight:600;font-size:14px;color:var(--text-primary);display:flex;align-items:center;gap:8px;letter-spacing:-0.01em;">'+escHtml(t.topic)+
-      '<span style="font-size:11px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;border-radius:12px;padding:2px 10px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.08);">'+t.commentCount+' 条评论</span></div>'+
+    if(t.deepInsights&&t.deepInsights.length){
+      opinions+='<div style="margin:8px 0 0;padding:10px 14px;background:rgba(99,102,241,0.06);border-radius:10px;border:1px solid rgba(99,102,241,0.15);">';
+      opinions+='<div style="font-size:11px;font-weight:600;color:#4f46e5;margin-bottom:6px;">🔍 深度解析</div>';
+      opinions+='<ul style="margin:0;padding-left:16px;font-size:12.5px;line-height:1.85;">';
+      t.deepInsights.forEach(function(n){opinions+='<li style="margin:2px 0;">'+escHtml(n)+'</li>';});
+      opinions+='</ul></div>';
+    }
+    if(t.mainEmotions&&t.mainEmotions.length){
+      opinions+='<div style="margin:8px 0 0;display:flex;flex-wrap:wrap;gap:6px;">';
+      t.mainEmotions.forEach(function(e){opinions+='<span style="font-size:11.5px;padding:3px 10px;border-radius:14px;background:rgba(0,0,0,0.05);color:var(--text-secondary);">'+escHtml(e)+'</span>';});
+      opinions+='</div>';
+    }
+    card.innerHTML='<div style="font-weight:600;font-size:14px;color:var(--text-primary);display:flex;align-items:center;gap:8px;">'+escHtml(t.topic)+
+      '<span style="font-size:11px;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;border-radius:12px;padding:2px 10px;font-weight:600;">'+t.commentCount+' 条评论</span></div>'+
       sentBar+sentLegend+opinions;
     el.appendChild(card);
   });
 })();
+
 
 /* ── Hot Comments Table ── */
 (function(){
@@ -1272,7 +1317,59 @@ renderRiskMatrix();
   });
 })();
 
-/* ── Tag Cloud (spiral placement, cloud-shaped) ── */
+/* ── Deep Article Cards ── */
+(function(){
+  var el=document.getElementById('deep-article-list'); if(!el)return;
+  if(!articleDeepData||!articleDeepData.length)return;
+  // 2-column grid wrapper
+  el.style.display='grid';
+  el.style.gridTemplateColumns='1fr 1fr';
+  el.style.gap='18px';
+  articleDeepData.forEach(function(d,i){
+    var card=document.createElement('div');
+    card.className='topic-card';
+    card.style.marginBottom='0';
+
+    var sentCls=d.sentiment==='positive'?'badge-pos':(d.sentiment==='negative'?'badge-neg':'badge-neu');
+    var sentLbl=d.sentiment==='positive'?'正面':(d.sentiment==='negative'?'负面':'中性');
+    var oldBadge=d.isOld?'<span style="font-size:10px;background:#fef3c7;color:#b45309;border:1px solid #fbbf24;border-radius:10px;padding:2px 8px;font-weight:600;">旧数据</span>':'';
+    var riskBadge=(d.riskSignal&&d.riskSignal!=='无')?'<span style="font-size:10px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;padding:2px 8px;font-weight:600;">⚠️ 风险</span>':'';
+
+    var header='<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">';
+    header+='<span style="font-size:13px;font-weight:700;color:var(--text-secondary);min-width:22px;">'+(i+1)+'.</span>';
+    header+='<div style="flex:1;">';
+    header+='<div style="font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.4;margin-bottom:6px;">'+escHtml(d.title)+' '+oldBadge+' '+riskBadge+'</div>';
+    header+='<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--text-secondary);">';
+    header+='<span>📱 '+escHtml(d.platform)+'</span>';
+    header+='<span>📅 '+escHtml(d.publishedAt)+' ('+d.ageDays+'天前)</span>';
+    header+='<span class="badge '+sentCls+'">'+sentLbl+' '+d.sentScore.toFixed(2)+'</span>';
+    if(d.contentType) header+='<span style="background:rgba(0,0,0,0.05);border-radius:10px;padding:2px 8px;">'+escHtml(d.contentType)+'</span>';
+    if(d.emotionProfile) header+='<span style="background:rgba(0,0,0,0.05);border-radius:10px;padding:2px 8px;">🎭 '+escHtml(d.emotionProfile)+'</span>';
+    header+='</div></div></div>';
+
+    var body='';
+    if(d.coreOpinion){
+      body+='<div style="background:linear-gradient(135deg,rgba(var(--primary-rgb,99,102,241),0.06),rgba(var(--accent-rgb,99,102,241),0.03));border-left:3px solid var(--primary);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:10px;font-size:13.5px;line-height:1.6;color:var(--text-primary);">'+escHtml(d.coreOpinion)+'</div>';
+    }
+    if(d.keyPoints&&d.keyPoints.length){
+      body+='<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;letter-spacing:0.04em;">关键要点</div>';
+      body+='<ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.8;">';
+      d.keyPoints.forEach(function(kp){body+='<li style="margin:2px 0;">'+escHtml(kp)+'</li>';});
+      body+='</ul></div>';
+    }
+    if(d.riskSignal&&d.riskSignal!=='无'){
+      body+='<div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#be123c;margin-bottom:8px;">⚠️ '+escHtml(d.riskSignal)+'</div>';
+    }
+    if(d.timeNote){
+      body+='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;font-size:12px;color:#92400e;">⏰ '+escHtml(d.timeNote)+'</div>';
+    }
+
+    card.innerHTML=header+body;
+    el.appendChild(card);
+  });
+})();
+
+
 (function(){
   var el = document.getElementById('tag-cloud'); if(!el)return;
   if(!tagCloudData||!tagCloudData.length)return;

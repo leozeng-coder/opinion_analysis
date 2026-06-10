@@ -368,8 +368,22 @@ export const NODE_REGISTRY = {
           { label: '✨ 琥珀金', value: '琥珀金' },
         ],
       },
-      { name: 'sampleSize', label: '每组样本数', type: 'number', required: false, default: 8, min: 3, max: 20, placeholder: '每个话题组取几篇代表性文章送入 LLM' },
-      { name: 'maxGroups', label: '最大话题组数', type: 'number', required: false, default: 5, min: 1, max: 10, placeholder: '按标签频次取前 N 个话题分组分析' },
+      { type: 'group-label', label: '文章分析', name: '_grp_article' },
+      {
+        type: 'number-pair', name: '_pair_article',
+        items: [
+          { name: 'maxGroups', label: '话题组数', default: 5, min: 1, max: 10, placeholder: '按标签频次取前N组' },
+          { name: 'sampleSize', label: '每组样本数', default: 8, min: 3, max: 20, placeholder: '每话题组送入LLM的代表文章数' },
+        ],
+      },
+      { type: 'group-label', label: '评论分析', name: '_grp_comment' },
+      {
+        type: 'number-pair', name: '_pair_comment',
+        items: [
+          { name: 'maxTopicCards', label: '话题卡片数', default: 8, min: 1, max: 20, placeholder: '最多展示几个话题卡片' },
+          { name: 'commentSampleSize', label: '每题分析条数', default: 18, min: 5, max: 50, placeholder: '每话题送入LLM的评论数' },
+        ],
+      },
     ],
   },
   http_request: {
@@ -1085,6 +1099,18 @@ const buildConsoleLines = (params: {
       }
     }
 
+    // 节点内部进度日志（由节点在执行过程中写入 output.progress）
+    const progressLines: string[] = Array.isArray(log.output?.progress) ? log.output.progress : []
+    for (let pi = 0; pi < progressLines.length; pi++) {
+      lines.push({
+        key: `node-${log.id}-progress-${pi}`,
+        time: fmtTime(log.startedAt),
+        level: 'info',
+        tag: label,
+        message: progressLines[pi],
+      })
+    }
+
     if (log.status !== 'running') {
       const summary = summarizeNodeOutput(type, log.output)
       const withSummary = (base: string) => (summary ? `${base} — ${summary}` : base)
@@ -1233,8 +1259,8 @@ const WorkflowEditorPage: React.FC = () => {
   useEffect(() => {
     if (!contextMenu) return
     const handleGlobalClick = () => setContextMenu(null)
-    document.addEventListener('mousedown', handleGlobalClick)
-    return () => document.removeEventListener('mousedown', handleGlobalClick)
+    document.addEventListener('click', handleGlobalClick)
+    return () => document.removeEventListener('click', handleGlobalClick)
   }, [contextMenu])
 
   // ============ 执行 / 控制台状态 ============
@@ -1877,10 +1903,10 @@ const WorkflowEditorPage: React.FC = () => {
         await workflowApi.update(Number(id), payload)
         message.success('更新成功')
       } else {
-        await workflowApi.create(payload)
+        const created = await workflowApi.create(payload)
         message.success('创建成功')
+        navigate(`/workflows/${created.id}/edit`, { replace: true })
       }
-      navigate('/workflows')
     } catch (error: any) {
       message.error(error.message || '保存失败')
     } finally {
@@ -2696,6 +2722,34 @@ const WorkflowEditorPage: React.FC = () => {
                 } else if (depValue !== undefined) {
                   if (cur !== depValue) return null
                 }
+              }
+
+              // 分组标题
+              if (field.type === 'group-label') {
+                return (
+                  <div key={fieldConfig.name} style={{ fontSize: 12, fontWeight: 600, color: '#8c8c8c', letterSpacing: 1, marginBottom: 4, marginTop: 8, borderBottom: '1px solid #f0f0f0', paddingBottom: 4 }}>
+                    {fieldConfig.label}
+                  </div>
+                )
+              }
+
+              // 一排两个数字输入
+              if (field.type === 'number-pair') {
+                return (
+                  <div key={fieldConfig.name} style={{ display: 'flex', gap: 12 }}>
+                    {(fieldConfig.items as any[]).map((item: any) => (
+                      <Form.Item
+                        key={item.name}
+                        name={item.name}
+                        label={item.label}
+                        initialValue={item.default}
+                        style={{ flex: 1, marginBottom: 16 }}
+                      >
+                        <InputNumber min={item.min} max={item.max} placeholder={item.placeholder} style={{ width: '100%' }} />
+                      </Form.Item>
+                    ))}
+                  </div>
+                )
               }
 
               // 双开关一行（boolean-pair）

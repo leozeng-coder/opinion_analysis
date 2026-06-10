@@ -22,58 +22,65 @@ type topArticle struct {
 }
 
 type topicCard struct {
-	Topic   string
-	Count   int
-	Summary string
-	Pos     int
-	Neu     int
-	Neg     int
-	PosRate float64
-	NeuRate float64
-	NegRate float64
+	Topic         string
+	Count         int
+	WeightedScore float64
+	Summary       string
+	Pos           int
+	Neu           int
+	Neg           int
+	PosRate       float64
+	NeuRate       float64
+	NegRate       float64
+	OldCount      int
+	MedianAgeDays int
+	DateRange     string // "2024-01-01 ~ 2024-06-01"
+	HasOldWarning bool
 }
 
 type htmlData struct {
-	Theme             ReportTheme
-	CrawlerRunID      uint
-	GeneratedAt       string
-	TimeRange         string
-	ArticleCount      int
-	CommentCount      int
-	Platforms         string
-	Topics            string
-	SentimentPos      int
-	SentimentNeu      int
-	SentimentNeg      int
-	SentPosRate       float64
-	SentNeuRate       float64
-	SentNegRate       float64
-	RiskAlert         bool
-	RiskLevel         string
-	TopArticlesJSON   template.JS
-	PlatformJSON      template.JS
-	SentimentJSON     template.JS
-	TopTagsJSON       template.JS
-	PlatformSentJSON  template.JS
-	TopicSentJSON     template.JS
-	DailyTrendJSON    template.JS
-	ScoreBucketJSON   template.JS
-	RadarJSON         template.JS
-	ChartColorsJSON   template.JS
-	TopicCards        []topicCard
-	Conclusion        string
-	TopicBubbleJSON   template.JS
-	TagCloudJSON      template.JS
-	ChartVariantJSON  template.JS
-	HasCommentAnalysis bool
-	CommentSentJSON    template.JS
-	CommentTopicJSON   template.JS
-	HotCommentsJSON    template.JS
-	CommentTrendJSON   template.JS
+	Theme               ReportTheme
+	CrawlerRunID        uint
+	GeneratedAt         string
+	TimeRange           string
+	ArticleCount        int
+	CommentCount        int
+	Platforms           string
+	Topics              string
+	SentimentPos        int
+	SentimentNeu        int
+	SentimentNeg        int
+	SentPosRate         float64
+	SentNeuRate         float64
+	SentNegRate         float64
+	RiskAlert           bool
+	RiskLevel           string
+	TopArticlesJSON     template.JS
+	PlatformJSON        template.JS
+	SentimentJSON       template.JS
+	TopTagsJSON         template.JS
+	PlatformSentJSON    template.JS
+	TopicSentJSON       template.JS
+	DailyTrendJSON      template.JS
+	ScoreBucketJSON     template.JS
+	RadarJSON           template.JS
+	ChartColorsJSON     template.JS
+	TopicCards          []topicCard
+	Conclusion          string
+	TopicBubbleJSON     template.JS
+	TagCloudJSON        template.JS
+	ChartVariantJSON    template.JS
+	HasCommentAnalysis  bool
+	CommentSentJSON     template.JS
+	CommentTopicJSON    template.JS
+	HotCommentsJSON     template.JS
+	CommentTrendJSON    template.JS
 	CommentPlatformJSON template.JS
+	ArticleDeepJSON     template.JS // Phase 2 文章细致分析
+	HasDeepAnalysis     bool
 }
 
-func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummaries map[string]string, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, htmlTheme string, commentAnalysis *CommentAnalysis) (string, error) {
+func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummaries map[string]string, briefings []ArticleBriefing, deepAnalysis []ArticleDeepAnalysis, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, htmlTheme string, commentAnalysis *CommentAnalysis) (string, error) {
 	theme := pickReportTheme(htmlTheme)
 
 	var conclusion string
@@ -90,16 +97,25 @@ func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummarie
 	for _, g := range stats.TopGroups {
 		ts := stats.TopicSentiment[g.Topic]
 		pos, neu, neg := ts["positive"], ts["neutral"], ts["negative"]
+		dateRange := ""
+		if !g.EarliestDate.IsZero() {
+			dateRange = g.EarliestDate.Format("2006-01-02") + " ~ " + g.LatestDate.Format("2006-01-02")
+		}
 		cards = append(cards, topicCard{
-			Topic:   g.Topic,
-			Count:   g.Count,
-			Summary: groupSummaries[g.Topic],
-			Pos:     pos,
-			Neu:     neu,
-			Neg:     neg,
-			PosRate: pct(pos, g.Count),
-			NeuRate: pct(neu, g.Count),
-			NegRate: pct(neg, g.Count),
+			Topic:         g.Topic,
+			Count:         g.Count,
+			WeightedScore: g.WeightedScore,
+			Summary:       groupSummaries[g.Topic],
+			Pos:           pos,
+			Neu:           neu,
+			Neg:           neg,
+			PosRate:       pct(pos, g.Count),
+			NeuRate:       pct(neu, g.Count),
+			NegRate:       pct(neg, g.Count),
+			OldCount:      g.OldCount,
+			MedianAgeDays: g.MedianAgeDays,
+			DateRange:     dateRange,
+			HasOldWarning: g.Count > 0 && float64(g.OldCount)/float64(g.Count) > 0.4,
 		})
 	}
 
@@ -157,6 +173,8 @@ func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummarie
 		TopicBubbleJSON:   template.JS(buildTopicBubbleJSON(stats.TopGroups, stats.TopicSentiment)),
 		TagCloudJSON:      template.JS(buildTopTagsJSON(stats.TagFreq, 25)),
 		ChartVariantJSON:  template.JS(mustJSON(theme.Variant)),
+		HasDeepAnalysis:   len(deepAnalysis) > 0,
+		ArticleDeepJSON:   template.JS(mustJSON(deepAnalysis)),
 	}
 
 	if commentAnalysis != nil {
@@ -352,7 +370,7 @@ func round2(v float64) float64 {
 func buildTopicBubbleJSON(groups []groupStats, topicSent map[string]map[string]int) string {
 	type item struct {
 		Name  string    `json:"name"`
-		Value []float64 `json:"value"` // [negRate, articleCount]
+		Value []float64 `json:"value"` // [negRate, weightedScore, articleCount]
 	}
 	var items []item
 	for _, g := range groups {
@@ -363,7 +381,7 @@ func buildTopicBubbleJSON(groups []groupStats, topicSent map[string]map[string]i
 		negRate := pct(ts["negative"], g.Count)
 		items = append(items, item{
 			Name:  g.Topic,
-			Value: []float64{round2(negRate), float64(g.Count)},
+			Value: []float64{round2(negRate), round2(g.WeightedScore), float64(g.Count)},
 		})
 	}
 	return mustJSON(items)

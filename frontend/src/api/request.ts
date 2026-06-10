@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios'
+import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import { message } from 'antd'
 import { useAuthStore } from '@/store/auth'
 
@@ -14,7 +14,7 @@ const request = axios.create({
   timeout: 15000,
 }) as CustomAxiosInstance
 
-request.interceptors.request.use((config) => {
+request.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = useAuthStore.getState().token
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -23,7 +23,7 @@ request.interceptors.request.use((config) => {
 })
 
 request.interceptors.response.use(
-  (res) => {
+  (res: AxiosResponse) => {
     const data = res.data
     if (data.code !== 0) {
       message.error(data.message || '请求失败')
@@ -31,7 +31,7 @@ request.interceptors.response.use(
     }
     return data.data
   },
-  (err) => {
+  (err: any) => {
     if (err.response?.status === 401) {
       useAuthStore.getState().logout()
       window.location.href = '/login'

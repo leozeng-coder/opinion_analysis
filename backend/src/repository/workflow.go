@@ -162,3 +162,15 @@ func (r *WorkflowNodeExecutionRepository) ListByExecutionID(executionID int64) (
 	err := r.db.Where("execution_id = ?", executionID).Order("started_at asc").Find(&nodeExecutions).Error
 	return nodeExecutions, err
 }
+
+// FindByID 按主键查单条节点执行记录
+func (r *WorkflowNodeExecutionRepository) FindByID(id int64, dest *model.WorkflowNodeExecution) error {
+	return r.db.First(dest, id).Error
+}
+
+// UpdateOutput 只更新 output 字段（用于写入进度，不改 status/finished_at）
+func (r *WorkflowNodeExecutionRepository) UpdateOutput(nodeExecution *model.WorkflowNodeExecution) error {
+	return r.db.Model(&model.WorkflowNodeExecution{}).
+		Where("id = ?", nodeExecution.ID).
+		Update("output", nodeExecution.Output).Error
+}

@@ -22,6 +22,7 @@ import (
 	actionNodes "opinion-analysis/src/service/workflow/nodes/action"
 	controlNodes "opinion-analysis/src/service/workflow/nodes/control"
 	crawlerNodes "opinion-analysis/src/service/workflow/nodes/crawler"
+	"opinion-analysis/src/service/workflow/nodes"
 	processorNodes "opinion-analysis/src/service/workflow/nodes/processor"
 )
 
@@ -384,6 +385,11 @@ func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[st
 	// 注册为当前活跃节点，用于转发 OnCancel
 	e.setActiveNode(executionID, executor)
 	defer e.clearActiveNode(executionID)
+
+	// 注入进度回调：节点内部调用 nodes.ProgressFunc(ctx)(msg) 即可追加进度到 output
+	ctx = nodes.WithProgressFunc(ctx, func(msg string) {
+		e.appendNodeProgress(nodeExec.ID, msg)
+	})
 
 	// 执行节点
 	output, err := executor.Execute(ctx, config, input)
@@ -809,6 +815,21 @@ func (e *Engine) updateExecutionStatus(executionID int64, status, errorMsg strin
 
 // updateNodeExecutionStatus 更新节点执行状态
 func (e *Engine) updateNodeExecutionStatus(nodeExecID int64, status, errorMsg string, output map[string]interface{}) {
+	// 保留执行过程中写入的 progress 字段（appendNodeProgress 会中途写入）
+	var cur model.WorkflowNodeExecution
+	if err := e.store.WorkflowNodeExecution.FindByID(nodeExecID, &cur); err == nil {
+		var existing map[string]interface{}
+		if len(cur.Output) > 0 {
+			_ = json.Unmarshal(cur.Output, &existing)
+		}
+		if progress, ok := existing["progress"]; ok {
+			if output == nil {
+				output = make(map[string]interface{})
+			}
+			output["progress"] = progress
+		}
+	}
+
 	outputJSON, err := json.Marshal(output)
 	if err != nil {
 		e.logger.Error("failed to marshal output",
@@ -831,4 +852,36 @@ func (e *Engine) updateNodeExecutionStatus(nodeExecID int64, status, errorMsg st
 			zap.String("status", status),
 			zap.Error(err))
 	}
+}
+
+// appendNodeProgress 追加一条进度消息到节点执行记录的 output.progress 数组
+func (e *Engine) appendNodeProgress(nodeExecID int64, msg string) {
+	var cur model.WorkflowNodeExecution
+	if err := e.store.WorkflowNodeExecution.FindByID(nodeExecID, &cur); err != nil {
+		return
+	}
+	var output map[string]interface{}
+	if len(cur.Output) > 0 {
+		_ = json.Unmarshal(cur.Output, &output)
+	}
+	if output == nil {
+		output = make(map[string]interface{})
+	}
+
+	var lines []string
+	if existing, ok := output["progress"].([]interface{}); ok {
+		for _, v := range existing {
+			if s, ok := v.(string); ok {
+				lines = append(lines, s)
+			}
+		}
+	}
+	lines = append(lines, msg)
+	output["progress"] = lines
+
+	outputJSON, _ := json.Marshal(output)
+	_ = e.store.WorkflowNodeExecution.UpdateOutput(&model.WorkflowNodeExecution{
+		ID:     nodeExecID,
+		Output: model.JSON(outputJSON),
+	})
 }

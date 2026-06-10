@@ -28,3 +28,19 @@ type NodeExecutor interface {
 	// 本方法应快速返回，不应阻塞；需要的异步操作请用 goroutine。
 	OnCancel(ctx context.Context)
 }
+
+type progressKey struct{}
+
+// WithProgressFunc 把进度回调注入 ctx，由 engine 在执行节点前调用
+func WithProgressFunc(ctx context.Context, fn func(string)) context.Context {
+	return context.WithValue(ctx, progressKey{}, fn)
+}
+
+// ProgressFunc 从 ctx 读取进度回调；若未注入则返回 no-op
+func ProgressFunc(ctx context.Context) func(string) {
+	if fn, ok := ctx.Value(progressKey{}).(func(string)); ok {
+		return fn
+	}
+	return func(string) {}
+}
+

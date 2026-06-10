@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"opinion-analysis/config"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/service/tagger"
+	"opinion-analysis/src/service/workflow/nodes"
 )
 
 const reportKeyPrefix = "analysis_report:"
@@ -46,19 +48,56 @@ type ReportMeta struct {
 
 // articleSummary 用于 LLM 分析的轻量文章摘要
 type articleSummary struct {
-	Title     string
-	Platform  string
-	Sentiment string
-	SentScore float64
-	Tags      []string
-	LikeCount int
+	ArticleID   uint
+	Title       string
+	Platform    string
+	Sentiment   string
+	SentScore   float64
+	Tags        []string
+	LikeCount   int
+	PublishedAt time.Time
+	AgeDays     int
+	TimeWeight  float64
 }
 
 // groupStats 单个话题组统计
 type groupStats struct {
-	Topic    string
-	Articles []articleSummary
-	Count    int
+	Topic         string
+	Articles      []articleSummary
+	Count         int            // 实际文章数
+	WeightedScore float64        // 时效加权热度（用于排序和气泡大小）
+	OldCount      int            // >180 天的文章数
+	MedianAgeDays int            // 中位数文章年龄（天）
+	EarliestDate  time.Time
+	LatestDate    time.Time
+}
+
+// ArticleBriefing 分析：每篇文章的快速摘要
+type ArticleBriefing struct {
+	ArticleID   uint      `json:"articleId"`
+	Opinion     string    `json:"opinion"`     // LLM 提炼的 1 句核心观点
+	PublishedAt time.Time `json:"publishedAt"`
+	AgeDays     int       `json:"ageDays"`
+	TimeWeight  float64   `json:"timeWeight"`
+	Tags        []string  `json:"tags"`
+}
+
+// ArticleDeepAnalysis 文章细致分析结果
+type ArticleDeepAnalysis struct {
+	ArticleID      uint     `json:"articleId"`
+	Title          string   `json:"title"`
+	Platform       string   `json:"platform"`
+	PublishedAt    string   `json:"publishedAt"`
+	AgeDays        int      `json:"ageDays"`
+	IsOld          bool     `json:"isOld"`
+	CoreOpinion    string   `json:"coreOpinion"`
+	ContentType    string   `json:"contentType"`
+	EmotionProfile string   `json:"emotionProfile"`
+	KeyPoints      []string `json:"keyPoints"`
+	RiskSignal     string   `json:"riskSignal"`
+	TimeNote       string   `json:"timeNote"`
+	SentScore      float64  `json:"sentScore"`
+	Sentiment      string   `json:"sentiment"`
 }
 
 // dailyTrendPoint 按日发布量与情感分布
@@ -85,6 +124,7 @@ type crawlStats struct {
 	TopGroups         []groupStats
 	TopArticles       []model.Article
 	TimeRange         [2]time.Time
+	RefDate           time.Time // 时效计算基准（批次最新文章日期）
 }
 
 // Service 报告服务
@@ -99,13 +139,23 @@ func NewService(db *gorm.DB, rdb *redis.Client, taggerSvc *tagger.Service) *Serv
 }
 
 // Generate 生成分析报告，返回 reportID
-func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID uint, platforms []string, topics []string, format Format, htmlTheme string, sampleSize int, maxGroups int) (string, error) {
+func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID uint, platforms []string, topics []string, format Format, htmlTheme string, sampleSize int, maxGroups int, maxTopicCards int, commentSampleSize int) (string, error) {
 	if sampleSize <= 0 {
 		sampleSize = 8
 	}
 	if maxGroups <= 0 {
 		maxGroups = 5
 	}
+	if maxTopicCards <= 0 {
+		maxTopicCards = 8
+	}
+	if commentSampleSize <= 0 {
+		commentSampleSize = 18
+	}
+
+	progress := nodes.ProgressFunc(ctx)
+	progress(fmt.Sprintf("开始生成报告 — 文章 %d 篇，格式 %s", len(articleIDs), format))
+	log.Printf("[Report] 开始生成报告 — 运行ID=%d, 文章数=%d, 格式=%s", crawlerRunID, len(articleIDs), format)
 
 	// Step1: 批量查文章
 	var articles []model.Article
@@ -116,38 +166,118 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 		return "", fmt.Errorf("no articles found for the given IDs")
 	}
 
-	// Step1: 统计评论数
+	// Step1: 统计评论数 + 查评论
 	var commentCount int64
 	var articleIDsUint []uint
 	for _, id := range articleIDs {
 		articleIDsUint = append(articleIDsUint, uint(id))
 	}
 	s.db.WithContext(ctx).Model(&model.ArticleComment{}).Where("article_id IN ?", articleIDsUint).Count(&commentCount)
-
-	// Step1: 查询全部评论用于分析
 	var comments []model.ArticleComment
 	s.db.WithContext(ctx).Where("article_id IN ?", articleIDsUint).Order("like_count DESC").Find(&comments)
 
+	progress(fmt.Sprintf("数据加载完成 — 文章 %d 篇，评论 %d 条", len(articles), commentCount))
+	log.Printf("[Report] 数据查询完成 — 文章 %d 篇, 评论 %d 条", len(articles), commentCount)
+
 	// Step1: 程序统计
 	stats := s.computeStats(articles, int(commentCount), sampleSize, maxGroups)
+	log.Printf("[Report] 统计完成 — 初始话题组 %d 个, 正面=%d 中性=%d 负面=%d",
+		len(stats.TopGroups),
+		stats.SentimentDist["positive"],
+		stats.SentimentDist["neutral"]+stats.SentimentDist[""],
+		stats.SentimentDist["negative"])
 
-	// Step2&3: 分层 LLM 分析
 	cfg, apiKeySet := s.taggerSvc.GetConfig()
 	groupSummaries := make(map[string]string, len(stats.TopGroups))
+	var briefings []ArticleBriefing
+	var deepAnalysis []ArticleDeepAnalysis
 	var commentAnalysis *CommentAnalysis
+
 	if apiKeySet {
-		groupSummaries = s.summarizeGroups(ctx, stats.TopGroups, cfg)
-		commentAnalysis = s.analyzeComments(ctx, comments, articles, stats.TopGroups, cfg)
+		// Phase 1+2+评论分析 并发执行
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		// Phase 1: 分析（全量文章）
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			progress(fmt.Sprintf("分析 %d 篇文章观点...", len(articles)))
+			log.Printf("[Report] Phase 1: 分析 %d 篇文章...", len(articles))
+			b := s.roughAnalyzeArticles(ctx, articles, stats.RefDate, cfg)
+			mu.Lock()
+			briefings = b
+			mu.Unlock()
+			progress(fmt.Sprintf("文章观点提炼完成 — %d 条", len(b)))
+			log.Printf("[Report] Phase 1 完成 — 获得 %d 条文章观点", len(b))
+		}()
+
+		// Phase 2: 文章细致分析（Top 影响力 × 时效加权）
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			progress("深度分析 Top 12 高影响力文章...")
+			log.Printf("[Report] Phase 2: 深度分析 Top 12 文章...")
+			d := s.deepAnalyzeTopArticles(ctx, articles, stats.RefDate, cfg, 12)
+			mu.Lock()
+			deepAnalysis = d
+			mu.Unlock()
+			progress(fmt.Sprintf("深度解析完成 — %d 篇", len(d)))
+			log.Printf("[Report] Phase 2 完成 — 深度分析 %d 篇", len(d))
+		}()
+
+		// 评论分析
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			progress(fmt.Sprintf("评论分析：处理 %d 条评论...", len(comments)))
+			log.Printf("[Report] 评论分析: 处理 %d 条评论...", len(comments))
+			ca := s.analyzeComments(ctx, comments, articles, stats.TopGroups, cfg, maxTopicCards, commentSampleSize)
+			mu.Lock()
+			commentAnalysis = ca
+			mu.Unlock()
+			if ca != nil {
+				progress(fmt.Sprintf("评论分析完成 — %d 个话题卡片，%d 条热评", len(ca.TopicComments), len(ca.HotComments)))
+				log.Printf("[Report] 评论分析完成 — 话题卡片 %d 个, 热评 %d 条", len(ca.TopicComments), len(ca.HotComments))
+			}
+		}()
+
+		wg.Wait()
+		log.Printf("[Report] Phase 1+2+评论分析全部完成")
+
+		// Phase 2.5: 基于分析结果，按舆情观点重新聚类话题
+		if len(briefings) > 0 {
+			progress(fmt.Sprintf("舆情观点聚类 %d 篇文章...", len(articles)))
+			log.Printf("[Report] Phase 2.5: 舆情观点聚类 — 对 %d 篇文章重新聚类...", len(articles))
+			newGroups, newTopicSent, ok := s.reclusterTopics(ctx, articles, briefings, stats.RefDate, cfg, maxGroups)
+			if ok {
+				stats.TopGroups = newGroups
+				stats.TopicSentiment = newTopicSent
+				progress(fmt.Sprintf("聚类完成 — %d 个舆情话题", len(newGroups)))
+				log.Printf("[Report] 话题聚类完成 — 生成 %d 个舆情观点话题", len(newGroups))
+			} else {
+				progress("Phase 2.5 聚类失败，保留原始话题组")
+				log.Printf("[Report] 话题聚类失败，保留 AI 标签话题组")
+			}
+		}
+
+		// Phase 3: 话题深度分析（用分析结果增强 prompt）
+		progress(fmt.Sprintf("话题深度分析 %d 个话题...", len(stats.TopGroups)))
+		log.Printf("[Report] Phase 3: 话题深度分析 %d 个话题...", len(stats.TopGroups))
+		groupSummaries = s.summarizeGroups(ctx, stats.TopGroups, briefings, cfg)
+		progress("话题分析完成，开始渲染报告...")
+		log.Printf("[Report] Phase 3 完成")
 	}
 
 	// Step4: 生成最终报告
+	log.Printf("[Report] 渲染报告内容 (格式=%s)...", format)
 	var content string
 	var genErr error
 	switch format {
 	case FormatHTML:
-		content, genErr = s.buildHTML(ctx, stats, groupSummaries, crawlerRunID, platforms, topics, cfg, apiKeySet, htmlTheme, commentAnalysis)
+		content, genErr = s.buildHTML(ctx, stats, groupSummaries, briefings, deepAnalysis, crawlerRunID, platforms, topics, cfg, apiKeySet, htmlTheme, commentAnalysis)
 	default:
-		content, genErr = s.buildMarkdown(ctx, stats, groupSummaries, crawlerRunID, platforms, topics, cfg, apiKeySet, commentAnalysis)
+		content, genErr = s.buildMarkdown(ctx, stats, groupSummaries, deepAnalysis, crawlerRunID, platforms, topics, cfg, apiKeySet, commentAnalysis)
 	}
 	if genErr != nil {
 		return "", genErr
@@ -168,6 +298,7 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	if err := s.save(ctx, reportID, meta); err != nil {
 		return "", fmt.Errorf("save report: %w", err)
 	}
+	log.Printf("[Report] 报告生成完成 — ID=%s, 大小=%d KB", reportID, len(content)/1024)
 
 	return reportID, nil
 }
@@ -218,6 +349,24 @@ func scoreBucket(score float64) int {
 	}
 }
 
+// timeWeight 返回文章基于年龄的时效权重
+func timeWeight(ageDays int) float64 {
+	switch {
+	case ageDays <= 7:
+		return 1.0
+	case ageDays <= 30:
+		return 0.8
+	case ageDays <= 90:
+		return 0.5
+	case ageDays <= 180:
+		return 0.3
+	case ageDays <= 365:
+		return 0.15
+	default:
+		return 0.05
+	}
+}
+
 // computeStats 纯程序统计，不调 LLM
 func (s *Service) computeStats(articles []model.Article, commentCount int, sampleSize int, maxGroups int) crawlStats {
 	stats := crawlStats{
@@ -236,8 +385,28 @@ func (s *Service) computeStats(articles []model.Article, commentCount int, sampl
 	platformScoreSum := make(map[string]float64)
 	platformScoreCnt := make(map[string]int)
 
+	// 计算 RefDate（批次最新文章发布日期，用于年龄计算）
 	var minT, maxT time.Time
 	for i, a := range articles {
+		if i == 0 {
+			minT, maxT = a.PublishedAt, a.PublishedAt
+		} else {
+			if a.PublishedAt.Before(minT) {
+				minT = a.PublishedAt
+			}
+			if a.PublishedAt.After(maxT) {
+				maxT = a.PublishedAt
+			}
+		}
+	}
+	stats.TimeRange = [2]time.Time{minT, maxT}
+	refDate := maxT
+	if refDate.IsZero() {
+		refDate = time.Now()
+	}
+	stats.RefDate = refDate
+
+	for _, a := range articles {
 		stats.Platforms[a.Platform]++
 		stats.SentimentDist[a.Sentiment]++
 		stats.SentScoreBuckets[scoreBucket(a.SentScore)]++
@@ -274,41 +443,72 @@ func (s *Service) computeStats(articles []model.Article, commentCount int, sampl
 				}
 			}
 		}
-
-		if i == 0 {
-			minT, maxT = a.PublishedAt, a.PublishedAt
-		} else {
-			if a.PublishedAt.Before(minT) {
-				minT = a.PublishedAt
-			}
-			if a.PublishedAt.After(maxT) {
-				maxT = a.PublishedAt
-			}
-		}
 	}
-	stats.TimeRange = [2]time.Time{minT, maxT}
 
-	// Top tags → groups
+	// Top tags → groups（按时效加权分数排序）
 	type tagCount struct {
-		tag   string
-		count int
+		tag           string
+		count         int
+		weightedScore float64
 	}
 	var tagList []tagCount
-	for tag, count := range stats.TagFreq {
-		tagList = append(tagList, tagCount{tag, count})
+	for tag, arts := range tagToArticles {
+		var ws float64
+		for _, a := range arts {
+			ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+			ws += timeWeight(ageDays)
+		}
+		tagList = append(tagList, tagCount{tag, len(arts), ws})
 	}
-	sort.Slice(tagList, func(i, j int) bool { return tagList[i].count > tagList[j].count })
+	sort.Slice(tagList, func(i, j int) bool { return tagList[i].weightedScore > tagList[j].weightedScore })
 
 	for i, tc := range tagList {
 		if i >= maxGroups {
 			break
 		}
-		grp := groupStats{Topic: tc.tag, Count: tc.count}
-		grp.Articles = s.pickRepresentative(tagToArticles[tc.tag], sampleSize)
+		arts := tagToArticles[tc.tag]
+
+		// 计算话题时间字段
+		var earliest, latest time.Time
+		ageDaysSlice := make([]int, 0, len(arts))
+		oldCount := 0
+		for j, a := range arts {
+			ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+			ageDaysSlice = append(ageDaysSlice, ageDays)
+			if ageDays > 180 {
+				oldCount++
+			}
+			if j == 0 {
+				earliest, latest = a.PublishedAt, a.PublishedAt
+			} else {
+				if a.PublishedAt.Before(earliest) {
+					earliest = a.PublishedAt
+				}
+				if a.PublishedAt.After(latest) {
+					latest = a.PublishedAt
+				}
+			}
+		}
+		sort.Ints(ageDaysSlice)
+		medianAge := 0
+		if len(ageDaysSlice) > 0 {
+			medianAge = ageDaysSlice[len(ageDaysSlice)/2]
+		}
+
+		grp := groupStats{
+			Topic:         tc.tag,
+			Count:         len(arts), // 使用实际文章数，不用 TagFreq 计数
+			WeightedScore: tc.weightedScore,
+			OldCount:      oldCount,
+			MedianAgeDays: medianAge,
+			EarliestDate:  earliest,
+			LatestDate:    latest,
+		}
+		grp.Articles = s.pickRepresentative(arts, sampleSize)
 		stats.TopGroups = append(stats.TopGroups, grp)
 
 		topicSent := make(map[string]int)
-		for _, a := range tagToArticles[tc.tag] {
+		for _, a := range arts {
 			incSentiment(topicSent, a.Sentiment)
 		}
 		stats.TopicSentiment[tc.tag] = topicSent
@@ -329,17 +529,26 @@ func (s *Service) computeStats(articles []model.Article, commentCount int, sampl
 		stats.DailyTrend = append(stats.DailyTrend, *dailyMap[k])
 	}
 
-	// Top 10 articles by sentiment score
-	sorted := make([]model.Article, len(articles))
-	copy(sorted, articles)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].SentScore > sorted[j].SentScore
-	})
-	top := sorted
+	// Top 10 articles by 时效加权情感分数（互动量 × 时效权重）
+	type scoredArticle struct {
+		art   model.Article
+		score float64
+	}
+	scored := make([]scoredArticle, len(articles))
+	for i, a := range articles {
+		ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+		tw := timeWeight(ageDays)
+		scored[i] = scoredArticle{art: a, score: a.SentScore * tw}
+	}
+	sort.Slice(scored, func(i, j int) bool { return scored[i].score > scored[j].score })
+	top := scored
 	if len(top) > 10 {
 		top = top[:10]
 	}
-	stats.TopArticles = top
+	stats.TopArticles = make([]model.Article, len(top))
+	for i, sa := range top {
+		stats.TopArticles[i] = sa.art
+	}
 
 	return stats
 }
@@ -373,6 +582,7 @@ func (s *Service) pickRepresentative(articles []model.Article, n int) []articleS
 	result := make([]articleSummary, len(picked))
 	for i, a := range picked {
 		sum := articleSummary{
+			ArticleID: a.ID,
 			Title:     a.Title,
 			Platform:  a.Platform,
 			Sentiment: a.Sentiment,
@@ -393,8 +603,158 @@ func head(articles []model.Article, n int) []model.Article {
 	return articles[:n]
 }
 
-// summarizeGroups 并发对每个话题组调用 LLM，生成 ~200 字小结
-func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, cfg config.TaggerConfig) map[string]string {
+// reclusterTopics 基于分析观点，用 LLM 按舆情立场重新聚类文章，生成观点驱动的话题组
+func (s *Service) reclusterTopics(ctx context.Context, articles []model.Article, briefings []ArticleBriefing, refDate time.Time, cfg config.TaggerConfig, maxGroups int) ([]groupStats, map[string]map[string]int, bool) {
+	briefMap := make(map[uint]ArticleBriefing, len(briefings))
+	for _, b := range briefings {
+		briefMap[b.ArticleID] = b
+	}
+
+	var sb strings.Builder
+	sb.WriteString("你是资深舆情分析师。以下是来自社交平台的文章列表（含情感标注和AI提炼的核心观点）。\n")
+	sb.WriteString(fmt.Sprintf("请按照「用户的情感立场和舆论诉求」将这%d篇文章聚合为%d~%d个话题组。\n\n", len(articles), min2(3, maxGroups), maxGroups))
+	sb.WriteString("话题命名规则（重要）：\n")
+	sb.WriteString("- 以舆情观点命名，如「运营失公引玩家愤慨」「付费机制遭集体吐槽」「版权争议影响品牌形象」\n")
+	sb.WriteString("- 禁止用纯实体名词（如「腾讯」「游戏名」「平台名」）作为话题名\n")
+	sb.WriteString("- 话题名5-12个字，直接体现用户的核心立场或情绪诉求\n")
+	sb.WriteString("- 有相同怨言、期待、争议点的文章优先归为一组；每篇文章只属于一个话题\n")
+	sb.WriteString("- 每个话题至少包含1篇文章\n\n")
+	sb.WriteString("以JSON返回（仅JSON，无其他文字）：\n")
+	sb.WriteString(`{"clusters":[{"topic":"话题名","ids":[文章序号...],"summary":"一句话归类理由"}]}`)
+	sb.WriteString("\n\n文章列表：\n")
+
+	for i, a := range articles {
+		opinion := ""
+		if b, ok := briefMap[a.ID]; ok && b.Opinion != "" {
+			opinion = " — " + b.Opinion
+		}
+		sb.WriteString(fmt.Sprintf("%d. [%s/%s] %s%s\n", i+1, a.Platform, a.Sentiment, a.Title, opinion))
+	}
+
+	resp, err := callLLM(ctx, sb.String(), cfg, 1200)
+	if err != nil {
+		log.Printf("[Report] reclusterTopics LLM failed: %v", err)
+		return nil, nil, false
+	}
+
+	resp = strings.TrimSpace(resp)
+	if idx := strings.Index(resp, "{"); idx >= 0 {
+		resp = resp[idx:]
+	}
+	if idx := strings.LastIndex(resp, "}"); idx >= 0 {
+		resp = resp[:idx+1]
+	}
+
+	var parsed struct {
+		Clusters []struct {
+			Topic   string `json:"topic"`
+			IDs     []int  `json:"ids"` // 1-indexed
+			Summary string `json:"summary"`
+		} `json:"clusters"`
+	}
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		log.Printf("[Report] reclusterTopics parse failed: %v — resp: %.200s", err, resp)
+		return nil, nil, false
+	}
+	if len(parsed.Clusters) == 0 {
+		return nil, nil, false
+	}
+
+	// 按 cluster 大小排序，取前 maxGroups
+	clusters := parsed.Clusters
+	sort.Slice(clusters, func(i, j int) bool { return len(clusters[i].IDs) > len(clusters[j].IDs) })
+	if len(clusters) > maxGroups {
+		clusters = clusters[:maxGroups]
+	}
+
+	var newGroups []groupStats
+	newTopicSent := make(map[string]map[string]int)
+
+	for _, cl := range clusters {
+		if len(cl.IDs) == 0 || cl.Topic == "" {
+			continue
+		}
+		var arts []model.Article
+		seen := make(map[int]bool)
+		for _, idx := range cl.IDs {
+			if idx >= 1 && idx <= len(articles) && !seen[idx] {
+				arts = append(arts, articles[idx-1])
+				seen[idx] = true
+			}
+		}
+		if len(arts) == 0 {
+			continue
+		}
+
+		var earliest, latest time.Time
+		var ws float64
+		oldCount := 0
+		ageDaysSlice := make([]int, 0, len(arts))
+		for j, a := range arts {
+			ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+			ws += timeWeight(ageDays)
+			ageDaysSlice = append(ageDaysSlice, ageDays)
+			if ageDays > 180 {
+				oldCount++
+			}
+			if j == 0 {
+				earliest, latest = a.PublishedAt, a.PublishedAt
+			} else {
+				if a.PublishedAt.Before(earliest) {
+					earliest = a.PublishedAt
+				}
+				if a.PublishedAt.After(latest) {
+					latest = a.PublishedAt
+				}
+			}
+		}
+		sort.Ints(ageDaysSlice)
+		medianAge := 0
+		if len(ageDaysSlice) > 0 {
+			medianAge = ageDaysSlice[len(ageDaysSlice)/2]
+		}
+
+		grp := groupStats{
+			Topic:         cl.Topic,
+			Count:         len(arts),
+			WeightedScore: ws,
+			OldCount:      oldCount,
+			MedianAgeDays: medianAge,
+			EarliestDate:  earliest,
+			LatestDate:    latest,
+		}
+		grp.Articles = s.pickRepresentative(arts, 8)
+		newGroups = append(newGroups, grp)
+
+		topicSent := make(map[string]int)
+		for _, a := range arts {
+			incSentiment(topicSent, a.Sentiment)
+		}
+		newTopicSent[cl.Topic] = topicSent
+	}
+
+	if len(newGroups) == 0 {
+		return nil, nil, false
+	}
+	sort.Slice(newGroups, func(i, j int) bool { return newGroups[i].WeightedScore > newGroups[j].WeightedScore })
+	return newGroups, newTopicSent, true
+}
+
+func min2(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// summarizeGroups 并发对每个话题组调用 LLM，生成深度分析小结
+func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, briefings []ArticleBriefing, cfg config.TaggerConfig) map[string]string {
+	// 建立 articleID → briefing 索引
+	briefMap := make(map[uint]ArticleBriefing, len(briefings))
+	for _, b := range briefings {
+		briefMap[b.ArticleID] = b
+	}
+
 	result := make(map[string]string, len(groups))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -403,8 +763,8 @@ func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, cfg 
 		wg.Add(1)
 		go func(grp groupStats) {
 			defer wg.Done()
-			prompt := buildGroupPrompt(grp)
-			summary, err := callLLM(ctx, prompt, cfg, 500)
+			prompt := buildGroupPrompt(grp, briefMap)
+			summary, err := callLLM(ctx, prompt, cfg, 600)
 			if err != nil {
 				log.Printf("[ReportService] group LLM failed for topic=%s: %v", grp.Topic, err)
 				summary = fmt.Sprintf("（话题「%s」共 %d 篇，LLM分析暂不可用）", grp.Topic, grp.Count)
@@ -418,23 +778,289 @@ func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, cfg 
 	return result
 }
 
-func buildGroupPrompt(grp groupStats) string {
+func buildGroupPrompt(grp groupStats, briefMap map[uint]ArticleBriefing) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("你是资深舆情分析师。请对以下「%s」话题的舆情做深度分析（250-350字），要求：\n", grp.Topic))
 	sb.WriteString("1. 总结该话题的核心事件/议题是什么\n")
 	sb.WriteString("2. 各方主要观点和立场分歧\n")
 	sb.WriteString("3. 情感倾向的成因分析（为什么正面/负面）\n")
 	sb.WriteString("4. 对决策者的建议：需要关注什么风险、可以采取什么行动\n\n")
-	sb.WriteString(fmt.Sprintf("话题文章共 %d 篇，以下是部分代表性样本：\n", grp.Count))
+
+	// 时效说明
+	if grp.OldCount > 0 {
+		oldPct := float64(grp.OldCount) / float64(grp.Count) * 100
+		sb.WriteString(fmt.Sprintf("⚠️ 数据时效提示：该话题 %d 篇中有 %d 篇（%.0f%%）为180天以上的旧数据（发布于 %s ~ %s），分析时请注意区分历史背景与当前热度。\n\n",
+			grp.Count, grp.OldCount, oldPct,
+			grp.EarliestDate.Format("2006-01-02"), grp.LatestDate.Format("2006-01-02")))
+	} else {
+		sb.WriteString(fmt.Sprintf("数据时间范围：%s ~ %s（近 %d 天内数据，时效性良好）\n\n",
+			grp.EarliestDate.Format("2006-01-02"), grp.LatestDate.Format("2006-01-02"), grp.MedianAgeDays))
+	}
+
+	sb.WriteString(fmt.Sprintf("话题文章共 %d 篇，时效加权热度：%.2f，以下是代表性内容及观点摘要：\n", grp.Count, grp.WeightedScore))
 	for i, a := range grp.Articles {
-		sb.WriteString(fmt.Sprintf("%d. [%s][%s][评分%.2f] %s\n", i+1, a.Platform, a.Sentiment, a.SentScore, a.Title))
+		line := fmt.Sprintf("%d. [%s][%s][评分%.2f] %s", i+1, a.Platform, a.Sentiment, a.SentScore, a.Title)
+		if b, ok := briefMap[a.ArticleID]; ok && b.Opinion != "" {
+			line += "　→ " + b.Opinion
+		}
+		sb.WriteString(line + "\n")
 	}
 	sb.WriteString("\n请直接输出分析内容，使用自然段落，不要加标题或markdown格式符号。")
 	return sb.String()
 }
 
-// buildMarkdown 生成 Markdown 报告（含最终 LLM 综合分析）
-func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSummaries map[string]string, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, commentAnalysis *CommentAnalysis) (string, error) {
+// roughAnalyzeArticles Phase 1: 全量文章分析，10篇/批并发调用 LLM 提炼核心观点
+func (s *Service) roughAnalyzeArticles(ctx context.Context, articles []model.Article, refDate time.Time, cfg config.TaggerConfig) []ArticleBriefing {
+	const batchSize = 10
+
+	type batch struct {
+		start int
+		arts  []model.Article
+	}
+	var batches []batch
+	for i := 0; i < len(articles); i += batchSize {
+		end := i + batchSize
+		if end > len(articles) {
+			end = len(articles)
+		}
+		batches = append(batches, batch{start: i, arts: articles[i:end]})
+	}
+
+	results := make([][]ArticleBriefing, len(batches))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for bi, b := range batches {
+		wg.Add(1)
+		go func(idx int, bt batch) {
+			defer wg.Done()
+			briefings := s.roughAnalyzeBatch(ctx, bt.arts, refDate, cfg)
+			mu.Lock()
+			results[idx] = briefings
+			mu.Unlock()
+		}(bi, b)
+	}
+	wg.Wait()
+
+	var all []ArticleBriefing
+	for _, r := range results {
+		all = append(all, r...)
+	}
+	return all
+}
+
+func (s *Service) roughAnalyzeBatch(ctx context.Context, arts []model.Article, refDate time.Time, cfg config.TaggerConfig) []ArticleBriefing {
+	var sb strings.Builder
+	sb.WriteString("请对以下每篇文章（含其内容摘要和评论）提炼一句核心观点（25-40字，说明主要立场或反映的问题）。\n")
+	sb.WriteString("以JSON数组返回，每项格式：{\"id\":序号,\"opinion\":\"核心观点\"}\n只返回JSON，不要其他文字。\n\n")
+
+	for i, a := range arts {
+		title := a.Title
+		content := ""
+		if len([]rune(a.Content)) > 0 {
+			r := []rune(a.Content)
+			if len(r) > 120 {
+				r = r[:120]
+			}
+			content = string(r)
+		}
+		ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+		dateLabel := a.PublishedAt.Format("2006-01-02")
+		sb.WriteString(fmt.Sprintf("%d. [%s/%s/%s/+%d天] %s", i+1, a.Platform, a.Sentiment, dateLabel, ageDays, title))
+		if content != "" {
+			sb.WriteString("　" + content)
+		}
+		sb.WriteString("\n")
+	}
+
+	resp, err := callLLM(ctx, sb.String(), cfg, 600)
+	if err != nil {
+		log.Printf("[RoughAnalysis] batch LLM failed: %v", err)
+		return buildFallbackBriefings(arts, refDate)
+	}
+
+	resp = strings.TrimSpace(resp)
+	if idx := strings.Index(resp, "["); idx >= 0 {
+		resp = resp[idx:]
+	}
+	if idx := strings.LastIndex(resp, "]"); idx >= 0 {
+		resp = resp[:idx+1]
+	}
+
+	var items []struct {
+		ID      int    `json:"id"`
+		Opinion string `json:"opinion"`
+	}
+	if err := json.Unmarshal([]byte(resp), &items); err != nil {
+		log.Printf("[RoughAnalysis] parse JSON failed: %v", err)
+		return buildFallbackBriefings(arts, refDate)
+	}
+
+	opMap := make(map[int]string, len(items))
+	for _, it := range items {
+		opMap[it.ID] = it.Opinion
+	}
+
+	briefings := make([]ArticleBriefing, len(arts))
+	for i, a := range arts {
+		ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+		var tags []string
+		if a.AITags != nil {
+			json.Unmarshal([]byte(*a.AITags), &tags)
+		}
+		briefings[i] = ArticleBriefing{
+			ArticleID:   a.ID,
+			Opinion:     opMap[i+1],
+			PublishedAt: a.PublishedAt,
+			AgeDays:     ageDays,
+			TimeWeight:  timeWeight(ageDays),
+			Tags:        tags,
+		}
+	}
+	return briefings
+}
+
+func buildFallbackBriefings(arts []model.Article, refDate time.Time) []ArticleBriefing {
+	result := make([]ArticleBriefing, len(arts))
+	for i, a := range arts {
+		ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+		var tags []string
+		if a.AITags != nil {
+			json.Unmarshal([]byte(*a.AITags), &tags)
+		}
+		result[i] = ArticleBriefing{
+			ArticleID:   a.ID,
+			Opinion:     a.Title,
+			PublishedAt: a.PublishedAt,
+			AgeDays:     ageDays,
+			TimeWeight:  timeWeight(ageDays),
+			Tags:        tags,
+		}
+	}
+	return result
+}
+
+// deepAnalyzeTopArticles Phase 2: 对 Top 影响力文章逐篇深度分析
+func (s *Service) deepAnalyzeTopArticles(ctx context.Context, articles []model.Article, refDate time.Time, cfg config.TaggerConfig, topN int) []ArticleDeepAnalysis {
+	// 按（互动量×时效）综合排序，取 Top N
+	type scored struct {
+		art   model.Article
+		score float64
+	}
+	candidates := make([]scored, len(articles))
+	for i, a := range articles {
+		ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+		tw := timeWeight(ageDays)
+		candidates[i] = scored{art: a, score: math.Abs(a.SentScore-0.5)*tw + tw}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+	if len(candidates) > topN {
+		candidates = candidates[:topN]
+	}
+
+	results := make([]ArticleDeepAnalysis, len(candidates))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for ci, c := range candidates {
+		wg.Add(1)
+		go func(idx int, a model.Article) {
+			defer wg.Done()
+			ageDays := int(refDate.Sub(a.PublishedAt).Hours() / 24)
+			analysis := s.deepAnalyzeSingle(ctx, a, ageDays, cfg)
+			mu.Lock()
+			results[idx] = analysis
+			mu.Unlock()
+		}(ci, c.art)
+	}
+	wg.Wait()
+
+	return results
+}
+
+func (s *Service) deepAnalyzeSingle(ctx context.Context, a model.Article, ageDays int, cfg config.TaggerConfig) ArticleDeepAnalysis {
+	isOld := ageDays > 180
+
+	content := ""
+	if len([]rune(a.Content)) > 0 {
+		r := []rune(a.Content)
+		if len(r) > 300 {
+			r = r[:300]
+		}
+		content = string(r)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("你是资深舆情分析师。请对以下文章做多维度深度分析，返回严格JSON格式。\n\n")
+	sb.WriteString(fmt.Sprintf("标题：%s\n平台：%s\n发布日期：%s（距今%d天）\n情感标注：%s（评分%.2f）\n",
+		a.Title, a.Platform, a.PublishedAt.Format("2006-01-02"), ageDays, a.Sentiment, a.SentScore))
+	if isOld {
+		sb.WriteString("⚠️ 注意：这是一篇旧文章（发布超过180天），请在timeNote字段明确说明时效限制。\n")
+	}
+	if content != "" {
+		sb.WriteString(fmt.Sprintf("内容摘要：%s\n", content))
+	}
+	sb.WriteString("\n请返回JSON：\n")
+	sb.WriteString(`{"coreOpinion":"核心观点(30-50字)","contentType":"内容类型(评测/攻略/抱怨/分享/新闻等)","emotionProfile":"情绪画像(25字以内，如：愤怒+失望、期待+兴奋)","keyPoints":["要点1","要点2","要点3"],"riskSignal":"风险信号(如无则填无)","timeNote":"时效说明(如为旧数据须说明)"}`)
+
+	resp, err := callLLM(ctx, sb.String(), cfg, 400)
+
+	result := ArticleDeepAnalysis{
+		ArticleID:   a.ID,
+		Title:       a.Title,
+		Platform:    a.Platform,
+		PublishedAt: a.PublishedAt.Format("2006-01-02"),
+		AgeDays:     ageDays,
+		IsOld:       isOld,
+		SentScore:   a.SentScore,
+		Sentiment:   a.Sentiment,
+	}
+
+	if err != nil {
+		log.Printf("[DeepAnalysis] LLM failed for article %d: %v", a.ID, err)
+		result.CoreOpinion = a.Title
+		if isOld {
+			result.TimeNote = fmt.Sprintf("该文章发布于 %d 天前，属于旧数据，请注意时效性。", ageDays)
+		}
+		return result
+	}
+
+	resp = strings.TrimSpace(resp)
+	if idx := strings.Index(resp, "{"); idx >= 0 {
+		resp = resp[idx:]
+	}
+	if idx := strings.LastIndex(resp, "}"); idx >= 0 {
+		resp = resp[:idx+1]
+	}
+
+	var parsed struct {
+		CoreOpinion    string   `json:"coreOpinion"`
+		ContentType    string   `json:"contentType"`
+		EmotionProfile string   `json:"emotionProfile"`
+		KeyPoints      []string `json:"keyPoints"`
+		RiskSignal     string   `json:"riskSignal"`
+		TimeNote       string   `json:"timeNote"`
+	}
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		log.Printf("[DeepAnalysis] parse JSON failed for article %d: %v", a.ID, err)
+		result.CoreOpinion = a.Title
+		return result
+	}
+
+	result.CoreOpinion = parsed.CoreOpinion
+	result.ContentType = parsed.ContentType
+	result.EmotionProfile = parsed.EmotionProfile
+	result.KeyPoints = parsed.KeyPoints
+	result.RiskSignal = parsed.RiskSignal
+	result.TimeNote = parsed.TimeNote
+	if isOld && result.TimeNote == "" {
+		result.TimeNote = fmt.Sprintf("该文章发布于 %d 天前，属于历史数据，请注意时效性。", ageDays)
+	}
+	return result
+}
+
+
+func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSummaries map[string]string, deepAnalysis []ArticleDeepAnalysis, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, commentAnalysis *CommentAnalysis) (string, error) {
 	var sb strings.Builder
 
 	timeRange := formatTimeRange(stats.TimeRange)
@@ -488,7 +1114,11 @@ func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSumm
 	// 各话题详细分析
 	sb.WriteString("## 各话题深度分析\n\n")
 	for _, g := range stats.TopGroups {
-		sb.WriteString(fmt.Sprintf("### %s（%d 篇）\n\n", g.Topic, g.Count))
+		sb.WriteString(fmt.Sprintf("### %s（%d 篇，时效热度%.2f）\n\n", g.Topic, g.Count, g.WeightedScore))
+		if g.OldCount > 0 {
+			sb.WriteString(fmt.Sprintf("> ⚠️ **时效提示：** 该话题 %d 篇中有 %d 篇为180天以上旧数据，数据时间跨度 %s ~ %s。\n\n",
+				g.Count, g.OldCount, g.EarliestDate.Format("2006-01-02"), g.LatestDate.Format("2006-01-02")))
+		}
 		if summary, ok := groupSummaries[g.Topic]; ok {
 			sb.WriteString(summary + "\n\n")
 		}
@@ -500,6 +1130,42 @@ func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSumm
 			sb.WriteString(fmt.Sprintf("%d. `[%s]` `[%s]` %s\n", i+1, a.Platform, sentimentLabel(a.Sentiment), a.Title))
 		}
 		sb.WriteString("\n")
+	}
+
+	// 文章精读（深度分析）
+	if len(deepAnalysis) > 0 {
+		sb.WriteString("## 重点文章精读\n\n")
+		for i, da := range deepAnalysis {
+			if i >= 10 {
+				break
+			}
+			oldMark := ""
+			if da.IsOld {
+				oldMark = "（旧数据）"
+			}
+			sb.WriteString(fmt.Sprintf("### %d. %s %s\n\n", i+1, da.Title, oldMark))
+			sb.WriteString(fmt.Sprintf("**平台：** %s　**发布：** %s（%d天前）　**情感：** %s（%.2f）\n\n",
+				da.Platform, da.PublishedAt, da.AgeDays, sentimentLabel(da.Sentiment), da.SentScore))
+			if da.CoreOpinion != "" {
+				sb.WriteString(fmt.Sprintf("**核心观点：** %s\n\n", da.CoreOpinion))
+			}
+			if da.ContentType != "" || da.EmotionProfile != "" {
+				sb.WriteString(fmt.Sprintf("**内容类型：** %s　**情绪画像：** %s\n\n", da.ContentType, da.EmotionProfile))
+			}
+			if len(da.KeyPoints) > 0 {
+				sb.WriteString("**关键要点：**\n")
+				for _, kp := range da.KeyPoints {
+					sb.WriteString(fmt.Sprintf("- %s\n", kp))
+				}
+				sb.WriteString("\n")
+			}
+			if da.RiskSignal != "" && da.RiskSignal != "无" {
+				sb.WriteString(fmt.Sprintf("**风险信号：** %s\n\n", da.RiskSignal))
+			}
+			if da.TimeNote != "" {
+				sb.WriteString(fmt.Sprintf("> ⏰ %s\n\n", da.TimeNote))
+			}
+		}
 	}
 
 	// 评论深度分析
@@ -541,6 +1207,16 @@ func (s *Service) buildMarkdown(ctx context.Context, stats crawlStats, groupSumm
 						sb.WriteString(fmt.Sprintf("- %s\n", op))
 					}
 					sb.WriteString("\n")
+				}
+				if len(tc.DeepInsights) > 0 {
+					sb.WriteString("深度解析：\n")
+					for _, n := range tc.DeepInsights {
+						sb.WriteString(fmt.Sprintf("- %s\n", n))
+					}
+					sb.WriteString("\n")
+				}
+				if len(tc.MainEmotions) > 0 {
+					sb.WriteString(fmt.Sprintf("主要情绪：%s\n\n", strings.Join(tc.MainEmotions, "、")))
 				}
 			}
 		}

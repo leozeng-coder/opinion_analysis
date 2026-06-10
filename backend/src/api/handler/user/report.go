@@ -195,12 +195,20 @@ func (h *ReportHandler) Regenerate(c *gin.Context) {
 
 	sampleSize := 8
 	maxGroups := 5
+	maxTopicCards := 8
+	commentSampleSize := 18
 	if reportNodeConfig != nil {
 		if s, ok := reportNodeConfig["sampleSize"].(float64); ok && int(s) > 0 {
 			sampleSize = int(s)
 		}
 		if m, ok := reportNodeConfig["maxGroups"].(float64); ok && int(m) > 0 {
 			maxGroups = int(m)
+		}
+		if m, ok := reportNodeConfig["maxTopicCards"].(float64); ok && int(m) > 0 {
+			maxTopicCards = int(m)
+		}
+		if m, ok := reportNodeConfig["commentSampleSize"].(float64); ok && int(m) > 0 {
+			commentSampleSize = int(m)
 		}
 	}
 
@@ -215,6 +223,8 @@ func (h *ReportHandler) Regenerate(c *gin.Context) {
 		htmlTheme,
 		sampleSize,
 		maxGroups,
+		maxTopicCards,
+		commentSampleSize,
 	)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "regenerate report failed: "+err.Error())

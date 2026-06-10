@@ -3,7 +3,6 @@ package action
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"opinion-analysis/src/service/report"
 	"opinion-analysis/src/service/workflow/nodes"
@@ -37,6 +36,8 @@ func (n *AnalysisReportNode) Execute(ctx context.Context, config map[string]inte
 	htmlTheme := n.GetString(config, "htmlTheme", "random")
 	sampleSize := n.GetInt(config, "sampleSize", 8)
 	maxGroups := n.GetInt(config, "maxGroups", 5)
+	maxTopicCards := n.GetInt(config, "maxTopicCards", 8)
+	commentSampleSize := n.GetInt(config, "commentSampleSize", 18)
 
 	articleIDs := n.GetArticleIDs(input)
 	if len(articleIDs) == 0 {
@@ -50,15 +51,15 @@ func (n *AnalysisReportNode) Execute(ctx context.Context, config map[string]inte
 	}
 	topics := nodes.GetStringSliceFromInput(input, "topics")
 
-	log.Printf("[AnalysisReportNode] generating %s report: articles=%d crawlerRunId=%d platforms=%v",
-		format, len(articleIDs), crawlerRunID, platforms)
+	progress := nodes.ProgressFunc(ctx)
+	progress(fmt.Sprintf("生成 %s 报告：%d 篇文章，平台 %v", format, len(articleIDs), platforms))
 
-	reportID, err := n.reportSvc.Generate(ctx, articleIDs, crawlerRunID, platforms, topics, format, htmlTheme, sampleSize, maxGroups)
+	reportID, err := n.reportSvc.Generate(ctx, articleIDs, crawlerRunID, platforms, topics, format, htmlTheme, sampleSize, maxGroups, maxTopicCards, commentSampleSize)
 	if err != nil {
 		return nil, n.WrapError("report generation failed", err)
 	}
 
-	log.Printf("[AnalysisReportNode] report generated: id=%s", reportID)
+	progress(fmt.Sprintf("报告生成完成：%s", reportID))
 
 	produced := map[string]interface{}{
 		"reportId":     reportID,

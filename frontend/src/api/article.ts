@@ -21,17 +21,17 @@ export interface TagsQuery {
 
 export const articleApi = {
   list: (params: ArticleQuery) =>
-    request.get<never, PageData<Article>>('/articles', { params }),
+    request.get<PageData<Article>>('/articles', { params }),
 
   detail: (id: number) =>
-    request.get<never, Article>(`/articles/${id}`),
+    request.get<Article>(`/articles/${id}`),
 
   stats: (params?: { startAt?: string; endAt?: string }) =>
-    request.get<never, ArticleStats>('/articles/stats', { params }),
+    request.get<ArticleStats>('/articles/stats', { params }),
 
   platforms: () =>
-    request.get<never, string[]>('/articles/platforms'),
+    request.get<string[]>('/articles/platforms'),
 
   tags: (params?: TagsQuery) =>
-    request.get<never, TagCount[]>('/articles/tags', { params }),
+    request.get<TagCount[]>('/articles/tags', { params }),
 }
