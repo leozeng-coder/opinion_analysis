@@ -290,23 +290,28 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         content: ZhihuContent,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        max_count: int = 0,
     ) -> List[ZhihuComment]:
         """
-        Get all root-level comments for a specified post, this method will retrieve all comment information under a post
+        Get all root-level comments for a specified post
         Args:
             content: Content detail object (question|article|video)
             crawl_interval: Crawl delay interval in seconds
             callback: Callback after completing one crawl
+            max_count: Max root-level comments to fetch (0 = use config default)
 
         Returns:
 
         """
+        if max_count <= 0:
+            max_count = config.CRAWLER_MAX_COMMENTS_COUNT_SINGLENOTES
+
         result: List[ZhihuComment] = []
         is_end: bool = False
         offset: str = ""
         prev_offset: str = ""
         limit: int = 10
-        while not is_end:
+        while not is_end and len(result) < max_count:
             prev_offset = offset
             root_comment_res = await self.get_root_comments(content.content_id, content.content_type, offset, limit)
             if not root_comment_res:
@@ -322,11 +327,19 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
             if prev_offset == offset:
                 break
 
+            remaining = max_count - len(result)
+            if len(comments) > remaining:
+                comments = comments[:remaining]
+                is_end = True
+
             if callback:
                 await callback(comments)
 
             result.extend(comments)
-            await self.get_comments_all_sub_comments(content, comments, crawl_interval=crawl_interval, callback=callback)
+            await self.get_comments_all_sub_comments(
+                content, comments, crawl_interval=crawl_interval, callback=callback,
+                max_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
+            )
             sleep_time = utils.get_random_sleep_time(crawl_interval)
 
             await asyncio.sleep(sleep_time)
@@ -338,20 +351,25 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
         comments: List[ZhihuComment],
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        max_count: int = 0,
     ) -> List[ZhihuComment]:
         """
-        Get all sub-comments under specified comments
+        Get sub-comments under specified comments
         Args:
             content: Content detail object (question|article|video)
             comments: Comment list
             crawl_interval: Crawl delay interval in seconds
             callback: Callback after completing one crawl
+            max_count: Max sub-comments per parent comment (0 = use config default)
 
         Returns:
 
         """
         if not config.ENABLE_GET_SUB_COMMENTS:
             return []
+
+        if max_count <= 0:
+            max_count = config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES
 
         all_sub_comments: List[ZhihuComment] = []
         for parment_comment in comments:
@@ -362,7 +380,8 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
             offset: str = ""
             prev_offset: str = ""
             limit: int = 10
-            while not is_end:
+            fetched_for_parent = 0
+            while not is_end and fetched_for_parent < max_count:
                 prev_offset = offset
                 child_comment_res = await self.get_child_comments(parment_comment.comment_id, offset, limit)
                 if not child_comment_res:
@@ -378,10 +397,16 @@ class ZhiHuClient(AbstractApiClient, ProxyRefreshMixin):
                 if prev_offset == offset:
                     break
 
+                remaining = max_count - fetched_for_parent
+                if len(sub_comments) > remaining:
+                    sub_comments = sub_comments[:remaining]
+                    is_end = True
+
                 if callback:
                     await callback(sub_comments)
 
                 all_sub_comments.extend(sub_comments)
+                fetched_for_parent += len(sub_comments)
                 sleep_time = utils.get_random_sleep_time(crawl_interval)
 
                 await asyncio.sleep(sleep_time)

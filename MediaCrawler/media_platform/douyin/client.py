@@ -257,6 +257,7 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         is_fetch_sub_comments=False,
         callback: Optional[Callable] = None,
         max_count: int = 10,
+        max_sub_count: int = 0,
     ):
         """
         获取帖子的所有评论，包括子评论
@@ -265,8 +266,12 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
         :param is_fetch_sub_comments: 是否抓取子评论
         :param callback: 回调函数，用于处理抓取到的评论
         :param max_count: 一次帖子爬取的最大评论数量
+        :param max_sub_count: 每条一级评论最大子评论数量（0=使用配置默认值）
         :return: 评论列表
         """
+        if max_sub_count <= 0:
+            max_sub_count = config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES
+
         result = []
         comments_has_more = 1
         comments_cursor = 0
@@ -285,7 +290,6 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
 
             sleep_time = utils.get_random_sleep_time(crawl_interval)
 
-
             await asyncio.sleep(sleep_time)
             if not is_fetch_sub_comments:
                 continue
@@ -297,8 +301,9 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
                     comment_id = comment.get("cid")
                     sub_comments_has_more = 1
                     sub_comments_cursor = 0
+                    fetched_sub = 0
 
-                    while sub_comments_has_more:
+                    while sub_comments_has_more and fetched_sub < max_sub_count:
                         sub_comments_res = await self.get_sub_comments(aweme_id, comment_id, sub_comments_cursor)
                         sub_comments_has_more = sub_comments_res.get("has_more", 0)
                         sub_comments_cursor = sub_comments_res.get("cursor", 0)
@@ -306,7 +311,12 @@ class DouYinClient(AbstractApiClient, ProxyRefreshMixin):
 
                         if not sub_comments:
                             continue
+                        remaining = max_sub_count - fetched_sub
+                        if len(sub_comments) > remaining:
+                            sub_comments = sub_comments[:remaining]
+                            sub_comments_has_more = 0
                         result.extend(sub_comments)
+                        fetched_sub += len(sub_comments)
                         if callback:  # If there is a callback function, execute the callback function
                             await callback(aweme_id, sub_comments)
                         sleep_time = utils.get_random_sleep_time(crawl_interval)

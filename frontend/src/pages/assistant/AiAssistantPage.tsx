@@ -517,6 +517,8 @@ const AiAssistantPage: React.FC = () => {
 
   const currentSession = sessions.find((s) => s.id === currentSessionId)
   const titleBar = currentSession?.title ?? '舆情分析助手'
+  // null === null would otherwise make all "loading" guards fire on initial render
+  const isCurrentSessionLoading = currentSessionId !== null && loadingSessionId === currentSessionId
 
   return (
     <div className={page.pageShellFlush}>
@@ -616,7 +618,7 @@ const AiAssistantPage: React.FC = () => {
 
           <main
             className={
-              messages.length === 0 && loadingSessionId !== currentSessionId
+              messages.length === 0 && !isCurrentSessionLoading
                 ? `${styles.doc} ${styles.docEmpty}`
                 : styles.doc
             }
@@ -646,7 +648,7 @@ const AiAssistantPage: React.FC = () => {
                               {m.content}
                             </ReactMarkdown>
                           </div>
-                          {m.content && loadingSessionId !== currentSessionId && (
+                          {m.content && !isCurrentSessionLoading && (
                             <div className={styles.messageActions}>
                               <Button
                                 type="text"
@@ -676,7 +678,7 @@ const AiAssistantPage: React.FC = () => {
                   )
                 })
               )}
-              {loadingSessionId === currentSessionId && (
+              {isCurrentSessionLoading && (
                 <div className={styles.block}>
                   <div className={styles.thinkingRow}>
                     <Spin size="small" />
@@ -722,7 +724,7 @@ const AiAssistantPage: React.FC = () => {
                       }
                     }
                   }}
-                  disabled={loadingSessionId === currentSessionId}
+                  disabled={isCurrentSessionLoading}
                   placeholder={
                     messages.length === 0
                       ? '发消息，Enter 发送 · Shift+Enter 换行'
@@ -731,7 +733,7 @@ const AiAssistantPage: React.FC = () => {
                   autoSize={{ minRows: 1, maxRows: 6 }}
                   style={{ flex: 1 }}
                 />
-                {loadingSessionId === currentSessionId ? (
+                {isCurrentSessionLoading ? (
                   <Button
                     danger
                     shape="circle"

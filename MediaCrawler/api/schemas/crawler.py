@@ -111,6 +111,7 @@ class LogEntry(BaseModel):
     timestamp: str
     level: Literal["info", "warning", "error", "success", "debug"]
     message: str
+    platform: Optional[str] = None
 
 
 class DataFileInfo(BaseModel):

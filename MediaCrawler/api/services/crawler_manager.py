@@ -1,37 +1,44 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2025 relakkes@gmail.com
-#
-# This file is part of MediaCrawler project.
-# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/api/services/crawler_manager.py
-# GitHub: https://github.com/NanmiCoder
-# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
-#
-# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
-# 1. 不得用于任何商业用途。
-# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
-# 3. 不得进行大规模爬取或对平台造成运营干扰。
-# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
-# 5. 不得用于任何非法或不当的用途。
-#
-# 详细许可条款请参阅项目根目录下的LICENSE文件。
-# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
-
 import asyncio
 import subprocess
 import signal
 import os
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 from pathlib import Path
 
 from ..schemas import CrawlerStartRequest, LogEntry
 
 
-class CrawlerManager:
-    """Crawler process manager"""
+PLATFORM_NAMES: Dict[str, str] = {
+    "xhs": "小红书",
+    "dy": "抖音",
+    "ks": "快手",
+    "bili": "B站",
+    "wb": "微博",
+    "tieba": "百度贴吧",
+    "zhihu": "知乎",
+}
 
-    def __init__(self):
+_CDP_PORT_MAP: Dict[str, int] = {
+    "xhs": 9222,
+    "dy": 9223,
+    "ks": 9224,
+    "bili": 9225,
+    "wb": 9226,
+    "tieba": 9227,
+    "zhihu": 9228,
+}
+
+
+class CrawlerManager:
+    """Crawler process manager (per-platform instance)"""
+
+    def __init__(self, platform: str = ""):
         self._lock = asyncio.Lock()
+        self.platform = platform
+        self.platform_label = PLATFORM_NAMES.get(platform, platform)
+        self.cdp_port = _CDP_PORT_MAP.get(platform, 9222)
         self.process: Optional[subprocess.Popen] = None
         self.status = "idle"
         self.started_at: Optional[datetime] = None
@@ -39,10 +46,23 @@ class CrawlerManager:
         self._log_id = 0
         self._logs: List[LogEntry] = []
         self._read_task: Optional[asyncio.Task] = None
-        # Project root directory
         self._project_root = Path(__file__).parent.parent.parent
-        # Log queue - for pushing to WebSocket
         self._log_queue: Optional[asyncio.Queue] = None
+
+        # Detect CDP_CONNECT_EXISTING from project config
+        self._cdp_connect_existing = self._detect_cdp_connect_existing()
+
+    def _detect_cdp_connect_existing(self) -> bool:
+        """Check if config.CDP_CONNECT_EXISTING is True"""
+        try:
+            config_path = self._project_root / "config" / "base_config.py"
+            if config_path.exists():
+                text = config_path.read_text(encoding="utf-8")
+                if "CDP_CONNECT_EXISTING = True" in text:
+                    return True
+        except Exception:
+            pass
+        return False
 
     @property
     def logs(self) -> List[LogEntry]:
@@ -55,22 +75,24 @@ class CrawlerManager:
         return self._log_queue
 
     def _create_log_entry(self, message: str, level: str = "info") -> LogEntry:
-        """Create log entry"""
+        """Create log entry with platform prefix"""
         self._log_id += 1
+        if self.platform_label:
+            message = f"[{self.platform_label}] {message}"
         entry = LogEntry(
             id=self._log_id,
             timestamp=datetime.now().strftime("%H:%M:%S"),
             level=level,
-            message=message
+            message=message,
+            platform=self.platform or None,
         )
         self._logs.append(entry)
-        # Keep last 500 logs
         if len(self._logs) > 500:
             self._logs = self._logs[-500:]
         return entry
 
     async def _push_log(self, entry: LogEntry):
-        """Push log to queue"""
+        """Push log to local queue and registry aggregated queue"""
         if self._log_queue is not None:
             try:
                 self._log_queue.put_nowait(entry)
@@ -96,11 +118,9 @@ class CrawlerManager:
             if self.process and self.process.poll() is None:
                 return False
 
-            # Clear old logs
             self._logs = []
             self._log_id = 0
 
-            # Clear pending queue (don't replace object to avoid WebSocket broadcast coroutine holding old queue reference)
             if self._log_queue is None:
                 self._log_queue = asyncio.Queue()
             else:
@@ -110,15 +130,12 @@ class CrawlerManager:
                 except asyncio.QueueEmpty:
                     pass
 
-            # Build command line arguments
             cmd = self._build_command(config)
 
-            # Log start information
-            entry = self._create_log_entry(f"Starting crawler: {' '.join(cmd)}", "info")
+            entry = self._create_log_entry(f"启动爬虫: {' '.join(cmd)}", "info")
             await self._push_log(entry)
 
             try:
-                # Start subprocess
                 self.process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -135,18 +152,17 @@ class CrawlerManager:
                 self.current_config = config
 
                 entry = self._create_log_entry(
-                    f"Crawler started on platform: {config.platform.value}, type: {config.crawler_type.value}",
+                    f"爬虫已启动，类型: {config.crawler_type.value}",
                     "success"
                 )
                 await self._push_log(entry)
 
-                # Start log reading task
                 self._read_task = asyncio.create_task(self._read_output())
 
                 return True
             except Exception as e:
                 self.status = "error"
-                entry = self._create_log_entry(f"Failed to start crawler: {str(e)}", "error")
+                entry = self._create_log_entry(f"启动失败: {str(e)}", "error")
                 await self._push_log(entry)
                 return False
 
@@ -157,35 +173,32 @@ class CrawlerManager:
                 return False
 
             self.status = "stopping"
-            entry = self._create_log_entry("Sending SIGTERM to crawler process...", "warning")
+            entry = self._create_log_entry("正在发送停止信号...", "warning")
             await self._push_log(entry)
 
             try:
                 self.process.send_signal(signal.SIGTERM)
 
-                # Wait for graceful exit (up to 15 seconds)
                 for _ in range(30):
                     if self.process.poll() is not None:
                         break
                     await asyncio.sleep(0.5)
 
-                # If still not exited, force kill
                 if self.process.poll() is None:
-                    entry = self._create_log_entry("Process not responding, sending SIGKILL...", "warning")
+                    entry = self._create_log_entry("进程未响应，强制终止...", "warning")
                     await self._push_log(entry)
                     self.process.kill()
 
-                entry = self._create_log_entry("Crawler process terminated", "info")
+                entry = self._create_log_entry("爬虫进程已终止", "info")
                 await self._push_log(entry)
 
             except Exception as e:
-                entry = self._create_log_entry(f"Error stopping crawler: {str(e)}", "error")
+                entry = self._create_log_entry(f"停止出错: {str(e)}", "error")
                 await self._push_log(entry)
 
             self.status = "idle"
             self.current_config = None
 
-            # Cancel log reading task
             if self._read_task:
                 self._read_task.cancel()
                 self._read_task = None
@@ -196,10 +209,10 @@ class CrawlerManager:
         """Get current status"""
         return {
             "status": self.status,
-            "platform": self.current_config.platform.value if self.current_config else None,
+            "platform": self.platform or (self.current_config.platform.value if self.current_config else None),
             "crawler_type": self.current_config.crawler_type.value if self.current_config else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "error_message": None
+            "error_message": None,
         }
 
     def _build_env(self, config: CrawlerStartRequest) -> dict:
@@ -257,6 +270,11 @@ class CrawlerManager:
         cmd.extend(["--sleep_sec_min", str(config.sleep_sec_min)])
         cmd.extend(["--sleep_sec_max", str(config.sleep_sec_max)])
 
+        # CDP port: only isolate per-platform when launching own browser.
+        # When CDP_CONNECT_EXISTING=True, all crawlers share the user's browser on default port.
+        if not self._cdp_connect_existing:
+            cmd.extend(["--cdp_port", str(self.cdp_port)])
+
         # Platform sort
         platform = config.platform.value
         if platform == "xhs":
@@ -283,7 +301,6 @@ class CrawlerManager:
 
         try:
             while self.process and self.process.poll() is None:
-                # Read a line in thread pool
                 line = await loop.run_in_executor(
                     None, self.process.stdout.readline
                 )
@@ -294,7 +311,6 @@ class CrawlerManager:
                         entry = self._create_log_entry(line, level)
                         await self._push_log(entry)
 
-            # Read remaining output
             if self.process and self.process.stdout:
                 remaining = await loop.run_in_executor(
                     None, self.process.stdout.read
@@ -306,22 +322,79 @@ class CrawlerManager:
                             entry = self._create_log_entry(line.strip(), level)
                             await self._push_log(entry)
 
-            # Process ended
             if self.status == "running":
                 exit_code = self.process.returncode if self.process else -1
                 if exit_code == 0:
-                    entry = self._create_log_entry("Crawler completed successfully", "success")
+                    entry = self._create_log_entry("爬取完成", "success")
                 else:
-                    entry = self._create_log_entry(f"Crawler exited with code: {exit_code}", "warning")
+                    entry = self._create_log_entry(f"进程退出，代码: {exit_code}", "warning")
                 await self._push_log(entry)
                 self.status = "idle"
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            entry = self._create_log_entry(f"Error reading output: {str(e)}", "error")
+            entry = self._create_log_entry(f"读取输出出错: {str(e)}", "error")
             await self._push_log(entry)
 
 
-# Global singleton
-crawler_manager = CrawlerManager()
+class CrawlerManagerRegistry:
+    """Registry of per-platform CrawlerManager instances"""
+
+    def __init__(self):
+        self._managers: Dict[str, CrawlerManager] = {}
+        self._agg_queue: asyncio.Queue = asyncio.Queue()
+
+    def get(self, platform: str) -> CrawlerManager:
+        """Get or create a manager for the given platform"""
+        if platform not in self._managers:
+            mgr = CrawlerManager(platform)
+            # Patch _push_log to also push to aggregated queue
+            original_push = mgr._push_log
+
+            async def _push_both(entry: LogEntry, _orig=original_push):
+                await _orig(entry)
+                try:
+                    self._agg_queue.put_nowait(entry)
+                except asyncio.QueueFull:
+                    pass
+
+            mgr._push_log = _push_both
+            self._managers[platform] = mgr
+        return self._managers[platform]
+
+    def get_all_status(self) -> List[dict]:
+        """Get status of all registered managers"""
+        return [mgr.get_status() for mgr in self._managers.values()]
+
+    def get_running(self) -> List[CrawlerManager]:
+        """Get all managers with running status"""
+        return [mgr for mgr in self._managers.values() if mgr.status == "running"]
+
+    async def stop_all(self) -> int:
+        """Stop all running crawlers, return count of stopped"""
+        count = 0
+        for mgr in self._managers.values():
+            if mgr.status == "running":
+                if await mgr.stop():
+                    count += 1
+        return count
+
+    def get_aggregated_queue(self) -> asyncio.Queue:
+        """Get aggregated log queue (all platforms)"""
+        return self._agg_queue
+
+    def get_all_logs(self, limit: int = 200) -> List[LogEntry]:
+        """Get recent logs from all managers, sorted by timestamp"""
+        all_logs: List[LogEntry] = []
+        for mgr in self._managers.values():
+            all_logs.extend(mgr.logs)
+        all_logs.sort(key=lambda x: x.id)
+        return all_logs[-limit:] if limit > 0 else all_logs
+
+
+# Global registry instance
+crawler_registry = CrawlerManagerRegistry()
+
+# Backward-compatible: default manager (no platform)
+crawler_manager = CrawlerManager("")

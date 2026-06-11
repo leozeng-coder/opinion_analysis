@@ -12,7 +12,6 @@ import (
 
 // DataPatchNode 补数节点：计算平台源表与 articles 中心表的差集，
 // 将未同步的源表 ID 列表传给下游 platform_sync 节点补录。
-// 适用场景：上游爬虫节点中途取消或失败后，手动补同步已爬取的数据。
 type DataPatchNode struct {
 	*nodes.BaseNode
 	db *gorm.DB
@@ -26,8 +25,7 @@ func NewDataPatchNode(db *gorm.DB) *DataPatchNode {
 }
 
 func (n *DataPatchNode) Validate(config map[string]interface{}) error {
-	platforms := n.GetStringSlice(config, "platforms")
-	if len(platforms) == 0 {
+	if platforms := n.GetStringSlice(config, "platforms"); len(platforms) == 0 {
 		return fmt.Errorf("平台（platforms）为必填项")
 	}
 	return nil
@@ -49,20 +47,18 @@ func (n *DataPatchNode) Execute(ctx context.Context, config map[string]interface
 
 	syncSvc := platformSync.NewPlatformSyncService(n.db)
 
-	var allMissingIDs []uint
-	patchResults := make(map[string]interface{})
+	totalMissing := 0
+	patchResults := make(map[string]interface{}, len(syncCodes))
+	perPlatformIDs := make(map[string]interface{}, len(syncCodes))
 
 	for _, code := range syncCodes {
 		sourceTable := platformSync.SyncCodeToSourceTable(code)
 		if sourceTable == "" {
-			log.Printf("[DataPatchNode] unknown source table for code=%s, skip", code)
 			continue
 		}
 
-		// 读取当前 offset（已同步的源表最大 ID）
 		offset := syncSvc.GetOffset(code)
 
-		// 查询源表中 id > offset 的所有 ID（即已爬取但未同步的行）
 		var missingIDs []uint
 		if err := n.db.WithContext(ctx).Table(sourceTable).
 			Where("id > ?", offset).
@@ -71,21 +67,23 @@ func (n *DataPatchNode) Execute(ctx context.Context, config map[string]interface
 		}
 
 		log.Printf("[DataPatchNode] platform=%s offset=%d missing=%d", code, offset, len(missingIDs))
-		allMissingIDs = append(allMissingIDs, missingIDs...)
+		totalMissing += len(missingIDs)
 		patchResults[code] = map[string]interface{}{
-			"offset":     offset,
+			"offset":       offset,
 			"missingCount": len(missingIDs),
+		}
+
+		if len(missingIDs) > 0 {
+			arr := make([]interface{}, len(missingIDs))
+			for i, id := range missingIDs {
+				arr[i] = float64(id)
+			}
+			perPlatformIDs[code] = arr
 		}
 	}
 
-	if len(allMissingIDs) == 0 {
+	if totalMissing == 0 {
 		return nil, fmt.Errorf("所选平台暂无缺失数据，无需补数")
-	}
-
-	// 转为 []interface{} 兼容 JSON 序列化
-	packed := make([]interface{}, len(allMissingIDs))
-	for i, id := range allMissingIDs {
-		packed[i] = float64(id)
 	}
 
 	var topic string
@@ -94,12 +92,12 @@ func (n *DataPatchNode) Execute(ctx context.Context, config map[string]interface
 	}
 
 	produced := map[string]interface{}{
-		"syncPlatformCodes": syncCodes,
-		"includeSourceIds":  packed,
-		"patchResults":      patchResults,
-		"missingCount":      len(allMissingIDs),
-		"topics":            topics,
-		"topic":             topic,
+		"syncPlatformCodes":          syncCodes,
+		"includeSourceIdsByPlatform": perPlatformIDs,
+		"patchResults":               patchResults,
+		"missingCount":               totalMissing,
+		"topics":                     topics,
+		"topic":                      topic,
 	}
 
 	return nodes.CarryForward(input, produced), nil

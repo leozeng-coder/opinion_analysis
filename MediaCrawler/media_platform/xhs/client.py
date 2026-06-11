@@ -451,6 +451,7 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                 xsec_token=xsec_token,
                 crawl_interval=crawl_interval,
                 callback=callback,
+                max_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
             )
             result.extend(sub_comments)
         return result
@@ -461,14 +462,16 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
         xsec_token: str,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        max_count: int = 0,
     ) -> List[Dict]:
         """
-        Get all second-level comments under specified first-level comments, this method will continuously find all second-level comment information under first-level comments
+        Get second-level comments under specified first-level comments.
         Args:
             comments: Comment list
             xsec_token: Verification token
             crawl_interval: Crawl delay per comment (seconds)
             callback: Callback after one comment crawl ends
+            max_count: Max sub-comments per parent comment (0 = use config default)
 
         Returns:
 
@@ -478,6 +481,9 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                 f"[XiaoHongShuCrawler.get_comments_all_sub_comments] Crawling sub_comment mode is not enabled"
             )
             return []
+
+        if max_count <= 0:
+            max_count = config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES
 
         result = []
         for comment in comments:
@@ -493,8 +499,9 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
 
                 root_comment_id = comment.get("id")
                 sub_comment_cursor = comment.get("sub_comment_cursor")
+                fetched_for_parent = 0
 
-                while sub_comment_has_more:
+                while sub_comment_has_more and fetched_for_parent < max_count:
                     try:
                         comments_res = await self.get_note_sub_comments(
                             note_id=note_id,
@@ -516,13 +523,18 @@ class XiaoHongShuClient(AbstractApiClient, ProxyRefreshMixin):
                                 f"[XiaoHongShuClient.get_comments_all_sub_comments] No 'comments' key found in response: {comments_res}"
                             )
                             break
-                        comments = comments_res["comments"]
+                        page_comments = comments_res["comments"]
+                        remaining = max_count - fetched_for_parent
+                        if len(page_comments) > remaining:
+                            page_comments = page_comments[:remaining]
+                            sub_comment_has_more = False
                         if callback:
-                            await callback(note_id, comments)
+                            await callback(note_id, page_comments)
                         sleep_time = utils.get_random_sleep_time(crawl_interval)
 
                         await asyncio.sleep(sleep_time)
-                        result.extend(comments)
+                        result.extend(page_comments)
+                        fetched_for_parent += len(page_comments)
                     except DataFetchError as e:
                         utils.logger.warning(
                             f"[XiaoHongShuClient.get_comments_all_sub_comments] Failed to get sub-comments for note_id: {note_id}, root_comment_id: {root_comment_id}, error: {e}. Skipping this comment's sub-comments."

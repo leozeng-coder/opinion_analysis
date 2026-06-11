@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,8 +22,8 @@ type RunNode struct {
 	crawlerRepo *repository.CrawlerRepository
 	crawlerSvc  *crawlerSvc.Service
 
-	// 当前活跃的 runID（atomic，用于 OnCancel 安全读取）
-	activeRunID atomic.Uint64
+	// 所有活跃的 runID（支持并发多节点同时执行）
+	activeRunIDs sync.Map // key: uint64(runID), value: string(platform)
 }
 
 func NewRunNode(db *gorm.DB, crawlerRepo *repository.CrawlerRepository, systemRepo *repository.SystemRepository) *RunNode {
@@ -107,8 +107,8 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 	}
 
 	log.Printf("[CrawlerRunNode] Crawler triggered: runId=%d", result.RunID)
-	n.activeRunID.Store(uint64(result.RunID))
-	defer n.activeRunID.Store(0)
+	n.activeRunIDs.Store(uint64(result.RunID), platform)
+	defer n.activeRunIDs.Delete(uint64(result.RunID))
 
 	commentMaxIDs := n.captureCommentBaselines(ctx, syncCodes)
 
@@ -157,18 +157,15 @@ func (n *RunNode) Execute(ctx context.Context, config map[string]interface{}, in
 	return nodes.CarryForward(input, produced), nil
 }
 
-// OnCancel 覆盖：立即发 stop 信号给 MediaCrawler，不等待爬虫完成。
-// engine 已经 cancel 了 ctx，WaitForCompletion 会通过 ctx.Done() 返回；
-// 这里额外发 /api/crawler/stop 确保 MediaCrawler 进程真正停止。
+// OnCancel 覆盖：向所有活跃的 MediaCrawler 发 stop 信号。
 func (n *RunNode) OnCancel(_ context.Context) {
-	runID := uint(n.activeRunID.Load())
-	if runID == 0 {
-		log.Printf("[CrawlerRunNode] OnCancel: no active run, skip stop signal")
-		return
-	}
-	log.Printf("[CrawlerRunNode] OnCancel: sending stop to MediaCrawler for runId=%d", runID)
-	// 使用后台 context，因为传入的 ctx 可能已经 Done
-	go n.crawlerSvc.StopCrawler(runID)
+	n.activeRunIDs.Range(func(key, value any) bool {
+		runID := uint(key.(uint64))
+		platform, _ := value.(string)
+		log.Printf("[CrawlerRunNode] OnCancel: sending stop to MediaCrawler for runId=%d platform=%s", runID, platform)
+		go n.crawlerSvc.StopCrawler(runID, platform)
+		return true
+	})
 }
 
 // captureSourceBaselines 查询每个平台对应源表当前的 max(id)

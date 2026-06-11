@@ -501,7 +501,8 @@ class BaiduTieBaClient(AbstractApiClient):
 
                 # Get all sub-comments
                 await self.get_comments_all_sub_comments(
-                    comments, crawl_interval=crawl_interval, callback=callback
+                    comments, crawl_interval=crawl_interval, callback=callback,
+                    max_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
                 )
 
                 sleep_time = utils.get_random_sleep_time(crawl_interval)
@@ -522,13 +523,15 @@ class BaiduTieBaClient(AbstractApiClient):
         comments: List[TiebaComment],
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        max_count: int = 0,
     ) -> List[TiebaComment]:
         """
-        Get all sub-comments for specified comments (uses Playwright to access page, avoiding API detection)
+        Get sub-comments for specified comments (uses Playwright to access page, avoiding API detection)
         Args:
             comments: Comment list
             crawl_interval: Crawl delay interval in seconds
             callback: Callback function after one post crawl completes
+            max_count: Max sub-comments to fetch per parent comment (0 = use config default)
 
         Returns:
             List[TiebaComment]: Sub-comment list
@@ -540,6 +543,9 @@ class BaiduTieBaClient(AbstractApiClient):
             utils.logger.error("[BaiduTieBaClient.get_comments_all_sub_comments] playwright_page is None, cannot use browser mode")
             raise Exception("playwright_page is required for browser-based sub-comment fetching")
 
+        if max_count <= 0:
+            max_count = config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES
+
         all_sub_comments: List[TiebaComment] = []
 
         for parment_comment in comments:
@@ -547,9 +553,12 @@ class BaiduTieBaClient(AbstractApiClient):
                 continue
 
             current_page = 1
-            max_sub_page_num = parment_comment.sub_comment_count // 10 + 1
+            # Cap pages by both actual sub-comment count and configured max
+            capped_sub_count = min(parment_comment.sub_comment_count, max_count)
+            max_sub_page_num = capped_sub_count // 10 + 1
+            fetched_for_parent = 0
 
-            while max_sub_page_num >= current_page:
+            while max_sub_page_num >= current_page and fetched_for_parent < max_count:
                 # Construct sub-comment URL
                 sub_comment_url = (
                     f"{self._host}/p/comment?"
@@ -564,10 +573,6 @@ class BaiduTieBaClient(AbstractApiClient):
                     # Serialise all playwright navigations to avoid ERR_ABORTED from concurrent goto calls
                     async with self._playwright_lock:
                         await self.playwright_page.goto(sub_comment_url, wait_until="domcontentloaded")
-
-                        # Wait for page loading
-                        await asyncio.sleep(utils.get_random_sleep_time(config.CRAWLER_MAX_SLEEP_SEC))
-
                         # Get page HTML content
                         page_content = await self.playwright_page.content()
 
@@ -583,13 +588,18 @@ class BaiduTieBaClient(AbstractApiClient):
                         )
                         break
 
+                    # Trim to max_count
+                    remaining = max_count - fetched_for_parent
+                    if len(sub_comments) > remaining:
+                        sub_comments = sub_comments[:remaining]
+
                     if callback:
                         await callback(parment_comment.note_id, sub_comments)
 
                     all_sub_comments.extend(sub_comments)
-                    sleep_time = utils.get_random_sleep_time(crawl_interval)
+                    fetched_for_parent += len(sub_comments)
 
-                    await asyncio.sleep(sleep_time)
+                    await asyncio.sleep(utils.get_random_sleep_time(crawl_interval))
                     current_page += 1
 
                 except Exception as e:

@@ -254,7 +254,8 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
 
             await asyncio.sleep(sleep_time)
             sub_comments = await self.get_comments_all_sub_comments(
-                comments, photo_id, crawl_interval, callback
+                comments, photo_id, crawl_interval, callback,
+                max_count=config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES,
             )
             result.extend(sub_comments)
         return result
@@ -265,14 +266,16 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
         photo_id,
         crawl_interval: float = 1.0,
         callback: Optional[Callable] = None,
+        max_count: int = 0,
     ) -> List[Dict]:
         """
-        Get all second-level comments under specified first-level comments (V2 REST API)
+        Get second-level comments under specified first-level comments (V2 REST API)
         Args:
             comments: Comment list
             photo_id: Video ID
             crawl_interval: Delay unit for crawling comments once (seconds)
             callback: Callback after one comment crawl ends
+            max_count: Max sub-comments per parent comment (0 = use config default)
         Returns:
             List of sub comments
         """
@@ -281,6 +284,9 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
                 f"[KuaiShouClient.get_comments_all_sub_comments] Crawling sub_comment mode is not enabled"
             )
             return []
+
+        if max_count <= 0:
+            max_count = config.CRAWLER_MAX_SUB_COMMENTS_COUNT_SINGLENOTES
 
         result = []
         for comment in comments:
@@ -295,8 +301,9 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
                 continue
 
             sub_comment_pcursor = ""
+            fetched_for_parent = 0
 
-            while sub_comment_pcursor != "no_more":
+            while sub_comment_pcursor != "no_more" and fetched_for_parent < max_count:
                 comments_res = await self.get_video_sub_comments(
                     photo_id, root_comment_id, sub_comment_pcursor
                 )
@@ -304,12 +311,18 @@ class KuaiShouClient(AbstractApiClient, ProxyRefreshMixin):
                 sub_comment_pcursor = comments_res.get("pcursorV2", "no_more")
                 sub_comments = comments_res.get("subCommentsV2", [])
 
+                remaining = max_count - fetched_for_parent
+                if len(sub_comments) > remaining:
+                    sub_comments = sub_comments[:remaining]
+                    sub_comment_pcursor = "no_more"
+
                 if callback and sub_comments:
                     await callback(photo_id, sub_comments)
                 sleep_time = utils.get_random_sleep_time(crawl_interval)
 
                 await asyncio.sleep(sleep_time)
                 result.extend(sub_comments)
+                fetched_for_parent += len(sub_comments)
         return result
 
     async def get_creator_info(self, user_id: str) -> Dict:

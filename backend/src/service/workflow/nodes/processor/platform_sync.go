@@ -12,12 +12,7 @@ import (
 )
 
 // PlatformSyncNode 将 MediaCrawler 平台表同步到 articles 中心表。
-//
-// 关键设计：基于「持久化偏移量（platform_sync_offset）」做主键增量，
-// 偏移量记录每个平台已同步进 articles 的源表最大 id，只处理 id > offset 的新行，
-// 成功后推进偏移量。相比旧的「爬虫临时 baseline」方案，不依赖 crawler_run 与
-// platform_sync 的严格配对，任何新增行迟早会被下一次同步捕获，从根本上避免漏行；
-// 同时复杂度为 O(新增行数)，数据量增长也不会变慢。
+// 基于持久化偏移量做主键增量，只处理 id > offset 的新行。
 type PlatformSyncNode struct {
 	*nodes.BaseNode
 	db *gorm.DB
@@ -52,20 +47,16 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		syncCodes = platformSync.ResolveSyncCodes([]string{"zhihu"})
 	}
 
-	// 从上游获取过滤后的源表 ID 列表（数据过滤节点传递）
-	includeSourceIDs := n.extractIncludeSourceIDs(input)
-
-	// 从上游获取爬虫启动前的源表 baseline（爬虫节点传递），用于只同步本次爬取新增行
+	perPlatformSourceIDs := n.extractPerPlatformSourceIDs(input)
 	sourceBaselines := n.extractSourceBaselines(input)
 
-	// 从上游获取 topics 列表（爬虫节点传递），取第一个作为 topic
 	var topic string
 	if topics := nodes.GetStringSliceFromInput(input, "topics"); len(topics) > 0 {
 		topic = topics[0]
 	}
 
-	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v topic=%s includeSourceIDs=%d",
-		syncMode, syncCodes, topic, len(includeSourceIDs))
+	log.Printf("[PlatformSyncNode] mode=%s syncCodes=%v topic=%s perPlatform=%d",
+		syncMode, syncCodes, topic, len(perPlatformSourceIDs))
 
 	syncSvc := platformSync.NewPlatformSyncService(n.db)
 	results := make(map[string]interface{})
@@ -78,10 +69,13 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 		var syncErr error
 		var strategy string
 
+		// 确定该平台的源表 ID 列表
+		codeSourceIDs := n.resolveSourceIDsForCode(code, perPlatformSourceIDs)
+
 		switch {
-		case len(includeSourceIDs) > 0:
+		case len(codeSourceIDs) > 0:
 			strategy = "filtered"
-			result, syncErr = syncSvc.SyncPlatformBySourceIDsWithTopic(ctx, code, includeSourceIDs, topic, enableSentiment)
+			result, syncErr = syncSvc.SyncPlatformBySourceIDsWithTopic(ctx, code, codeSourceIDs, topic, enableSentiment)
 		case syncMode == "full":
 			strategy = "full"
 			result, syncErr = syncSvc.SyncPlatformFullWithTopic(ctx, code, topic, enableSentiment)
@@ -124,26 +118,33 @@ func (n *PlatformSyncNode) Execute(ctx context.Context, config map[string]interf
 	}
 
 	produced := map[string]interface{}{
-		"articleIds":        nodes.PackArticleIDs(allInsertedIDs),
-		"articlesCount":    len(allInsertedIDs),
-		"syncMode":         syncMode,
-		"syncPlatforms":    syncCodes,
+		"articleIds":         nodes.PackArticleIDs(allInsertedIDs),
+		"articlesCount":     len(allInsertedIDs),
+		"syncMode":          syncMode,
+		"syncPlatforms":     syncCodes,
 		"syncPlatformCodes": syncCodes,
-		"syncResults":      results,
-		"syncNewCount":     totalNew,
-		"status":           status,
+		"syncResults":       results,
+		"syncNewCount":      totalNew,
+		"status":            status,
 	}
 
-	output := nodes.CarryForward(input, produced)
-
-	log.Printf("[PlatformSyncNode] done: newRecords=%d articleIds=%d",
-		totalNew, len(allInsertedIDs))
-
-	return output, nil
+	log.Printf("[PlatformSyncNode] done: newRecords=%d articleIds=%d", totalNew, len(allInsertedIDs))
+	return nodes.CarryForward(input, produced), nil
 }
 
-// extractSourceBaselines 从上游 crawler_run 节点的输出中提取各平台的源表 baseline（爬虫启动前 max(id)）。
-// crawler_run 节点存为 map[string]uint，经 JSON 往返后值类型变为 float64。
+// resolveSourceIDsForCode 返回指定平台应使用的源表 ID 列表。
+// 如果上游有 perPlatform 数据，则只使用该平台对应的 ID；没有则返回 nil 走其他同步策略。
+func (n *PlatformSyncNode) resolveSourceIDsForCode(code string, perPlatform map[string][]uint) []uint {
+	if perPlatform == nil {
+		return nil
+	}
+	if ids, ok := perPlatform[code]; ok {
+		return ids
+	}
+	return nil
+}
+
+// extractSourceBaselines 从上游 crawler_run 节点提取各平台源表 baseline（爬虫启动前 max(id)）。
 func (n *PlatformSyncNode) extractSourceBaselines(input map[string]interface{}) map[string]uint {
 	val, ok := input["sourceMaxIdsBefore"]
 	if !ok || val == nil {
@@ -155,14 +156,7 @@ func (n *PlatformSyncNode) extractSourceBaselines(input map[string]interface{}) 
 	case map[string]interface{}:
 		result := make(map[string]uint, len(m))
 		for k, v := range m {
-			switch id := v.(type) {
-			case float64:
-				result[k] = uint(id)
-			case int:
-				result[k] = uint(id)
-			case int64:
-				result[k] = uint(id)
-			case uint:
+			if id, ok := toUint(v); ok {
 				result[k] = id
 			}
 		}
@@ -171,29 +165,54 @@ func (n *PlatformSyncNode) extractSourceBaselines(input map[string]interface{}) 
 	return nil
 }
 
-// extractIncludeSourceIDs 从上游输入中提取过滤后的源表 ID 列表
-func (n *PlatformSyncNode) extractIncludeSourceIDs(input map[string]interface{}) []uint {
-	// 尝试从 includeSourceIds 字段获取
-	if val, ok := input["includeSourceIds"]; ok {
-		switch v := val.(type) {
-		case []uint:
-			return v
-		case []interface{}:
-			result := make([]uint, 0, len(v))
-			for _, item := range v {
-				switch id := item.(type) {
-				case float64:
-					result = append(result, uint(id))
-				case int:
-					result = append(result, uint(id))
-				case int64:
-					result = append(result, uint(id))
-				case uint:
-					result = append(result, id)
-				}
-			}
-			return result
+// extractPerPlatformSourceIDs 从上游提取按平台分组的源表 ID map。
+func (n *PlatformSyncNode) extractPerPlatformSourceIDs(input map[string]interface{}) map[string][]uint {
+	val, ok := input["includeSourceIdsByPlatform"]
+	if !ok || val == nil {
+		return nil
+	}
+	m, ok := val.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	result := make(map[string][]uint, len(m))
+	for code, v := range m {
+		if ids := toUintSlice(v); len(ids) > 0 {
+			result[code] = ids
 		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+func toUint(v interface{}) (uint, bool) {
+	switch id := v.(type) {
+	case float64:
+		return uint(id), true
+	case int:
+		return uint(id), true
+	case int64:
+		return uint(id), true
+	case uint:
+		return id, true
+	}
+	return 0, false
+}
+
+func toUintSlice(v interface{}) []uint {
+	switch ids := v.(type) {
+	case []uint:
+		return ids
+	case []interface{}:
+		out := make([]uint, 0, len(ids))
+		for _, item := range ids {
+			if id, ok := toUint(item); ok {
+				out = append(out, id)
+			}
+		}
+		return out
 	}
 	return nil
 }

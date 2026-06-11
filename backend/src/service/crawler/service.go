@@ -377,9 +377,10 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 	}
 
 	jsonData, _ := json.Marshal(reqBody)
-	log.Printf("[CrawlerService] Request to MediaCrawler API: POST %s/api/crawler/start, body: %s", s.apiBaseURL, string(jsonData))
+	log.Printf("[CrawlerService] Request to MediaCrawler API: POST %s/api/crawler/%s/start, body: %s", s.apiBaseURL, platform, string(jsonData))
 
-	req, err := http.NewRequest("POST", s.apiBaseURL+"/api/crawler/start", bytes.NewBuffer(jsonData))
+	startURL := fmt.Sprintf("%s/api/crawler/%s/start", s.apiBaseURL, platform)
+	req, err := http.NewRequest("POST", startURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Printf("[CrawlerService] Failed to create request: %v", err)
 		s.finishRunLog(logID, "failed", fmt.Sprintf("Failed to create request: %v", err))
@@ -409,7 +410,7 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 
 	log.Printf("[CrawlerService] MediaCrawler API call succeeded: runId=%d, elapsed=%v, waiting for completion...", logID, elapsed)
 
-	if err := s.waitMediaCrawlerIdle(timeout); err != nil {
+	if err := s.waitMediaCrawlerIdle(platform, timeout); err != nil {
 		log.Printf("[CrawlerService] MediaCrawler did not finish: %v", err)
 		s.finishRunLog(logID, "failed", err.Error())
 		return
@@ -418,18 +419,18 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 	s.finishRunLog(logID, "success", "Crawler completed successfully via MediaCrawler API")
 }
 
-func (s *Service) waitMediaCrawlerIdle(timeout time.Duration) error {
+func (s *Service) waitMediaCrawlerIdle(platform string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	runningDeadline := time.Now().Add(30 * time.Second)
 	sawRunning := false
 	for !sawRunning && time.Now().Before(runningDeadline) {
-		status, err := s.fetchMediaCrawlerStatus()
+		status, err := s.fetchMediaCrawlerStatus(platform)
 		if err != nil {
 			log.Printf("[CrawlerService] Failed to fetch MediaCrawler status: %v", err)
 		} else if status.Status == "running" || status.Status == "stopping" {
 			sawRunning = true
-			log.Printf("[CrawlerService] MediaCrawler entered %s state", status.Status)
+			log.Printf("[CrawlerService] MediaCrawler [%s] entered %s state", platform, status.Status)
 			break
 		} else if status.Status == "error" {
 			return fmt.Errorf("MediaCrawler error: %s", mediaCrawlerErrorMessage(status))
@@ -437,28 +438,28 @@ func (s *Service) waitMediaCrawlerIdle(timeout time.Duration) error {
 		time.Sleep(2 * time.Second)
 	}
 	if !sawRunning {
-		return fmt.Errorf("MediaCrawler did not enter running state within 30s")
+		return fmt.Errorf("MediaCrawler [%s] did not enter running state within 30s", platform)
 	}
 
 	for time.Now().Before(deadline) {
-		status, err := s.fetchMediaCrawlerStatus()
+		status, err := s.fetchMediaCrawlerStatus(platform)
 		if err != nil {
 			log.Printf("[CrawlerService] Failed to fetch MediaCrawler status: %v", err)
 		} else {
 			switch status.Status {
 			case "idle":
-				log.Printf("[CrawlerService] MediaCrawler finished (idle)")
+				log.Printf("[CrawlerService] MediaCrawler [%s] finished (idle)", platform)
 				return nil
 			case "error":
 				return fmt.Errorf("MediaCrawler error: %s", mediaCrawlerErrorMessage(status))
 			case "running", "stopping":
-				log.Printf("[CrawlerService] MediaCrawler still %s...", status.Status)
+				log.Printf("[CrawlerService] MediaCrawler [%s] still %s...", platform, status.Status)
 			}
 		}
 		time.Sleep(5 * time.Second)
 	}
 
-	return fmt.Errorf("timeout waiting for MediaCrawler to finish")
+	return fmt.Errorf("timeout waiting for MediaCrawler [%s] to finish", platform)
 }
 
 func mediaCrawlerErrorMessage(status *mediaCrawlerStatusResponse) string {
@@ -470,10 +471,15 @@ func mediaCrawlerErrorMessage(status *mediaCrawlerStatusResponse) string {
 
 // StopCrawler 向 MediaCrawler 发送停止信号并标记 run log 为 cancelled。
 // 设计为幂等：若 MediaCrawler 已 idle，stop 请求会被 400 拒绝，直接忽略。
-func (s *Service) StopCrawler(runID uint) {
-	log.Printf("[CrawlerService] Stopping MediaCrawler for runId=%d", runID)
+func (s *Service) StopCrawler(runID uint, platform string) {
+	log.Printf("[CrawlerService] Stopping MediaCrawler for runId=%d platform=%s", runID, platform)
 
-	req, err := http.NewRequest("POST", s.apiBaseURL+"/api/crawler/stop", nil)
+	stopURL := s.apiBaseURL + "/api/crawler/stop"
+	if platform != "" {
+		stopURL = fmt.Sprintf("%s/api/crawler/%s/stop", s.apiBaseURL, platform)
+	}
+
+	req, err := http.NewRequest("POST", stopURL, nil)
 	if err != nil {
 		log.Printf("[CrawlerService] Failed to build stop request: %v", err)
 	} else {
@@ -493,8 +499,12 @@ func (s *Service) StopCrawler(runID uint) {
 	}
 }
 
-func (s *Service) fetchMediaCrawlerStatus() (*mediaCrawlerStatusResponse, error) {
-	req, err := http.NewRequest("GET", s.apiBaseURL+"/api/crawler/status", nil)
+func (s *Service) fetchMediaCrawlerStatus(platform string) (*mediaCrawlerStatusResponse, error) {
+	statusURL := s.apiBaseURL + "/api/crawler/status"
+	if platform != "" {
+		statusURL = fmt.Sprintf("%s/api/crawler/%s/status", s.apiBaseURL, platform)
+	}
+	req, err := http.NewRequest("GET", statusURL, nil)
 	if err != nil {
 		return nil, err
 	}

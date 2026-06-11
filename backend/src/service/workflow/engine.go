@@ -46,9 +46,9 @@ type Engine struct {
 	cancelMu    sync.Mutex
 	cancelFuncs map[int64]context.CancelFunc
 
-	// 当前正在执行的节点：executionID → NodeExecutor（用于转发 OnCancel）
+	// 当前正在执行的节点：executionID → []NodeExecutor（支持并发多节点）
 	activeNodeMu sync.Mutex
-	activeNodes  map[int64]NodeExecutor
+	activeNodes  map[int64][]NodeExecutor
 }
 
 // NewEngine 创建工作流引擎
@@ -72,7 +72,7 @@ func NewEngine(
 		alertEngine:  alertEngine,
 		reportSvc:    reportSvc,
 		cancelFuncs:  make(map[int64]context.CancelFunc),
-		activeNodes:  make(map[int64]NodeExecutor),
+		activeNodes:  make(map[int64][]NodeExecutor),
 	}
 
 	// 注册所有节点
@@ -109,13 +109,9 @@ func (e *Engine) registerNodes() {
 }
 
 // CancelExecution 请求取消指定执行。若执行不存在或已结束返回 false。
-// 取消分两步：
-//  1. 调用注册的 cancel func 取消 context（所有依赖 ctx.Done 的阻塞点会退出）
-//  2. 通知当前正在执行的节点调用其 OnCancel（用于需要主动停止外部资源的节点，如爬虫）
 func (e *Engine) CancelExecution(executionID int64) bool {
-	// 先拿到当前节点，再 cancel（避免节点在 cancel 后还未读到 activeNodes）
 	e.activeNodeMu.Lock()
-	node, hasNode := e.activeNodes[executionID]
+	nodeList := append([]NodeExecutor(nil), e.activeNodes[executionID]...)
 	e.activeNodeMu.Unlock()
 
 	e.cancelMu.Lock()
@@ -126,13 +122,13 @@ func (e *Engine) CancelExecution(executionID int64) bool {
 		return false
 	}
 
-	// 先通知节点做清理（此时 ctx 还未 Done，节点内部可以做最后的操作）
-	if hasNode {
+	// 先通知所有活跃节点做清理
+	for _, node := range nodeList {
 		bgCtx := context.Background()
 		node.OnCancel(bgCtx)
 	}
 
-	// 再 cancel context，让阻塞的 WaitForCompletion / 轮询 退出
+	// 再 cancel context
 	cancel()
 	return true
 }
@@ -149,16 +145,22 @@ func (e *Engine) unregisterCancel(executionID int64) {
 	delete(e.cancelFuncs, executionID)
 }
 
-func (e *Engine) setActiveNode(executionID int64, node NodeExecutor) {
+func (e *Engine) addActiveNode(executionID int64, node NodeExecutor) {
 	e.activeNodeMu.Lock()
 	defer e.activeNodeMu.Unlock()
-	e.activeNodes[executionID] = node
+	e.activeNodes[executionID] = append(e.activeNodes[executionID], node)
 }
 
-func (e *Engine) clearActiveNode(executionID int64) {
+func (e *Engine) removeActiveNode(executionID int64, node NodeExecutor) {
 	e.activeNodeMu.Lock()
 	defer e.activeNodeMu.Unlock()
-	delete(e.activeNodes, executionID)
+	list := e.activeNodes[executionID]
+	for i, n := range list {
+		if n == node {
+			e.activeNodes[executionID] = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
 }
 
 // Execute 执行工作流
@@ -207,25 +209,20 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 		return nil, fmt.Errorf("failed to parse edges: %w", err)
 	}
 
-	// 4. 拓扑排序（确定执行顺序）
-	sortedNodes, err := e.topologicalSort(nodeList, edgeList)
+	// 4. 拓扑排序（按 wave 分层，同层可并发）
+	waves, err := e.topologicalWaves(nodeList, edgeList)
 	if err != nil {
 		e.updateExecutionStatus(execution.ID, "failed", err.Error())
 		return nil, err
 	}
 
-	// 5. 按顺序执行节点
+	// 5. 按 wave 执行节点（同一 wave 内并发）
 	nodeOutputs := make(map[string]map[string]interface{})
-	// outgoingActive[nodeID] 标记该节点的出边是否「有效」：
-	//   - 普通节点执行成功 → true
-	//   - condition 节点 → 取 conditionResult
-	//   - 被跳过的节点 → false
-	// 下游节点只有在「至少一条入边有效」时才会执行，从而实现条件分支。
 	outgoingActive := make(map[string]bool)
-	partialNodes := 0 // 节点 success 但内部有错误（partial_success）的计数
-	skippedNodes := 0 // 因上游条件不满足而被跳过的节点计数
+	partialNodes := 0
+	skippedNodes := 0
 
-	// 预计算每个节点是否有入边（无入边的起点节点始终执行）
+	// 预计算每个节点是否有入边
 	hasIncoming := make(map[string]bool)
 	for _, edge := range edgeList {
 		if t, ok := edge["target"].(string); ok {
@@ -234,88 +231,126 @@ func (e *Engine) Execute(ctx context.Context, workflowID int64, manualInput map[
 	}
 
 	e.logger.Info("starting node execution",
-		zap.Int("totalNodes", len(sortedNodes)))
+		zap.Int("totalNodes", len(nodeList)),
+		zap.Int("waves", len(waves)))
 
-	for _, node := range sortedNodes {
-		nodeID := node["id"].(string)
-		nodeType := e.resolveNodeType(node)
-
-		e.logger.Info("processing node",
-			zap.String("nodeId", nodeID),
-			zap.String("nodeType", nodeType))
-
-		// 在每个节点开始前检查取消
+	for _, wave := range waves {
+		// 检查取消
 		if err := execCtx.Err(); err != nil {
-			e.logger.Warn("workflow cancelled before node", zap.String("nodeId", nodeID))
 			e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
 			return execution, ErrCancelled
 		}
 
-		// 跳过 trigger 节点（trigger 只是起点标记）
-		if nodeType == "trigger" {
-			e.logger.Info("skipping trigger node", zap.String("nodeId", nodeID))
-			nodeOutputs[nodeID] = manualInput
-			outgoingActive[nodeID] = true
+		// 预处理 wave：分出需要真正执行的节点
+		var toExecute []map[string]interface{}
+		for _, node := range wave {
+			nodeID := node["id"].(string)
+			nodeType := e.resolveNodeType(node)
+
+			if nodeType == "trigger" {
+				nodeOutputs[nodeID] = manualInput
+				outgoingActive[nodeID] = true
+				continue
+			}
+
+			if hasIncoming[nodeID] && !hasActiveIncoming(nodeID, edgeList, outgoingActive) {
+				outgoingActive[nodeID] = false
+				skippedNodes++
+				e.recordSkippedNode(execution.ID, nodeID)
+				continue
+			}
+
+			toExecute = append(toExecute, node)
+		}
+
+		if len(toExecute) == 0 {
 			continue
 		}
 
-		// 条件分支：若该节点有入边但没有任何一条「有效」入边，则跳过
-		// （上游 condition 判否，或上游本身被跳过）。
-		if hasIncoming[nodeID] && !hasActiveIncoming(nodeID, edgeList, outgoingActive) {
-			e.logger.Info("skipping node: no active upstream branch",
-				zap.String("nodeId", nodeID),
-				zap.String("nodeType", nodeType))
-			outgoingActive[nodeID] = false
-			skippedNodes++
-			e.recordSkippedNode(execution.ID, nodeID)
+		// 单节点直接串行执行
+		if len(toExecute) == 1 {
+			node := toExecute[0]
+			nodeID := node["id"].(string)
+			nodeType := e.resolveNodeType(node)
+			input := e.collectInputs(nodeID, edgeList, nodeOutputs)
+
+			output, err := e.executeNode(execCtx, execution.ID, node, input)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(execCtx.Err(), context.Canceled) {
+					e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
+					return execution, ErrCancelled
+				}
+				e.updateExecutionStatus(execution.ID, "failed", err.Error())
+				return execution, err
+			}
+
+			if output != nil {
+				if s, ok := output["status"].(string); ok && (s == "partial_success" || s == "partial") {
+					partialNodes++
+				}
+			}
+			nodeOutputs[nodeID] = output
+			if nodeType == "condition" {
+				outgoingActive[nodeID] = conditionPassed(output)
+			} else {
+				outgoingActive[nodeID] = true
+			}
 			continue
 		}
 
-		// 获取上游节点的输出作为输入
-		input := e.collectInputs(nodeID, edgeList, nodeOutputs)
+		// 多节点并发执行
+		type nodeResult struct {
+			nodeID  string
+			output  map[string]interface{}
+			err     error
+		}
 
-		e.logger.Info("executing node",
-			zap.String("nodeId", nodeID),
-			zap.String("nodeType", nodeType),
-			zap.Any("input", input),
-			zap.Int("inputKeys", len(input)))
+		waveCtx, waveCancel := context.WithCancel(execCtx)
+		results := make([]nodeResult, len(toExecute))
+		var wg sync.WaitGroup
 
-		// 执行节点
-		output, err := e.executeNode(execCtx, execution.ID, node, input)
-		if err != nil {
-			// 区分「取消」与「失败」
-			if errors.Is(err, context.Canceled) || errors.Is(execCtx.Err(), context.Canceled) {
-				e.logger.Warn("node cancelled", zap.String("nodeId", nodeID))
-				e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
-				return execution, ErrCancelled
+		for i, node := range toExecute {
+			wg.Add(1)
+			go func(idx int, n map[string]interface{}) {
+				defer wg.Done()
+				nID := n["id"].(string)
+				input := e.collectInputs(nID, edgeList, nodeOutputs)
+				output, err := e.executeNode(waveCtx, execution.ID, n, input)
+				results[idx] = nodeResult{nodeID: nID, output: output, err: err}
+				if err != nil {
+					waveCancel()
+				}
+			}(i, node)
+		}
+		wg.Wait()
+		waveCancel()
+
+		// 处理并发结果
+		for i, node := range toExecute {
+			res := results[i]
+			nodeType := e.resolveNodeType(node)
+
+			if res.err != nil {
+				if errors.Is(res.err, context.Canceled) || errors.Is(execCtx.Err(), context.Canceled) {
+					e.updateExecutionStatus(execution.ID, "cancelled", "用户取消")
+					return execution, ErrCancelled
+				}
+				e.updateExecutionStatus(execution.ID, "failed", res.err.Error())
+				return execution, res.err
 			}
-			e.logger.Error("node execution failed",
-				zap.String("nodeId", nodeID),
-				zap.Error(err))
-			e.updateExecutionStatus(execution.ID, "failed", err.Error())
-			return execution, err
-		}
 
-		// 节点产出里若包含 status=partial_success/skipped，记录到聚合状态
-		if output != nil {
-			if s, ok := output["status"].(string); ok && (s == "partial_success" || s == "partial") {
-				partialNodes++
+			if res.output != nil {
+				if s, ok := res.output["status"].(string); ok && (s == "partial_success" || s == "partial") {
+					partialNodes++
+				}
+			}
+			nodeOutputs[res.nodeID] = res.output
+			if nodeType == "condition" {
+				outgoingActive[res.nodeID] = conditionPassed(res.output)
+			} else {
+				outgoingActive[res.nodeID] = true
 			}
 		}
-
-		nodeOutputs[nodeID] = output
-
-		// 记录出边有效性：condition 节点按 conditionResult，其它节点默认有效。
-		if nodeType == "condition" {
-			outgoingActive[nodeID] = conditionPassed(output)
-		} else {
-			outgoingActive[nodeID] = true
-		}
-
-		e.logger.Info("node execution succeeded",
-			zap.String("nodeId", nodeID),
-			zap.Any("output", output),
-			zap.Int("outputKeys", len(output)))
 	}
 
 	// 6. 更新执行状态
@@ -383,8 +418,8 @@ func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[st
 	}
 
 	// 注册为当前活跃节点，用于转发 OnCancel
-	e.setActiveNode(executionID, executor)
-	defer e.clearActiveNode(executionID)
+	e.addActiveNode(executionID, executor)
+	defer e.removeActiveNode(executionID, executor)
 
 	// 注入进度回调：节点内部调用 nodes.ProgressFunc(ctx)(msg) 即可追加进度到 output
 	ctx = nodes.WithProgressFunc(ctx, func(msg string) {
@@ -430,9 +465,21 @@ func (e *Engine) executeNode(ctx context.Context, executionID int64, node map[st
 	return output, nil
 }
 
-// topologicalSort 拓扑排序
+// topologicalSort 拓扑排序（平铺列表，兼容 ExecuteFromNode 等旧路径）
 func (e *Engine) topologicalSort(nodeList []map[string]interface{}, edgeList []map[string]interface{}) ([]map[string]interface{}, error) {
-	// 构建邻接表和入度表
+	waves, err := e.topologicalWaves(nodeList, edgeList)
+	if err != nil {
+		return nil, err
+	}
+	var flat []map[string]interface{}
+	for _, wave := range waves {
+		flat = append(flat, wave...)
+	}
+	return flat, nil
+}
+
+// topologicalWaves 按层级拓扑排序，返回 wave 分组（同一 wave 内节点可并发执行）
+func (e *Engine) topologicalWaves(nodeList []map[string]interface{}, edgeList []map[string]interface{}) ([][]map[string]interface{}, error) {
 	adjList := make(map[string][]string)
 	inDegree := make(map[string]int)
 	nodeMap := make(map[string]map[string]interface{})
@@ -450,37 +497,45 @@ func (e *Engine) topologicalSort(nodeList []map[string]interface{}, edgeList []m
 		inDegree[target]++
 	}
 
-	// Kahn算法进行拓扑排序
-	queue := []string{}
+	// Kahn 算法，按 wave 分层
+	var queue []string
 	for nodeID, degree := range inDegree {
 		if degree == 0 {
 			queue = append(queue, nodeID)
 		}
 	}
 
-	sorted := []map[string]interface{}{}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		sorted = append(sorted, nodeMap[current])
+	var waves [][]map[string]interface{}
+	visited := 0
 
-		for _, neighbor := range adjList[current] {
-			inDegree[neighbor]--
-			if inDegree[neighbor] == 0 {
-				queue = append(queue, neighbor)
+	for len(queue) > 0 {
+		wave := make([]map[string]interface{}, 0, len(queue))
+		for _, id := range queue {
+			wave = append(wave, nodeMap[id])
+		}
+		waves = append(waves, wave)
+		visited += len(queue)
+
+		var nextQueue []string
+		for _, current := range queue {
+			for _, neighbor := range adjList[current] {
+				inDegree[neighbor]--
+				if inDegree[neighbor] == 0 {
+					nextQueue = append(nextQueue, neighbor)
+				}
 			}
 		}
+		queue = nextQueue
 	}
 
-	// 检测循环依赖
-	if len(sorted) != len(nodeList) {
+	if visited != len(nodeList) {
 		return nil, fmt.Errorf("workflow contains circular dependency")
 	}
 
-	return sorted, nil
+	return waves, nil
 }
 
-// collectInputs 收集上游节点的输出
+// collectInputs 收集上游节点的输出，对 slice 类型字段做 append 合并（支持并发节点输出汇聚）
 func (e *Engine) collectInputs(nodeID string, edgeList []map[string]interface{}, outputs map[string]map[string]interface{}) map[string]interface{} {
 	input := make(map[string]interface{})
 
@@ -488,8 +543,37 @@ func (e *Engine) collectInputs(nodeID string, edgeList []map[string]interface{},
 		if edge["target"].(string) == nodeID {
 			sourceID := edge["source"].(string)
 			if output, ok := outputs[sourceID]; ok {
-				// 合并上游输出
 				for k, v := range output {
+					existing, exists := input[k]
+					if !exists {
+						input[k] = v
+						continue
+					}
+					// 对 []interface{} 类型做 append 合并
+					if existSlice, ok := existing.([]interface{}); ok {
+						if newSlice, ok := v.([]interface{}); ok {
+							input[k] = append(existSlice, newSlice...)
+							continue
+						}
+					}
+					// 对 []string 类型做 append 合并
+					if existSlice, ok := existing.([]string); ok {
+						if newSlice, ok := v.([]string); ok {
+							input[k] = append(existSlice, newSlice...)
+							continue
+						}
+					}
+					// 对 map[string]interface{} 类型做 key-level merge
+					if existMap, ok := existing.(map[string]interface{}); ok {
+						if newMap, ok := v.(map[string]interface{}); ok {
+							for mk, mv := range newMap {
+								existMap[mk] = mv
+							}
+							input[k] = existMap
+							continue
+						}
+					}
+					// 标量：后写覆盖
 					input[k] = v
 				}
 			}

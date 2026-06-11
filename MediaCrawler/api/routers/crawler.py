@@ -1,67 +1,114 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2025 relakkes@gmail.com
-#
-# This file is part of MediaCrawler project.
-# Repository: https://github.com/NanmiCoder/MediaCrawler/blob/main/api/routers/crawler.py
-# GitHub: https://github.com/NanmiCoder
-# Licensed under NON-COMMERCIAL LEARNING LICENSE 1.1
-#
-# 声明：本代码仅供学习和研究目的使用。使用者应遵守以下原则：
-# 1. 不得用于任何商业用途。
-# 2. 使用时应遵守目标平台的使用条款和robots.txt规则。
-# 3. 不得进行大规模爬取或对平台造成运营干扰。
-# 4. 应合理控制请求频率，避免给目标平台带来不必要的负担。
-# 5. 不得用于任何非法或不当的用途。
-#
-# 详细许可条款请参阅项目根目录下的LICENSE文件。
-# 使用本代码即表示您同意遵守上述原则和LICENSE中的所有条款。
+from typing import List
 
 from fastapi import APIRouter, HTTPException
 
 from ..schemas import CrawlerStartRequest, CrawlerStatusResponse
-from ..services import crawler_manager
+from ..services import crawler_manager, crawler_registry
 
 router = APIRouter(prefix="/crawler", tags=["crawler"])
 
 
+# ==================== Per-platform routes ====================
+
+@router.post("/{platform}/start")
+async def start_crawler_platform(platform: str, request: CrawlerStartRequest):
+    """Start crawler task for a specific platform"""
+    mgr = crawler_registry.get(platform)
+    success = await mgr.start(request)
+    if not success:
+        if mgr.process and mgr.process.poll() is None:
+            raise HTTPException(status_code=400, detail=f"Crawler for {platform} is already running")
+        raise HTTPException(status_code=500, detail=f"Failed to start crawler for {platform}")
+    return {"status": "ok", "message": f"Crawler started for {platform}"}
+
+
+@router.post("/{platform}/stop")
+async def stop_crawler_platform(platform: str):
+    """Stop crawler task for a specific platform"""
+    mgr = crawler_registry.get(platform)
+    success = await mgr.stop()
+    if not success:
+        if not mgr.process or mgr.process.poll() is not None:
+            raise HTTPException(status_code=400, detail=f"No crawler running for {platform}")
+        raise HTTPException(status_code=500, detail=f"Failed to stop crawler for {platform}")
+    return {"status": "ok", "message": f"Crawler stopped for {platform}"}
+
+
+@router.get("/{platform}/status", response_model=CrawlerStatusResponse)
+async def get_crawler_status_platform(platform: str):
+    """Get crawler status for a specific platform"""
+    mgr = crawler_registry.get(platform)
+    return mgr.get_status()
+
+
+@router.get("/{platform}/logs")
+async def get_logs_platform(platform: str, limit: int = 100):
+    """Get recent logs for a specific platform"""
+    mgr = crawler_registry.get(platform)
+    logs = mgr.logs[-limit:] if limit > 0 else mgr.logs
+    return {"logs": [log.model_dump() for log in logs]}
+
+
+# ==================== Aggregated routes ====================
+
+@router.get("/status/all")
+async def get_all_status():
+    """Get status of all platform crawlers"""
+    return {"platforms": crawler_registry.get_all_status()}
+
+
+@router.post("/stop/all")
+async def stop_all_crawlers():
+    """Stop all running crawlers"""
+    count = await crawler_registry.stop_all()
+    return {"status": "ok", "stopped_count": count}
+
+
+# ==================== Legacy routes (backward-compatible) ====================
+
 @router.post("/start")
 async def start_crawler(request: CrawlerStartRequest):
-    """Start crawler task"""
-    success = await crawler_manager.start(request)
+    """Start crawler task (legacy, uses platform from request body)"""
+    platform = request.platform.value
+    mgr = crawler_registry.get(platform)
+    success = await mgr.start(request)
     if not success:
-        # Handle concurrent/duplicate requests: if process is already running, return 400 instead of 500
-        if crawler_manager.process and crawler_manager.process.poll() is None:
+        if mgr.process and mgr.process.poll() is None:
             raise HTTPException(status_code=400, detail="Crawler is already running")
         raise HTTPException(status_code=500, detail="Failed to start crawler")
-
     return {"status": "ok", "message": "Crawler started successfully"}
 
 
 @router.post("/stop")
 async def stop_crawler():
-    """Stop crawler task"""
-    success = await crawler_manager.stop()
+    """Stop crawler task (legacy, stops first running)"""
+    running = crawler_registry.get_running()
+    if not running:
+        raise HTTPException(status_code=400, detail="No crawler is running")
+    success = await running[0].stop()
     if not success:
-        # Handle concurrent/duplicate requests: if process already exited/doesn't exist, return 400 instead of 500
-        if not crawler_manager.process or crawler_manager.process.poll() is not None:
-            raise HTTPException(status_code=400, detail="No crawler is running")
         raise HTTPException(status_code=500, detail="Failed to stop crawler")
-
     return {"status": "ok", "message": "Crawler stopped successfully"}
 
 
 @router.get("/status", response_model=CrawlerStatusResponse)
 async def get_crawler_status():
-    """Get crawler status"""
-    return crawler_manager.get_status()
+    """Get crawler status (legacy, returns first running or idle)"""
+    running = crawler_registry.get_running()
+    if running:
+        return running[0].get_status()
+    return {"status": "idle", "platform": None, "crawler_type": None, "started_at": None, "error_message": None}
 
 
 @router.get("/logs")
 async def get_logs(limit: int = 100):
-    """Get recent logs"""
-    logs = crawler_manager.logs[-limit:] if limit > 0 else crawler_manager.logs
+    """Get recent logs (legacy, returns aggregated)"""
+    logs = crawler_registry.get_all_logs(limit)
     return {"logs": [log.model_dump() for log in logs]}
 
+
+# ==================== Utility routes ====================
 
 @router.get("/platforms")
 async def get_platforms():

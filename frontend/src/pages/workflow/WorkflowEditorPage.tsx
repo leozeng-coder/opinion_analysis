@@ -467,11 +467,6 @@ function validateWorkflowGraph(
     }
   })
 
-  // 6. 多个起始节点
-  if (sourceNodes.length > 1) {
-    warnings.push(`存在 ${sourceNodes.length} 个起始节点，工作流将依次执行所有爬虫，请确认是否符合预期`)
-  }
-
   return warnings
 }
 
