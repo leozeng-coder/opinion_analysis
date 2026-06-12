@@ -335,9 +335,7 @@ class BilibiliClient(AbstractApiClient, ProxyRefreshMixin):
                 await callback(video_id, comment_list)
             sleep_time = utils.get_random_sleep_time(crawl_interval)
             await asyncio.sleep(sleep_time)
-            if not is_fetch_sub_comments:
-                result.extend(comment_list)
-                continue
+            result.extend(comment_list)
         return result
 
     async def get_video_all_level_two_comments(
