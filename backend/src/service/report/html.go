@@ -36,6 +36,12 @@ type topicCard struct {
 	MedianAgeDays int
 	DateRange     string // "2024-01-01 ~ 2024-06-01"
 	HasOldWarning bool
+	// 结构化字段（Phase 3 新增）
+	CoreSummary string
+	KeyFindings []string
+	RiskLevel   string
+	RiskNote    string
+	Opportunity string
 }
 
 type htmlData struct {
@@ -67,7 +73,12 @@ type htmlData struct {
 	ChartColorsJSON     template.JS
 	TopicCards          []topicCard
 	Conclusion          string
+	ConclusionJSON      template.JS // 结构化结论
+	HasStructConclusion bool
+	GlobalInsightJSON   template.JS // 全局矛盾/风险
+	HasGlobalInsight    bool
 	TopicBubbleJSON     template.JS
+
 	TagCloudJSON        template.JS
 	ChartVariantJSON    template.JS
 	HasCommentAnalysis  bool
@@ -76,15 +87,15 @@ type htmlData struct {
 	HotCommentsJSON     template.JS
 	CommentTrendJSON    template.JS
 	CommentPlatformJSON template.JS
-	ArticleDeepJSON     template.JS // Phase 2 文章细致分析
-	HasDeepAnalysis     bool
+	IsDeepMode          bool
 }
 
-func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummaries map[string]string, briefings []ArticleBriefing, deepAnalysis []ArticleDeepAnalysis, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, htmlTheme string, commentAnalysis *CommentAnalysis) (string, error) {
+func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummaries map[string]string, crawlerRunID uint, platforms []string, topics []string, cfg config.TaggerConfig, apiKeySet bool, htmlTheme string, commentAnalysis *CommentAnalysis, topicSummariesStructured map[string]*TopicSummaryStructured, conclusionStructured *ConclusionStructured, globalInsight *GlobalInsight, deepMode bool) (string, error) {
 	theme := pickReportTheme(htmlTheme)
 
+	// 旧版纯文本结论作为 fallback
 	var conclusion string
-	if apiKeySet {
+	if conclusionStructured == nil && apiKeySet {
 		var err error
 		conclusion, err = s.buildConclusion(ctx, stats, groupSummaries, cfg)
 		if err != nil {
@@ -101,7 +112,7 @@ func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummarie
 		if !g.EarliestDate.IsZero() {
 			dateRange = g.EarliestDate.Format("2006-01-02") + " ~ " + g.LatestDate.Format("2006-01-02")
 		}
-		cards = append(cards, topicCard{
+		card := topicCard{
 			Topic:         g.Topic,
 			Count:         g.Count,
 			WeightedScore: g.WeightedScore,
@@ -116,7 +127,15 @@ func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummarie
 			MedianAgeDays: g.MedianAgeDays,
 			DateRange:     dateRange,
 			HasOldWarning: g.Count > 0 && float64(g.OldCount)/float64(g.Count) > 0.4,
-		})
+		}
+		if structured, ok := topicSummariesStructured[g.Topic]; ok && structured != nil {
+			card.CoreSummary = structured.CoreSummary
+			card.KeyFindings = structured.KeyFindings
+			card.RiskLevel = structured.RiskLevel
+			card.RiskNote = structured.RiskNote
+			card.Opportunity = structured.Opportunity
+		}
+		cards = append(cards, card)
 	}
 
 	var topArticles []topArticle
@@ -173,8 +192,23 @@ func (s *Service) buildHTML(ctx context.Context, stats crawlStats, groupSummarie
 		TopicBubbleJSON:   template.JS(buildTopicBubbleJSON(stats.TopGroups, stats.TopicSentiment)),
 		TagCloudJSON:      template.JS(buildTopTagsJSON(stats.TagFreq, 25)),
 		ChartVariantJSON:  template.JS(mustJSON(theme.Variant)),
-		HasDeepAnalysis:   len(deepAnalysis) > 0,
-		ArticleDeepJSON:   template.JS(mustJSON(deepAnalysis)),
+		IsDeepMode:        deepMode,
+	}
+
+	// 结构化结论
+	if conclusionStructured != nil {
+		d.HasStructConclusion = true
+		d.ConclusionJSON = template.JS(mustJSON(conclusionStructured))
+	} else {
+		d.ConclusionJSON = template.JS("null")
+	}
+
+	// 全局矛盾/风险
+	if globalInsight != nil {
+		d.HasGlobalInsight = true
+		d.GlobalInsightJSON = template.JS(mustJSON(globalInsight))
+	} else {
+		d.GlobalInsightJSON = template.JS("null")
 	}
 
 	if commentAnalysis != nil {

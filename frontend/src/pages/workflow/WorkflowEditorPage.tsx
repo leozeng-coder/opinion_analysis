@@ -339,6 +339,14 @@ export const NODE_REGISTRY = {
     icon: '📊',
     configSchema: [
       {
+        name: 'deepMode',
+        label: '深度分析模式',
+        type: 'boolean',
+        required: false,
+        default: false,
+        description: '开启后全量分析所有文章和评论，深度挖掘用户需求（耗时较长，不限token）',
+      },
+      {
         name: 'format',
         label: '报告格式',
         type: 'select',
@@ -368,21 +376,31 @@ export const NODE_REGISTRY = {
           { label: '✨ 琥珀金', value: '琥珀金' },
         ],
       },
-      { type: 'group-label', label: '文章分析', name: '_grp_article' },
+      { type: 'group-label', label: '文章分析（抽样模式）', name: '_grp_article', hideIf: { field: 'deepMode', value: true } },
       {
         type: 'number-pair', name: '_pair_article',
+        hideIf: { field: 'deepMode', value: true },
         items: [
           { name: 'maxGroups', label: '话题组数', default: 5, min: 1, max: 10, placeholder: '按标签频次取前N组' },
           { name: 'sampleSize', label: '每组样本数', default: 8, min: 3, max: 20, placeholder: '每话题组送入LLM的代表文章数' },
         ],
       },
-      { type: 'group-label', label: '评论分析', name: '_grp_comment' },
+      { type: 'group-label', label: '评论分析（抽样模式）', name: '_grp_comment', hideIf: { field: 'deepMode', value: true } },
       {
         type: 'number-pair', name: '_pair_comment',
+        hideIf: { field: 'deepMode', value: true },
         items: [
           { name: 'maxTopicCards', label: '话题卡片数', default: 8, min: 1, max: 20, placeholder: '最多展示几个话题卡片' },
           { name: 'commentSampleSize', label: '每题分析条数', default: 18, min: 5, max: 50, placeholder: '每话题送入LLM的评论数' },
         ],
+      },
+      {
+        name: 'autoDownload',
+        label: '生成后自动下载',
+        type: 'boolean',
+        required: false,
+        default: false,
+        description: '报告生成完成后自动触发浏览器下载',
       },
     ],
   },
@@ -1438,11 +1456,42 @@ const WorkflowEditorPage: React.FC = () => {
       if (exec && exec.status !== 'running') {
         stopPolling()
         setIsExecuting(false)
+
+        // 自动下载报告（如果节点配置了 autoDownload）
+        if (exec.status === 'success' || exec.status === 'partial_success') {
+          const reportLog = (logs || []).find((l: any) => l.output?.reportId)
+          if (reportLog) {
+            const reportNodeId = reportLog.nodeId
+            const reportNode = nodes.find((n) => n.id === reportNodeId)
+            const nodeConfig = (reportNode?.data as any)?.config
+            if (nodeConfig?.autoDownload) {
+              const rId = reportLog.output!.reportId as string
+              const rFmt = reportLog.output!.reportFormat as string
+              setTimeout(async () => {
+                try {
+                  const token = useAuthStore.getState().token
+                  const resp = await fetch(`/api/reports/${rId}/download`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                  })
+                  if (!resp.ok) return
+                  const blob = await resp.blob()
+                  const ext = rFmt === 'html' ? 'html' : 'md'
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `report-${rId.slice(0, 8)}.${ext}`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch {}
+              }, 500)
+            }
+          }
+        }
       }
     } catch (error) {
       // 轮询失败静默处理，下一轮重试
     }
-  }, [id, hasCrawlerNode, stopPolling])
+  }, [id, hasCrawlerNode, stopPolling, nodes])
 
   const startMonitor = useCallback(
     (execId: number) => {
@@ -1916,6 +1965,7 @@ const WorkflowEditorPage: React.FC = () => {
   // 节点配置抽屉：监听 crawlerType / format，用于条件性显示字段
   const watchedNodeCrawlerType = Form.useWatch('crawlerType', nodeConfigForm)
   const watchedNodeFormat = Form.useWatch('format', nodeConfigForm)
+  const watchedNodeDeepMode = Form.useWatch('deepMode', nodeConfigForm)
 
   // 节点执行状态映射：nodeId → status，供画布节点渲染流光/徽章效果
   const nodeStatusMap = React.useMemo(() => {
@@ -2710,6 +2760,7 @@ const WorkflowEditorPage: React.FC = () => {
                 const watchedValues: Record<string, any> = {
                   crawlerType: watchedNodeCrawlerType,
                   format: watchedNodeFormat,
+                  deepMode: watchedNodeDeepMode,
                 }
                 const cur = watchedValues[depField]
                 if (depValues !== undefined) {
@@ -2717,6 +2768,18 @@ const WorkflowEditorPage: React.FC = () => {
                 } else if (depValue !== undefined) {
                   if (cur !== depValue) return null
                 }
+              }
+
+              // hideIf 条件渲染：showIf 的反向
+              if ((fieldConfig as any).hideIf) {
+                const { field: depField, value: depValue } = (fieldConfig as any).hideIf
+                const watchedValues: Record<string, any> = {
+                  crawlerType: watchedNodeCrawlerType,
+                  format: watchedNodeFormat,
+                  deepMode: watchedNodeDeepMode,
+                }
+                const cur = watchedValues[depField]
+                if (cur === depValue) return null
               }
 
               // 分组标题

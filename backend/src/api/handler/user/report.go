@@ -225,6 +225,7 @@ func (h *ReportHandler) Regenerate(c *gin.Context) {
 		maxGroups,
 		maxTopicCards,
 		commentSampleSize,
+		false,
 	)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, "regenerate report failed: "+err.Error())

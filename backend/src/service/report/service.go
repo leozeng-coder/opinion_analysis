@@ -82,6 +82,30 @@ type ArticleBriefing struct {
 	Tags        []string  `json:"tags"`
 }
 
+// TopicSummaryStructured Phase 3 结构化话题摘要
+type TopicSummaryStructured struct {
+	CoreSummary string   `json:"coreSummary"` // 一句话核心结论
+	KeyFindings []string `json:"keyFindings"` // 3-4 条要点
+	RiskLevel   string   `json:"riskLevel"`   // high/medium/low
+	RiskNote    string   `json:"riskNote"`    // 风险说明
+	Opportunity string   `json:"opportunity"` // 正面机遇信号
+}
+
+// GlobalInsight Phase 1.5 全局矛盾/风险聚合
+type GlobalInsight struct {
+	TopRisks       []string `json:"topRisks"`       // 最突出的风险信号
+	Contradictions []string `json:"contradictions"` // 观点矛盾点
+	Trends         []string `json:"trends"`         // 趋势信号
+}
+
+// ConclusionStructured 结构化结论
+type ConclusionStructured struct {
+	Situation    string   `json:"situation"`    // 整体态势(1句)
+	Risks        []string `json:"risks"`        // 风险信号
+	Opportunities []string `json:"opportunities"` // 正面机遇
+	Actions      []string `json:"actions"`      // 行动建议
+}
+
 // ArticleDeepAnalysis 文章细致分析结果
 type ArticleDeepAnalysis struct {
 	ArticleID      uint     `json:"articleId"`
@@ -139,7 +163,7 @@ func NewService(db *gorm.DB, rdb *redis.Client, taggerSvc *tagger.Service) *Serv
 }
 
 // Generate 生成分析报告，返回 reportID
-func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID uint, platforms []string, topics []string, format Format, htmlTheme string, sampleSize int, maxGroups int, maxTopicCards int, commentSampleSize int) (string, error) {
+func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID uint, platforms []string, topics []string, format Format, htmlTheme string, sampleSize int, maxGroups int, maxTopicCards int, commentSampleSize int, deepMode bool) (string, error) {
 	if sampleSize <= 0 {
 		sampleSize = 8
 	}
@@ -157,6 +181,10 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	progress(fmt.Sprintf("开始生成报告 — 文章 %d 篇，格式 %s", len(articleIDs), format))
 	log.Printf("[Report] 开始生成报告 — 运行ID=%d, 文章数=%d, 格式=%s", crawlerRunID, len(articleIDs), format)
 
+	// 全局 token 计数器（两种模式共用）
+	globalTC := &TokenCounter{}
+	ctx = WithTokenCounter(ctx, globalTC)
+
 	// Step1: 批量查文章
 	var articles []model.Article
 	if err := s.db.WithContext(ctx).Where("id IN ?", articleIDs).Find(&articles).Error; err != nil {
@@ -165,6 +193,9 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	if len(articles) == 0 {
 		return "", fmt.Errorf("no articles found for the given IDs")
 	}
+
+	// 数据预处理：过滤无效数据（两种模式共用）
+	articles = filterInvalidArticles(articles)
 
 	// Step1: 统计评论数 + 查评论
 	var commentCount int64
@@ -175,12 +206,13 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	s.db.WithContext(ctx).Model(&model.ArticleComment{}).Where("article_id IN ?", articleIDsUint).Count(&commentCount)
 	var comments []model.ArticleComment
 	s.db.WithContext(ctx).Where("article_id IN ?", articleIDsUint).Order("like_count DESC").Find(&comments)
+	comments = filterInvalidComments(comments)
 
-	progress(fmt.Sprintf("数据加载完成 — 文章 %d 篇，评论 %d 条", len(articles), commentCount))
-	log.Printf("[Report] 数据查询完成 — 文章 %d 篇, 评论 %d 条", len(articles), commentCount)
+	progress(fmt.Sprintf("数据加载完成 — 文章 %d 篇，评论 %d 条", len(articles), len(comments)))
+	log.Printf("[Report] 数据查询完成 — 文章 %d 篇, 评论 %d 条", len(articles), len(comments))
 
 	// Step1: 程序统计
-	stats := s.computeStats(articles, int(commentCount), sampleSize, maxGroups)
+	stats := s.computeStats(articles, len(comments), sampleSize, maxGroups)
 	log.Printf("[Report] 统计完成 — 初始话题组 %d 个, 正面=%d 中性=%d 负面=%d",
 		len(stats.TopGroups),
 		stats.SentimentDist["positive"],
@@ -192,8 +224,49 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	var briefings []ArticleBriefing
 	var deepAnalysis []ArticleDeepAnalysis
 	var commentAnalysis *CommentAnalysis
+	var globalInsight *GlobalInsight
+	var topicSummariesStructured map[string]*TopicSummaryStructured
+	var conclusionStructured *ConclusionStructured
+	var totalTokensUsed int
 
-	if apiKeySet {
+	if deepMode && apiKeySet {
+		// ═══ 深度分析路径 ═══
+		log.Printf("[Report] 深度分析模式 — 开始全量挖掘")
+		progress("深度分析模式：全量挖掘中...")
+		tc := &TokenCounter{}
+
+		// 步骤②：全量深度挖掘
+		insights := s.deepAnalyzeAll(ctx, articles, comments, stats, cfg, tc)
+
+		// 步骤③：语义聚类
+		progress("语义聚类中...")
+		clusters := s.clusterInsights(ctx, insights, cfg, tc)
+
+		// 步骤④：LLM 质量评估+排序
+		progress("质量评估与排序...")
+		clusters = s.evaluateAndRank(ctx, clusters, cfg, tc)
+
+		// 步骤⑤：转换为渲染结构
+		topicSummariesStructured, groupSummaries = s.convertToReportData(clusters, &stats)
+
+		// 评论按 cluster 精确归类分析
+		progress("评论深度归类分析...")
+		commentAnalysis = s.deepCommentAnalysis(ctx, clusters, comments, articles, cfg, tc)
+
+		// 结论
+		progress("生成综合结论...")
+		cs, err := s.buildConclusionStructured(ctx, stats, topicSummariesStructured, nil, cfg)
+		if err != nil {
+			log.Printf("[Report] 深度模式结论失败: %v", err)
+		} else {
+			conclusionStructured = cs
+		}
+
+		progress(fmt.Sprintf("深度分析完成 · 消耗 %s", tc.Summary()))
+		log.Printf("[Report] 深度分析完成 — %d 个话题组, %s", len(clusters), tc.Summary())
+		totalTokensUsed = tc.Total()
+
+	} else if apiKeySet {
 		// Phase 1+2+评论分析 并发执行
 		var wg sync.WaitGroup
 		var mu sync.Mutex
@@ -210,20 +283,6 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 			mu.Unlock()
 			progress(fmt.Sprintf("文章观点提炼完成 — %d 条", len(b)))
 			log.Printf("[Report] Phase 1 完成 — 获得 %d 条文章观点", len(b))
-		}()
-
-		// Phase 2: 文章细致分析（Top 影响力 × 时效加权）
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			progress("深度分析 Top 12 高影响力文章...")
-			log.Printf("[Report] Phase 2: 深度分析 Top 12 文章...")
-			d := s.deepAnalyzeTopArticles(ctx, articles, stats.RefDate, cfg, 12)
-			mu.Lock()
-			deepAnalysis = d
-			mu.Unlock()
-			progress(fmt.Sprintf("深度解析完成 — %d 篇", len(d)))
-			log.Printf("[Report] Phase 2 完成 — 深度分析 %d 篇", len(d))
 		}()
 
 		// 评论分析
@@ -245,6 +304,19 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 		wg.Wait()
 		log.Printf("[Report] Phase 1+2+评论分析全部完成")
 
+		// Phase 1.5: 全局矛盾/风险聚合（基于 Phase 1 结果）
+		if len(briefings) > 0 {
+			progress("全局风险与矛盾分析...")
+			log.Printf("[Report] Phase 1.5: 全局矛盾检测...")
+			globalInsight = s.globalAnalyzeInsights(ctx, briefings, stats, cfg)
+			if globalInsight != nil {
+				progress(fmt.Sprintf("全局分析完成 — %d 风险, %d 矛盾, %d 趋势",
+					len(globalInsight.TopRisks), len(globalInsight.Contradictions), len(globalInsight.Trends)))
+				log.Printf("[Report] Phase 1.5 完成 — 风险%d 矛盾%d 趋势%d",
+					len(globalInsight.TopRisks), len(globalInsight.Contradictions), len(globalInsight.Trends))
+			}
+		}
+
 		// Phase 2.5: 基于分析结果，按舆情观点重新聚类话题
 		if len(briefings) > 0 {
 			progress(fmt.Sprintf("舆情观点聚类 %d 篇文章...", len(articles)))
@@ -261,12 +333,44 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 			}
 		}
 
-		// Phase 3: 话题深度分析（用分析结果增强 prompt）
+		// Phase 3: 话题深度分析
 		progress(fmt.Sprintf("话题深度分析 %d 个话题...", len(stats.TopGroups)))
 		log.Printf("[Report] Phase 3: 话题深度分析 %d 个话题...", len(stats.TopGroups))
-		groupSummaries = s.summarizeGroups(ctx, stats.TopGroups, briefings, cfg)
-		progress("话题分析完成，开始渲染报告...")
+		topicSummariesStructured = s.summarizeGroupsStructured(ctx, stats.TopGroups, briefings, globalInsight, cfg)
+		// 生成纯文本版本用于 Markdown
+		for topic, ts := range topicSummariesStructured {
+			if ts == nil {
+				continue
+			}
+			var text strings.Builder
+			text.WriteString(ts.CoreSummary)
+			if len(ts.KeyFindings) > 0 {
+				text.WriteString("\n")
+				for _, f := range ts.KeyFindings {
+					text.WriteString("- " + f + "\n")
+				}
+			}
+			if ts.RiskNote != "" {
+				text.WriteString("风险：" + ts.RiskNote + "\n")
+			}
+			if ts.Opportunity != "" {
+				text.WriteString("机遇：" + ts.Opportunity + "\n")
+			}
+			groupSummaries[topic] = text.String()
+		}
+		progress("话题分析完成，生成结论...")
 		log.Printf("[Report] Phase 3 完成")
+
+		// 结构化结论
+		progress("生成综合分析结论...")
+		log.Printf("[Report] 生成结构化结论...")
+		cs, err := s.buildConclusionStructured(ctx, stats, topicSummariesStructured, globalInsight, cfg)
+		if err != nil {
+			log.Printf("[Report] 结构化结论失败: %v, 回退旧版", err)
+		} else {
+			conclusionStructured = cs
+		}
+		progress("开始渲染报告...")
 	}
 
 	// Step4: 生成最终报告
@@ -275,7 +379,7 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 	var genErr error
 	switch format {
 	case FormatHTML:
-		content, genErr = s.buildHTML(ctx, stats, groupSummaries, briefings, deepAnalysis, crawlerRunID, platforms, topics, cfg, apiKeySet, htmlTheme, commentAnalysis)
+		content, genErr = s.buildHTML(ctx, stats, groupSummaries, crawlerRunID, platforms, topics, cfg, apiKeySet, htmlTheme, commentAnalysis, topicSummariesStructured, conclusionStructured, globalInsight, deepMode)
 	default:
 		content, genErr = s.buildMarkdown(ctx, stats, groupSummaries, deepAnalysis, crawlerRunID, platforms, topics, cfg, apiKeySet, commentAnalysis)
 	}
@@ -299,6 +403,11 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 		return "", fmt.Errorf("save report: %w", err)
 	}
 	log.Printf("[Report] 报告生成完成 — ID=%s, 大小=%d KB", reportID, len(content)/1024)
+
+	// 趣味完成话术（公共路径）
+	totalTokensUsed = globalTC.Total()
+	msg := completionMessage(stats.ArticleCount, stats.CommentCount, totalTokensUsed, deepMode)
+	progress(msg)
 
 	return reportID, nil
 }
@@ -747,15 +856,14 @@ func min2(a, b int) int {
 	return b
 }
 
-// summarizeGroups 并发对每个话题组调用 LLM，生成深度分析小结
-func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, briefings []ArticleBriefing, cfg config.TaggerConfig) map[string]string {
-	// 建立 articleID → briefing 索引
+// summarizeGroupsStructured 并发对每个话题组调用 LLM，生成结构化分析
+func (s *Service) summarizeGroupsStructured(ctx context.Context, groups []groupStats, briefings []ArticleBriefing, globalInsight *GlobalInsight, cfg config.TaggerConfig) map[string]*TopicSummaryStructured {
 	briefMap := make(map[uint]ArticleBriefing, len(briefings))
 	for _, b := range briefings {
 		briefMap[b.ArticleID] = b
 	}
 
-	result := make(map[string]string, len(groups))
+	result := make(map[string]*TopicSummaryStructured, len(groups))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -763,14 +871,37 @@ func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, brie
 		wg.Add(1)
 		go func(grp groupStats) {
 			defer wg.Done()
-			prompt := buildGroupPrompt(grp, briefMap)
-			summary, err := callLLM(ctx, prompt, cfg, 600)
+			prompt := buildGroupPromptStructured(grp, briefMap, globalInsight)
+			resp, err := callLLM(ctx, prompt, cfg, 500)
 			if err != nil {
 				log.Printf("[ReportService] group LLM failed for topic=%s: %v", grp.Topic, err)
-				summary = fmt.Sprintf("（话题「%s」共 %d 篇，LLM分析暂不可用）", grp.Topic, grp.Count)
+				mu.Lock()
+				result[grp.Topic] = &TopicSummaryStructured{
+					CoreSummary: fmt.Sprintf("话题「%s」共 %d 篇，LLM分析暂不可用", grp.Topic, grp.Count),
+					RiskLevel:   "low",
+				}
+				mu.Unlock()
+				return
+			}
+
+			resp = strings.TrimSpace(resp)
+			if idx := strings.Index(resp, "{"); idx >= 0 {
+				resp = resp[idx:]
+			}
+			if idx := strings.LastIndex(resp, "}"); idx >= 0 {
+				resp = resp[:idx+1]
+			}
+
+			var parsed TopicSummaryStructured
+			if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+				log.Printf("[ReportService] parse group summary JSON failed for topic=%s: %v", grp.Topic, err)
+				parsed = TopicSummaryStructured{
+					CoreSummary: fmt.Sprintf("话题「%s」共 %d 篇", grp.Topic, grp.Count),
+					RiskLevel:   "low",
+				}
 			}
 			mu.Lock()
-			result[grp.Topic] = summary
+			result[grp.Topic] = &parsed
 			mu.Unlock()
 		}(g)
 	}
@@ -778,6 +909,67 @@ func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, brie
 	return result
 }
 
+// summarizeGroups 兼容旧接口：返回纯文本摘要（用于 Markdown 报告）
+func (s *Service) summarizeGroups(ctx context.Context, groups []groupStats, briefings []ArticleBriefing, cfg config.TaggerConfig) map[string]string {
+	structured := s.summarizeGroupsStructured(ctx, groups, briefings, nil, cfg)
+	result := make(map[string]string, len(structured))
+	for topic, ts := range structured {
+		if ts == nil {
+			continue
+		}
+		var sb strings.Builder
+		sb.WriteString(ts.CoreSummary)
+		if len(ts.KeyFindings) > 0 {
+			sb.WriteString("\n")
+			for _, f := range ts.KeyFindings {
+				sb.WriteString("- " + f + "\n")
+			}
+		}
+		if ts.RiskNote != "" {
+			sb.WriteString("风险：" + ts.RiskNote + "\n")
+		}
+		if ts.Opportunity != "" {
+			sb.WriteString("机遇：" + ts.Opportunity + "\n")
+		}
+		result[topic] = sb.String()
+	}
+	return result
+}
+
+func buildGroupPromptStructured(grp groupStats, briefMap map[uint]ArticleBriefing, globalInsight *GlobalInsight) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("你是资深舆情分析师。请对「%s」话题做精准研判，输出结构化JSON。\n\n", grp.Topic))
+	sb.WriteString("要求：\n")
+	sb.WriteString("- coreSummary：一句话点明核心问题和情感态势（不超过30字，直击要害）\n")
+	sb.WriteString("- keyFindings：3-4个关键发现（每条15-25字，有信息量，不泛泛而谈）\n")
+	sb.WriteString("- riskLevel：high/medium/low\n")
+	sb.WriteString("- riskNote：风险说明（若无风险填空字符串，有则20字以内说明）\n")
+	sb.WriteString("- opportunity：正面机遇信号（若无填空字符串，有则20字以内）\n\n")
+
+	if grp.OldCount > 0 {
+		oldPct := float64(grp.OldCount) / float64(grp.Count) * 100
+		sb.WriteString(fmt.Sprintf("⚠️ 时效：%d篇中%d篇（%.0f%%）超180天旧数据（%s~%s）\n\n",
+			grp.Count, grp.OldCount, oldPct,
+			grp.EarliestDate.Format("2006-01-02"), grp.LatestDate.Format("2006-01-02")))
+	}
+
+	if globalInsight != nil && len(globalInsight.TopRisks) > 0 {
+		sb.WriteString("全局风险上下文：" + strings.Join(globalInsight.TopRisks, "；") + "\n\n")
+	}
+
+	sb.WriteString(fmt.Sprintf("话题共%d篇，时效热度%.2f，代表性文章：\n", grp.Count, grp.WeightedScore))
+	for i, a := range grp.Articles {
+		line := fmt.Sprintf("%d. [%s/%s/%.2f] %s", i+1, a.Platform, a.Sentiment, a.SentScore, a.Title)
+		if b, ok := briefMap[a.ArticleID]; ok && b.Opinion != "" {
+			line += " → " + b.Opinion
+		}
+		sb.WriteString(line + "\n")
+	}
+	sb.WriteString("\n仅返回JSON，格式：{\"coreSummary\":\"...\",\"keyFindings\":[...],\"riskLevel\":\"...\",\"riskNote\":\"...\",\"opportunity\":\"...\"}")
+	return sb.String()
+}
+
+// buildGroupPrompt 旧版 prompt（保留给 Markdown）
 func buildGroupPrompt(grp groupStats, briefMap map[uint]ArticleBriefing) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("你是资深舆情分析师。请对以下「%s」话题的舆情做深度分析（250-350字），要求：\n", grp.Topic))
@@ -786,7 +978,6 @@ func buildGroupPrompt(grp groupStats, briefMap map[uint]ArticleBriefing) string 
 	sb.WriteString("3. 情感倾向的成因分析（为什么正面/负面）\n")
 	sb.WriteString("4. 对决策者的建议：需要关注什么风险、可以采取什么行动\n\n")
 
-	// 时效说明
 	if grp.OldCount > 0 {
 		oldPct := float64(grp.OldCount) / float64(grp.Count) * 100
 		sb.WriteString(fmt.Sprintf("⚠️ 数据时效提示：该话题 %d 篇中有 %d 篇（%.0f%%）为180天以上的旧数据（发布于 %s ~ %s），分析时请注意区分历史背景与当前热度。\n\n",
@@ -938,6 +1129,101 @@ func buildFallbackBriefings(arts []model.Article, refDate time.Time) []ArticleBr
 		}
 	}
 	return result
+}
+
+// globalAnalyzeInsights Phase 1.5: 全局视角矛盾检测与风险聚合
+func (s *Service) globalAnalyzeInsights(ctx context.Context, briefings []ArticleBriefing, stats crawlStats, cfg config.TaggerConfig) *GlobalInsight {
+	if len(briefings) == 0 {
+		return nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("你是资深舆情分析师。以下是本批次所有文章的核心观点列表，请从全局视角分析：\n")
+	sb.WriteString("1. topRisks：最突出的2-3个风险信号（每条15-20字，具体到事件）\n")
+	sb.WriteString("2. contradictions：2-3个观点矛盾冲突点（不同群体的对立立场）\n")
+	sb.WriteString("3. trends：2-3个趋势信号（情绪走向、舆论演变方向）\n\n")
+	sb.WriteString(fmt.Sprintf("统计概况：%d篇文章，正面%d/中性%d/负面%d\n\n",
+		stats.ArticleCount,
+		stats.SentimentDist["positive"],
+		stats.SentimentDist["neutral"]+stats.SentimentDist[""],
+		stats.SentimentDist["negative"]))
+	sb.WriteString("文章观点列表：\n")
+
+	for i, b := range briefings {
+		if i >= 60 {
+			sb.WriteString(fmt.Sprintf("...（省略剩余%d篇）\n", len(briefings)-60))
+			break
+		}
+		sb.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, b.Tags, b.Opinion))
+	}
+	sb.WriteString("\n仅返回JSON：{\"topRisks\":[...],\"contradictions\":[...],\"trends\":[...]}")
+
+	resp, err := callLLM(ctx, sb.String(), cfg, 800)
+	if err != nil {
+		log.Printf("[Report] Phase 1.5 globalAnalyze failed: %v", err)
+		return nil
+	}
+
+	resp = strings.TrimSpace(resp)
+	if idx := strings.Index(resp, "{"); idx >= 0 {
+		resp = resp[idx:]
+	}
+	if idx := strings.LastIndex(resp, "}"); idx >= 0 {
+		resp = resp[:idx+1]
+	}
+
+	var insight GlobalInsight
+	if err := json.Unmarshal([]byte(resp), &insight); err != nil {
+		log.Printf("[Report] Phase 1.5 parse failed: %v", err)
+		return nil
+	}
+	return &insight
+}
+
+// buildConclusionStructured 生成分段式结论（带加粗重点）
+func (s *Service) buildConclusionStructured(ctx context.Context, stats crawlStats, topicSummaries map[string]*TopicSummaryStructured, globalInsight *GlobalInsight, cfg config.TaggerConfig) (*ConclusionStructured, error) {
+	var sb strings.Builder
+	sb.WriteString("你是决策层舆情顾问。基于以下数据撰写综合研判结论。\n\n")
+	sb.WriteString("格式要求（严格遵守）：\n")
+	sb.WriteString("- 分为4段，每段开头用【】标注段落主题：【整体态势】【风险研判】【正面机遇】【行动建议】\n")
+	sb.WriteString("- 每段2-4句话，总计250-350字\n")
+	sb.WriteString("- 每段中最关键的短语用 ** 包裹加粗（每段1-2处加粗即可，不要过多）\n")
+	sb.WriteString("- 行动建议段用编号列出3-4条具体措施\n")
+	sb.WriteString("- 直接输出文字，不要JSON，不要markdown标题\n\n")
+	sb.WriteString(fmt.Sprintf("数据：%d篇文章，%d条评论，正面%.1f%%，负面%.1f%%\n\n",
+		stats.ArticleCount, stats.CommentCount,
+		float64(stats.SentimentDist["positive"])/float64(max1(stats.ArticleCount))*100,
+		float64(stats.SentimentDist["negative"])/float64(max1(stats.ArticleCount))*100,
+	))
+
+	if globalInsight != nil {
+		if len(globalInsight.TopRisks) > 0 {
+			sb.WriteString("全局风险：" + strings.Join(globalInsight.TopRisks, "；") + "\n")
+		}
+		if len(globalInsight.Trends) > 0 {
+			sb.WriteString("趋势信号：" + strings.Join(globalInsight.Trends, "；") + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("各话题研判：\n")
+	for topic, ts := range topicSummaries {
+		if ts == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("- %s [%s]：%s\n", topic, ts.RiskLevel, ts.CoreSummary))
+	}
+
+	resp, err := callLLM(ctx, sb.String(), cfg, 800)
+	if err != nil {
+		return nil, err
+	}
+
+	// 将纯文本结论存入 Situation 字段，前端直接渲染
+	conclusion := &ConclusionStructured{
+		Situation: strings.TrimSpace(resp),
+	}
+	return conclusion, nil
 }
 
 // deepAnalyzeTopArticles Phase 2: 对 Top 影响力文章逐篇深度分析
@@ -1319,11 +1605,139 @@ func formatTimeRange(tr [2]time.Time) string {
 	return fmt.Sprintf("%s ~ %s", tr[0].Format("2006-01-02"), tr[1].Format("2006-01-02"))
 }
 
+// completionMessage 根据工作量生成趣味性完成话术
+// 必包含：文章数、评论数、一个emoji；不包含token消耗
+func completionMessage(articleCount int, commentCount int, tokenCount int, deepMode bool) string {
+	level := 1
+	switch {
+	case tokenCount > 80000:
+		level = 5
+	case tokenCount > 40000:
+		level = 4
+	case tokenCount > 15000:
+		level = 3
+	case tokenCount > 5000:
+		level = 2
+	default:
+		level = 1
+	}
+
+	// 每级 5-6 条话术，必含 {a}=文章数 {c}=评论数
+	msgs := map[int][]string{
+		1: {
+			"✨ {a}篇文章+{c}条评论，小菜一碟！报告已就绪",
+			"😎 轻松搞定{a}篇文章和{c}条评论，下次有这种小活还找我",
+			"😉 {a}篇+{c}条，一眨眼的功夫就分析完了",
+			"😏 秒杀！{a}篇文章{c}条评论，连热身都算不上",
+			"🙂 {a}篇文章+{c}条评论已分析，这活儿太轻松了",
+		},
+		2: {
+			"👌 {a}篇文章+{c}条评论分析完毕，还挺顺利的",
+			"😁 处理了{a}篇文章和{c}条评论，报告已生成好啦",
+			"😮 {a}篇+{c}条，规模适中分析得刚刚好",
+			"🙂 {a}篇文章{c}条评论，不多不少，完美完成",
+			"😋 分析{a}篇文章+{c}条评论完成，去看看报告吧",
+		},
+		3: {
+			"🫣 认真分析了{a}篇文章和{c}条评论，结果应该挺扎实的",
+			"🤔 {a}篇文章+{c}条评论全部过了一遍，建议看看话题分析部分",
+			"🫡 {a}篇+{c}条处理完毕，这次挺充实的",
+			"😌 {a}篇文章{c}条评论分析完成，数据量中等偏大该看的都看了",
+			"🥱 逐一分析了{a}篇文章和{c}条评论，报告已生成",
+		},
+		4: {
+			"💪 {a}篇文章+{c}条评论全部啃完，这次工作量不小",
+			"🫣 处理了{a}篇+{c}条评论，总算圆满完成了",
+			"🔥 {a}篇文章{c}条评论的大工程完工，含金量不低",
+			"😦 这批{a}篇+{c}条够忙活的，不过报告质量有保障",
+			"😪 {a}篇文章和{c}条评论挨个翻完了，值得好好看看结果",
+		},
+		5: {
+			"😭 我活下来了！{a}篇文章+{c}条评论全部深挖完毕，我先躺会儿...",
+			"🫠 终于完了！{a}篇+{c}条逐条翻了个遍，有事明天再说...",
+			"🥵 史诗级工作量！{a}篇文章{c}条评论，这波真拼了老命",
+			"😇 {a}篇+{c}条全量分析完成，太多了，我需要冷静一下...",
+			"🤯 {a}篇文章和{c}条评论的深度挖掘完工，我去冰箱拿瓶水歇会儿...",
+		},
+	}
+
+	candidates := msgs[level]
+	idx := int(time.Now().UnixNano()/1000) % len(candidates)
+	tmpl := candidates[idx]
+
+	result := strings.ReplaceAll(tmpl, "{a}", fmt.Sprintf("%d", articleCount))
+	result = strings.ReplaceAll(result, "{c}", fmt.Sprintf("%d", commentCount))
+	return result
+}
+
+func formatTokenCount(tokens int) string {
+	if tokens >= 1000 {
+		return fmt.Sprintf("%.1fk tokens", float64(tokens)/1000)
+	}
+	return fmt.Sprintf("%d tokens", tokens)
+}
+
+// filterInvalidArticles 过滤无效文章（共用路径）
+func filterInvalidArticles(articles []model.Article) []model.Article {
+	var valid []model.Article
+	for _, a := range articles {
+		content := strings.TrimSpace(a.Content)
+		if len([]rune(content)) < 10 && a.Title == "" {
+			continue
+		}
+		valid = append(valid, a)
+	}
+	if len(valid) == 0 {
+		return articles
+	}
+	return valid
+}
+
+// filterInvalidComments 过滤无效评论
+func filterInvalidComments(comments []model.ArticleComment) []model.ArticleComment {
+	var valid []model.ArticleComment
+	for _, c := range comments {
+		content := strings.TrimSpace(c.Content)
+		if len([]rune(content)) < 4 {
+			continue
+		}
+		valid = append(valid, c)
+	}
+	return valid
+}
+
 // callLLM 通用 LLM 调用（与 digest 服务保持相同模式）
+// LLMUsage API 返回的 token 用量
+type LLMUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type ctxKeyType string
+
+const ctxKeyTokenCounter ctxKeyType = "tokenCounter"
+
+// WithTokenCounter 将 TokenCounter 注入 context
+func WithTokenCounter(ctx context.Context, tc *TokenCounter) context.Context {
+	return context.WithValue(ctx, ctxKeyTokenCounter, tc)
+}
+
 func callLLM(ctx context.Context, prompt string, cfg config.TaggerConfig, maxTokens int) (string, error) {
+	content, usage, err := callLLMWithUsage(ctx, prompt, cfg, maxTokens)
+	if err == nil {
+		if tc, ok := ctx.Value(ctxKeyTokenCounter).(*TokenCounter); ok && tc != nil {
+			tc.Add(usage)
+		}
+	}
+	return content, err
+}
+
+func callLLMWithUsage(ctx context.Context, prompt string, cfg config.TaggerConfig, maxTokens int) (string, LLMUsage, error) {
+	var usage LLMUsage
 	apiKey := strings.TrimSpace(cfg.LLMApiKey)
 	if apiKey == "" {
-		return "", fmt.Errorf("API key is empty")
+		return "", usage, fmt.Errorf("API key is empty")
 	}
 	llmModel := cfg.LLMModel
 	if strings.TrimSpace(llmModel) == "" {
@@ -1348,7 +1762,7 @@ func callLLM(ctx context.Context, prompt string, cfg config.TaggerConfig, maxTok
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return "", err
+		return "", usage, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -1356,13 +1770,13 @@ func callLLM(ctx context.Context, prompt string, cfg config.TaggerConfig, maxTok
 	client := &http.Client{Timeout: 90 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", usage, err
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return "", fmt.Errorf("LLM API error %d: %s", resp.StatusCode, body)
+		return "", usage, fmt.Errorf("LLM API error %d: %s", resp.StatusCode, body)
 	}
 
 	var apiResp struct {
@@ -1371,9 +1785,10 @@ func callLLM(ctx context.Context, prompt string, cfg config.TaggerConfig, maxTok
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage LLMUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil || len(apiResp.Choices) == 0 {
-		return "", fmt.Errorf("invalid LLM response")
+		return "", usage, fmt.Errorf("invalid LLM response")
 	}
-	return strings.TrimSpace(apiResp.Choices[0].Message.Content), nil
+	return strings.TrimSpace(apiResp.Choices[0].Message.Content), apiResp.Usage, nil
 }

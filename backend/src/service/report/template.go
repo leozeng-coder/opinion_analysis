@@ -137,7 +137,7 @@ body{
 .pulse-dot{width:10px;height:10px;border-radius:50%;background:#ef4444;flex-shrink:0;animation:pulse 1.6s infinite;}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0.55);}50%{box-shadow:0 0 0 9px rgba(239,68,68,0);}}
 /* ── Sections ── */
-.section{margin-bottom:40px;opacity:0;transform:translateY(18px);transition:opacity 480ms var(--ease-soft),transform 480ms var(--ease-soft);}
+.section{margin-bottom:40px;opacity:0;transform:translateY(12px);transition:opacity 400ms ease,transform 400ms ease;}
 .section.visible{opacity:1;transform:translateY(0);}
 .section-header{display:flex;align-items:center;gap:12px;margin-bottom:20px;}
 .section-icon{
@@ -225,6 +225,30 @@ body{
 .sent-legend span{display:flex;align-items:center;gap:5px;}
 .sent-dot{width:8px;height:8px;border-radius:50%;display:inline-block;box-shadow:0 0 0 2px rgba(255,255,255,0.6);}
 .topic-summary{font-size:13px;color:var(--text-secondary);line-height:1.7;}
+/* ── Topic card structured ── */
+.topic-core-summary{font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.5;margin:8px 0 6px;padding:8px 12px;background:linear-gradient(135deg,rgba(99,102,241,0.12),rgba(99,102,241,0.05));border-left:3px solid var(--primary);border-radius:0 8px 8px 0;}
+.topic-findings{margin:8px 0 6px;padding-left:18px;font-size:12.5px;line-height:1.8;color:var(--text-secondary);}
+.topic-findings li{margin:2px 0;position:relative;}
+.topic-findings li::marker{color:var(--primary);}
+.topic-signals{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.signal-tag{font-size:11.5px;padding:4px 10px;border-radius:12px;font-weight:500;display:inline-flex;align-items:center;gap:4px;}
+.signal-risk{background:#fff1f2;color:#be123c;border:1px solid #fecdd3;}
+.signal-opportunity{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;}
+.topic-risk-badge{font-size:10px;border-radius:10px;padding:2px 8px;font-weight:600;}
+.risk-high{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
+.risk-medium{background:#fef3c7;color:#92400e;border:1px solid #fde68a;}
+/* ── Insight grid ── */
+.insight-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;}
+.insight-card{background:rgba(245,248,255,0.82);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border-radius:var(--radius);padding:18px 20px;border:1px solid rgba(200,215,255,0.5);box-shadow:0 8px 28px rgba(31,38,135,0.06);}
+.insight-card-title{font-size:12px;font-weight:700;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:0.05em;}
+.insight-card-title::before{content:'';width:3px;height:12px;border-radius:1.5px;}
+.insight-card.risk .insight-card-title::before{background:linear-gradient(180deg,#ef4444,#f97316);}
+.insight-card.contradiction .insight-card-title::before{background:linear-gradient(180deg,#8b5cf6,#6366f1);}
+.insight-card.trend .insight-card-title::before{background:linear-gradient(180deg,#0ea5e9,#06b6d4);}
+.insight-list{list-style:none;padding:0;margin:0;font-size:12.5px;line-height:1.8;color:var(--text-primary);}
+.insight-list li{padding:3px 0;border-bottom:1px solid rgba(0,0,0,0.04);}
+.insight-list li:last-child{border-bottom:none;}
+@media(max-width:960px){.insight-grid{grid-template-columns:1fr;}}
 /* ── Tag cloud ── */
 .tag-cloud-wrap{position:relative;min-height:300px;padding:14px 4px;}
 .tag-chip{display:inline-block;padding:2px 12px;border-radius:20px;background:rgba(0,0,0,0.05);cursor:default;transition:transform 0.2s var(--ease-spring),background 0.2s;}
@@ -272,7 +296,7 @@ body{
 /* ── Subtitle ── */
 .chart-subtitle{font-size:12px;color:var(--text-secondary);margin-bottom:14px;margin-top:-4px;}
 /* ── Risk Matrix SVG ── */
-.risk-svg-wrap{position:relative;width:100%;}
+.risk-svg-wrap{position:relative;width:100%;overflow:visible;}
 .risk-tooltip{position:absolute;background:rgba(15,23,42,0.95);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;padding:10px 14px;border-radius:10px;font-size:12px;pointer-events:none;opacity:0;transition:opacity 200ms var(--ease-soft);z-index:10;box-shadow:0 10px 30px rgba(0,0,0,0.25);max-width:240px;}
 .risk-tooltip strong{font-weight:600;display:block;margin-bottom:4px;font-size:13px;}
 .risk-tooltip .tt-row{display:flex;justify-content:space-between;gap:14px;line-height:1.6;}
@@ -310,6 +334,7 @@ body{
   <div class="hero-inner">
     <div class="hero-title"><span class="icon">{{.Theme.Icons.Report}}</span>舆情分析报告</div>
     <div class="theme-badge">🎨 主题：{{.Theme.Name}}</div>
+    {{if .IsDeepMode}}<div class="theme-badge" style="background:rgba(255,255,255,0.22);border:1px solid rgba(255,255,255,0.35);">🔬 深度分析模式 · 全量挖掘</div>{{end}}
     <div class="hero-meta">
       <span>🕐 生成时间：{{.GeneratedAt}}</span>
       <span>📅 数据范围：{{.TimeRange}}</span>
@@ -469,8 +494,11 @@ body{
         {{.Topic}}
         <span class="topic-count-badge">{{.Count}} 篇</span>
         {{if .HasOldWarning}}<span class="topic-old-badge">⚠️ 旧数据</span>{{end}}
+        {{if eq .RiskLevel "high"}}<span class="topic-risk-badge risk-high">高风险</span>{{end}}
+        {{if eq .RiskLevel "medium"}}<span class="topic-risk-badge risk-medium">中风险</span>{{end}}
       </div>
       {{if .DateRange}}<div class="topic-date-range">📅 {{.DateRange}}</div>{{end}}
+      {{if .CoreSummary}}<div class="topic-core-summary">{{.CoreSummary}}</div>{{end}}
       <div class="sent-bar">
         <div class="sent-bar-pos" style="width:{{printf "%.1f" .PosRate}}%;"></div>
         <div class="sent-bar-neu" style="width:{{printf "%.1f" .NeuRate}}%;"></div>
@@ -481,7 +509,11 @@ body{
         <span><span class="sent-dot" style="background:var(--sent-neu);"></span>中性 {{.Neu}} ({{printf "%.0f" .NeuRate}}%)</span>
         <span><span class="sent-dot" style="background:var(--sent-neg);"></span>负面 {{.Neg}} ({{printf "%.0f" .NegRate}}%)</span>
       </div>
-      <p class="topic-summary">{{.Summary}}</p>
+      {{if .KeyFindings}}<ul class="topic-findings">{{range .KeyFindings}}<li>{{.}}</li>{{end}}</ul>{{end}}
+      <div class="topic-signals">
+        {{if .RiskNote}}<span class="signal-tag signal-risk">⚠ {{.RiskNote}}</span>{{end}}
+        {{if .Opportunity}}<span class="signal-tag signal-opportunity">✦ {{.Opportunity}}</span>{{end}}
+      </div>
     </div>
     {{end}}
   </div>
@@ -552,21 +584,6 @@ body{
 </div>
 {{end}}
 
-<!-- ══ Section: 重点文章精读 ══ -->
-{{if .HasDeepAnalysis}}
-<div class="section" id="section-deep-articles">
-  <div class="section-header">
-    <span class="section-icon">📖</span>
-    <div class="section-title-group">
-      <span class="section-title">重点文章精读</span>
-      <div class="section-title-underline"></div>
-    </div>
-    <div class="section-line"></div>
-  </div>
-  <div id="deep-article-list"></div>
-</div>
-{{end}}
-
 <!-- ══ Section: 高影响力内容 Top 10 ══ -->
 <div class="section">
   <div class="section-header">
@@ -593,6 +610,21 @@ body{
   </div>
 </div>
 
+{{if .HasGlobalInsight}}
+<!-- ══ Section: 全局风险洞察 ══ -->
+<div class="section">
+  <div class="section-header">
+    <span class="section-icon">🔍</span>
+    <div class="section-title-group">
+      <span class="section-title">全局风险洞察</span>
+      <div class="section-title-underline"></div>
+    </div>
+    <div class="section-line"></div>
+  </div>
+  <div class="insight-grid" id="global-insight-grid"></div>
+</div>
+{{end}}
+
 <!-- ══ Section: 综合分析结论 ══ -->
 <div class="section">
   <div class="section-header">
@@ -605,7 +637,11 @@ body{
   </div>
   <div class="conclusion-box">
     <div class="conclusion-quote">"</div>
+    {{if .HasStructConclusion}}
+    <div class="conclusion-text" id="conclusion-prose"></div>
+    {{else}}
     <p class="conclusion-text">{{.Conclusion}}</p>
+    {{end}}
     <div class="conclusion-signature">— 舆情监控平台 · AI 分析引擎</div>
   </div>
 </div>
@@ -643,7 +679,8 @@ var commentTopicData = {{.CommentTopicJSON}};
 var hotCommentsData  = {{.HotCommentsJSON}};
 var commentTrendData = {{.CommentTrendJSON}};
 var commentPlatData  = {{.CommentPlatformJSON}};
-var articleDeepData  = {{.ArticleDeepJSON}};
+var conclusionData   = {{.ConclusionJSON}};
+var globalInsightData = {{.GlobalInsightJSON}};
 
 var allCharts = [];
 
@@ -677,18 +714,13 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 /* ── Platform Distribution ── */
 (function(){
   var c = mkChart('chart-platform'); if(!c)return;
-  var pie = variant.pieStyle;
-  var radiusCfg, roseType;
-  if(pie==='donut'){    radiusCfg=['44%','72%']; roseType=undefined; }
-  else if(pie==='nightingale'){ radiusCfg=['18%','72%']; roseType='radius'; }
-  else {                radiusCfg=['22%','70%']; roseType='area'; }
   var seriesCfg = {
-    type:'pie', radius:radiusCfg,
+    type:'pie', radius:['44%','72%'],
     itemStyle:{borderRadius:10,borderColor:'#fff',borderWidth:2,shadowBlur:8,shadowColor:'rgba(0,0,0,0.06)'},
     emphasis:{itemStyle:{shadowBlur:18,shadowColor:'rgba(0,0,0,0.25)'},scale:true,scaleSize:6},
+    label:{formatter:function(p){return p.name+'\n'+p.percent.toFixed(1)+'%';},fontSize:12,color:'#475569'},
     data:platformData.map(function(d,i){return{name:d.name,value:d.value,itemStyle:{color:softColors[i%softColors.length]}};})
   };
-  if(roseType) seriesCfg.roseType = roseType;
   var opt = {tooltip:{trigger:'item',backgroundColor:'rgba(15,23,42,0.95)',borderColor:'transparent',textStyle:{color:'#fff',fontSize:12}},legend:{orient:'horizontal',bottom:0,textStyle:{fontSize:11,color:'#64748b'},itemGap:14},series:[seriesCfg]};
   Object.assign(opt,commonAnim);
   c.setOption(opt);
@@ -1115,7 +1147,8 @@ function renderRiskMatrix(){
         'transform:translate('+txBase+','+tyBase+');'+
         'pointer-events:none;'+
         'opacity:0;'+
-        'transition:opacity 200ms ease, left 280ms cubic-bezier(0.34,1.56,0.64,1), top 280ms cubic-bezier(0.34,1.56,0.64,1);'+
+        'visibility:hidden;'+
+        'transition:opacity 200ms ease, visibility 0ms 200ms, left 280ms cubic-bezier(0.34,1.56,0.64,1), top 280ms cubic-bezier(0.34,1.56,0.64,1);'+
         'z-index:20;'+
         'white-space:nowrap;';
       el.innerHTML =
@@ -1131,9 +1164,11 @@ function renderRiskMatrix(){
           'color:'+tag.color+';'+
           'box-shadow:0 2px 8px rgba(0,0,0,0.30);'+
         '">'+tag.text+'</div>';
-      // 存储展开目标坐标到 dataset
-      el.dataset.ox = (pctX + tag.dx * spread / W * 100).toFixed(3);
-      el.dataset.oy = (pctY + tag.dy * spread / H * 100).toFixed(3);
+      // 存储展开目标坐标到 dataset（钳制在 5%-95% 防溢出）
+      var rawOx = pctX + tag.dx * spread / W * 100;
+      var rawOy = pctY + tag.dy * spread / H * 100;
+      el.dataset.ox = Math.max(5, Math.min(95, rawOx)).toFixed(3);
+      el.dataset.oy = Math.max(5, Math.min(95, rawOy)).toFixed(3);
       container.appendChild(el);
     });
   });
@@ -1146,8 +1181,9 @@ function renderRiskMatrix(){
     el.style.cursor = 'pointer';
 
     el.addEventListener('mouseenter', function(ev){
-      // 展开：移动到展开目标坐标并显示
       cornerLabels.forEach(function(lbl){
+        lbl.style.visibility = 'visible';
+        lbl.style.transition = 'opacity 200ms ease, left 280ms cubic-bezier(0.34,1.56,0.64,1), top 280ms cubic-bezier(0.34,1.56,0.64,1)';
         lbl.style.left  = lbl.dataset.ox + '%';
         lbl.style.top   = lbl.dataset.oy + '%';
         lbl.style.opacity = '1';
@@ -1155,12 +1191,13 @@ function renderRiskMatrix(){
     });
     el.addEventListener('mousemove', function(ev){});
     el.addEventListener('mouseleave', function(){
-      // 收回：回到气泡中心坐标（opacity→0，位置归回 pctX/pctY）
       cornerLabels.forEach(function(lbl){
         var pos = bubblePos[idx];
         lbl.style.left    = (pos.cx / W * 100) + '%';
         lbl.style.top     = (pos.cy / H * 100) + '%';
         lbl.style.opacity = '0';
+        lbl.style.transition = 'opacity 200ms ease, visibility 0ms 200ms, left 280ms cubic-bezier(0.34,1.56,0.64,1), top 280ms cubic-bezier(0.34,1.56,0.64,1)';
+        lbl.style.visibility = 'hidden';
       });
     });
   });
@@ -1245,6 +1282,11 @@ renderRiskMatrix();
   var el=document.getElementById('comment-topic-cards'); if(!el)return;
   if(!commentTopicData||!commentTopicData.length)return;
   commentTopicData.forEach(function(t){
+    // 跳过没有实质内容的卡片（LLM 未返回观点）
+    var hasContent = (t.keyOpinions&&t.keyOpinions.length) || (t.deepInsights&&t.deepInsights.length) || (t.mainEmotions&&t.mainEmotions.length);
+    var hasSentData = t.sentiment && (t.sentiment.positive+t.sentiment.neutral+t.sentiment.negative)>0;
+    if(!hasContent && !hasSentData) return;
+
     var card=document.createElement('div'); card.className='topic-card';
     // 优先用预计算的 rate 字段（Go 端已按样本比例换算）；若全为 0 则从 counts 派生
     var pr=t.sentiment.posRate||0, nr=t.sentiment.neuRate||0, negr=t.sentiment.negRate||0;
@@ -1317,56 +1359,46 @@ renderRiskMatrix();
   });
 })();
 
-/* ── Deep Article Cards ── */
+/* ── Global Insight Cards ── */
 (function(){
-  var el=document.getElementById('deep-article-list'); if(!el)return;
-  if(!articleDeepData||!articleDeepData.length)return;
-  // 2-column grid wrapper
-  el.style.display='grid';
-  el.style.gridTemplateColumns='1fr 1fr';
-  el.style.gap='18px';
-  articleDeepData.forEach(function(d,i){
+  var el=document.getElementById('global-insight-grid'); if(!el)return;
+  if(!globalInsightData)return;
+  var sections=[
+    {key:'topRisks',title:'风险信号',cls:'risk',icon:'⚠'},
+    {key:'contradictions',title:'观点矛盾',cls:'contradiction',icon:'⚡'},
+    {key:'trends',title:'趋势信号',cls:'trend',icon:'📈'}
+  ];
+  sections.forEach(function(sec){
+    var items=globalInsightData[sec.key];
+    if(!items||!items.length)return;
     var card=document.createElement('div');
-    card.className='topic-card';
-    card.style.marginBottom='0';
-
-    var sentCls=d.sentiment==='positive'?'badge-pos':(d.sentiment==='negative'?'badge-neg':'badge-neu');
-    var sentLbl=d.sentiment==='positive'?'正面':(d.sentiment==='negative'?'负面':'中性');
-    var oldBadge=d.isOld?'<span style="font-size:10px;background:#fef3c7;color:#b45309;border:1px solid #fbbf24;border-radius:10px;padding:2px 8px;font-weight:600;">旧数据</span>':'';
-    var riskBadge=(d.riskSignal&&d.riskSignal!=='无')?'<span style="font-size:10px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:10px;padding:2px 8px;font-weight:600;">⚠️ 风险</span>':'';
-
-    var header='<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">';
-    header+='<span style="font-size:13px;font-weight:700;color:var(--text-secondary);min-width:22px;">'+(i+1)+'.</span>';
-    header+='<div style="flex:1;">';
-    header+='<div style="font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.4;margin-bottom:6px;">'+escHtml(d.title)+' '+oldBadge+' '+riskBadge+'</div>';
-    header+='<div style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--text-secondary);">';
-    header+='<span>📱 '+escHtml(d.platform)+'</span>';
-    header+='<span>📅 '+escHtml(d.publishedAt)+' ('+d.ageDays+'天前)</span>';
-    header+='<span class="badge '+sentCls+'">'+sentLbl+' '+d.sentScore.toFixed(2)+'</span>';
-    if(d.contentType) header+='<span style="background:rgba(0,0,0,0.05);border-radius:10px;padding:2px 8px;">'+escHtml(d.contentType)+'</span>';
-    if(d.emotionProfile) header+='<span style="background:rgba(0,0,0,0.05);border-radius:10px;padding:2px 8px;">🎭 '+escHtml(d.emotionProfile)+'</span>';
-    header+='</div></div></div>';
-
-    var body='';
-    if(d.coreOpinion){
-      body+='<div style="background:linear-gradient(135deg,rgba(var(--primary-rgb,99,102,241),0.06),rgba(var(--accent-rgb,99,102,241),0.03));border-left:3px solid var(--primary);border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:10px;font-size:13.5px;line-height:1.6;color:var(--text-primary);">'+escHtml(d.coreOpinion)+'</div>';
-    }
-    if(d.keyPoints&&d.keyPoints.length){
-      body+='<div style="margin-bottom:10px;"><div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;letter-spacing:0.04em;">关键要点</div>';
-      body+='<ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:1.8;">';
-      d.keyPoints.forEach(function(kp){body+='<li style="margin:2px 0;">'+escHtml(kp)+'</li>';});
-      body+='</ul></div>';
-    }
-    if(d.riskSignal&&d.riskSignal!=='无'){
-      body+='<div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#be123c;margin-bottom:8px;">⚠️ '+escHtml(d.riskSignal)+'</div>';
-    }
-    if(d.timeNote){
-      body+='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;font-size:12px;color:#92400e;">⏰ '+escHtml(d.timeNote)+'</div>';
-    }
-
-    card.innerHTML=header+body;
+    card.className='insight-card '+sec.cls;
+    var html='<div class="insight-card-title">'+sec.icon+' '+sec.title+'</div>';
+    html+='<ul class="insight-list">';
+    items.forEach(function(item){html+='<li>'+escHtml(item)+'</li>';});
+    html+='</ul>';
+    card.innerHTML=html;
     el.appendChild(card);
   });
+})();
+
+/* ── Structured Conclusion (prose with bold) ── */
+(function(){
+  var el=document.getElementById('conclusion-prose'); if(!el)return;
+  if(!conclusionData||!conclusionData.situation)return;
+  var text=conclusionData.situation;
+  // 将 **text** 转为 <strong>
+  text=text.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  // 按段落分割（【标题】开头视为新段；双换行也分段）
+  var paragraphs=text.split(/\n{2,}|\n(?=【)/);
+  var html='';
+  paragraphs.forEach(function(p){
+    p=p.trim(); if(!p)return;
+    // 【标题】加粗处理
+    p=p.replace(/^【(.+?)】/,'<strong style="color:var(--text-primary);font-size:15px;">【$1】</strong>');
+    html+='<p style="margin:0 0 14px;line-height:1.9;">'+p+'</p>';
+  });
+  el.innerHTML=html;
 })();
 
 
@@ -1482,6 +1514,12 @@ renderRiskMatrix();
     sections.forEach(function(s){s.classList.add('visible');});
     return;
   }
+  // 首屏的 section 立即显示，避免闪烁
+  sections.forEach(function(s){
+    if(s.getBoundingClientRect().top < window.innerHeight){
+      s.classList.add('visible');
+    }
+  });
   var io = new IntersectionObserver(function(entries){
     entries.forEach(function(e){
       if(e.isIntersecting){
@@ -1489,8 +1527,10 @@ renderRiskMatrix();
         io.unobserve(e.target);
       }
     });
-  },{threshold:0.08, rootMargin:'0px 0px -40px 0px'});
-  sections.forEach(function(s){io.observe(s);});
+  },{threshold:0.05, rootMargin:'0px 0px -20px 0px'});
+  sections.forEach(function(s){
+    if(!s.classList.contains('visible')) io.observe(s);
+  });
 })();
 
 /* ── Resize ── */

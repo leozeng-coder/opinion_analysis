@@ -38,6 +38,7 @@ func (n *AnalysisReportNode) Execute(ctx context.Context, config map[string]inte
 	maxGroups := n.GetInt(config, "maxGroups", 5)
 	maxTopicCards := n.GetInt(config, "maxTopicCards", 8)
 	commentSampleSize := n.GetInt(config, "commentSampleSize", 18)
+	deepMode := n.GetBool(config, "deepMode", false)
 
 	articleIDs := n.GetArticleIDs(input)
 	if len(articleIDs) == 0 {
@@ -54,7 +55,7 @@ func (n *AnalysisReportNode) Execute(ctx context.Context, config map[string]inte
 	progress := nodes.ProgressFunc(ctx)
 	progress(fmt.Sprintf("生成 %s 报告：%d 篇文章，平台 %v", format, len(articleIDs), platforms))
 
-	reportID, err := n.reportSvc.Generate(ctx, articleIDs, crawlerRunID, platforms, topics, format, htmlTheme, sampleSize, maxGroups, maxTopicCards, commentSampleSize)
+	reportID, err := n.reportSvc.Generate(ctx, articleIDs, crawlerRunID, platforms, topics, format, htmlTheme, sampleSize, maxGroups, maxTopicCards, commentSampleSize, deepMode)
 	if err != nil {
 		return nil, n.WrapError("report generation failed", err)
 	}
