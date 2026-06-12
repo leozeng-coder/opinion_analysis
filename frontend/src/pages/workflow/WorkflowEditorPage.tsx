@@ -45,8 +45,7 @@ import { useAuthStore } from '@/store/auth'
 import { workflowApi, reportApi } from '@/api/workflow'
 import { crawlerApi } from '@/api/crawler'
 import { alertApi } from '@/api/alert'
-import { topicApi } from '@/api/topic'
-import { Workflow, WorkflowExecution, WorkflowNodeExecution, CrawlerLog, Topic } from '@/types'
+import { Workflow, WorkflowExecution, WorkflowNodeExecution, CrawlerLog } from '@/types'
 
 const { TextArea } = Input
 
@@ -1339,9 +1338,9 @@ const WorkflowEditorPage: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    topicApi
-      .list({ pageSize: 200 })
-      .then((res) => setTopicOptions((res.list || []).map((t: Topic) => ({ label: t.name, value: t.name }))))
+    workflowApi
+      .listTopics()
+      .then((res) => setTopicOptions((res.topics || []).map((t: string) => ({ label: t, value: t }))))
       .catch(() => setTopicOptions([]))
   }, [])
 

@@ -449,7 +449,7 @@ func (s *Service) ListTopics(ctx context.Context) ([]string, error) {
 	for _, col := range res {
 		if col.Name() == fieldTopic {
 			for i := 0; i < col.Len(); i++ {
-				if v, e := col.GetAsString(i); e == nil && v != "" {
+				if v, e := col.GetAsString(i); e == nil && v != "" && v != defaultPartition {
 					topicSet[v] = struct{}{}
 				}
 			}

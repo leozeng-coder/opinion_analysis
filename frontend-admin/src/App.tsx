@@ -37,6 +37,7 @@ const App: React.FC = () => (
             <Route path="/config/notify" element={<NotifyPage />} />
             <Route path="/config/crawler" element={<CrawlerConfigPage />} />
             {/* 审计日志 */}
+            <Route path="/audit" element={<AuditPage />} />
             <Route path="/config" element={<Navigate to="/config/system" replace />} />
             <Route path="/settings" element={<Navigate to="/config/system" replace />} />
             <Route path="/tagger" element={<Navigate to="/ai/tagger" replace />} />

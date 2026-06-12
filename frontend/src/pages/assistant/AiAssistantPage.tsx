@@ -292,12 +292,11 @@ const AiAssistantPage: React.FC = () => {
             setLoadingSessionId(data.sessionId)
           },
           onContent: (chunk) => {
-            // 更新缓存和当前显示的消息
             const updateMessages = (prev: ChatMessage[]) => {
               const updated = [...prev]
               const lastMsg = updated[updated.length - 1]
               if (lastMsg && lastMsg.role === 'assistant' &&
-                  (lastMsg.sessionId === targetSessionId || lastMsg.sessionId === newSessionId)) {
+                  (lastMsg.sessionId === (targetSessionId ?? 0) || lastMsg.sessionId === newSessionId)) {
                 updated[updated.length - 1] = {
                   ...lastMsg,
                   content: lastMsg.content + chunk
@@ -313,15 +312,8 @@ const AiAssistantPage: React.FC = () => {
               sessionMessagesRef.current.set(sid, updateMessages(cached))
             }
 
-            // 只有当前在这个会话时才更新显示
-            setMessages((prev) => {
-              // 检查当前是否还在目标会话
-              const currentSid = newSessionId || targetSessionId
-              if (currentSessionId !== currentSid) {
-                return prev
-              }
-              return updateMessages(prev)
-            })
+            // updateMessages 内部已通过 sessionId 匹配防止跨会话写入，无需外部守卫
+            setMessages(updateMessages)
           },
           onDone: (data) => {
             if (data.title) {
@@ -603,8 +595,17 @@ const AiAssistantPage: React.FC = () => {
                     mode="multiple"
                     placeholder="选择话题筛选"
                     value={selectedTopics}
-                    onChange={setSelectedTopics}
-                    options={topicOptions.map(t => ({ label: t, value: t }))}
+                    onChange={(vals: string[]) => {
+                      if (vals.includes('__all__')) {
+                        setSelectedTopics([])
+                      } else {
+                        setSelectedTopics(vals)
+                      }
+                    }}
+                    options={[
+                      { label: '全部', value: '__all__' },
+                      ...topicOptions.map(t => ({ label: t, value: t })),
+                    ]}
                     loading={loadingTopics}
                     allowClear
                     maxTagCount="responsive"
