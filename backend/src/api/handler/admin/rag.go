@@ -617,6 +617,7 @@ func (h *RAGHandler) UpdateChunk(c *gin.Context) {
 		Snippet:   newSnippet,
 		Platform:  old.Platform,
 		ChunkType: old.ChunkType,
+		Topic:     old.Topic,
 	}
 	if err := h.milvus.Insert(c.Request.Context(), []milvus.ChunkRow{newRow}); err != nil {
 		response.Fail(c, 502, "写入 Milvus 失败: "+err.Error())
