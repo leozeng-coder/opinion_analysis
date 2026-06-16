@@ -481,6 +481,18 @@
   max-width: 980px;
   width: 100%;
   margin: 0 auto;
+  position: relative;
+}
+
+/* “回到底部”浮层：绝对定位，悬浮在输入框上方，不占据布局空间 */
+.scrollFabWrap {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  pointer-events: none;
+  z-index: 5;
 }
 .composerPill {
   display: flex;
@@ -584,16 +596,30 @@
 .scrollDown {
   pointer-events: auto;
   align-self: center;
-  margin-bottom: 10px;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  padding: 0;
+  flex: 0 0 auto;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px;
+  padding: 0 !important;
   border-radius: 50% !important;
   box-shadow: 0 2px 12px rgba(15, 23, 42, 0.1);
   border: 1px solid rgba(0, 0, 0, 0.06);
   background: var(--app-surface) !important;
   color: rgba(0, 0, 0, 0.45) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 箭头图标加粗一点，更醒目 */
+.scrollDown :global(.anticon) {
+  font-size: 17px;
+}
+
+.scrollDown :global(svg) {
+  stroke: currentColor;
+  stroke-width: 26;
 }
 
 .scrollDown:hover {

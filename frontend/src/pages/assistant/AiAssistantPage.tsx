@@ -167,6 +167,10 @@ const AiAssistantPage: React.FC = () => {
   const threadRef = useRef<HTMLElement>(null)
   const sessionMessagesRef = useRef<Map<number, ChatMessage[]>>(new Map())
   const abortControllerRef = useRef<AbortController | null>(null)
+  // 是否“黏底”：用户在底部时自动跟随滚动；上滑查看历史时停止自动滚动
+  const stickToBottomRef = useRef(true)
+  // 记录上次滚动位置，用于判断滚动方向（向上滚立即脱离黏底）
+  const lastScrollTopRef = useRef(0)
   const [renameForm] = Form.useForm<{ title: string }>()
   const [renameTarget, setRenameTarget] = useState<{
     id: number
@@ -206,6 +210,7 @@ const AiAssistantPage: React.FC = () => {
 
   const loadSession = useCallback(async (id: number) => {
     try {
+      stickToBottomRef.current = true // 打开会话默认滚到底部
       // 先从缓存加载
       const cached = sessionMessagesRef.current.get(id)
       if (cached) {
@@ -230,16 +235,30 @@ const AiAssistantPage: React.FC = () => {
     const el = threadRef.current
     if (!el) return
     el.scrollTo({ top: el.scrollHeight, behavior })
+    stickToBottomRef.current = true // 主动滚到底后恢复黏底
   }, [])
 
   useLayoutEffect(() => {
-    scrollThreadToBottom('auto')
+    // 仅在用户处于底部（黏底）时才自动跟随；上滑查看历史时不打扰
+    if (stickToBottomRef.current) {
+      scrollThreadToBottom('auto')
+    }
   }, [messages, loading, scrollThreadToBottom])
 
   const onThreadScroll = useCallback(() => {
     const el = threadRef.current
     if (!el) return
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight
+    const prevTop = lastScrollTopRef.current
+    lastScrollTopRef.current = el.scrollTop
+
+    if (el.scrollTop < prevTop - 1) {
+      // 向上滚动：立即脱离自动跟随
+      stickToBottomRef.current = false
+    } else if (dist <= 8) {
+      // 真正触底：恢复自动跟随
+      stickToBottomRef.current = true
+    }
     setShowScrollFab(dist > 120)
   }, [])
 
@@ -329,6 +348,7 @@ const AiAssistantPage: React.FC = () => {
 
     setInput('')
     setLoading(true)
+    stickToBottomRef.current = true // 发送消息属主动操作，强制跟随到底部
 
     const controller = new AbortController()
     abortControllerRef.current = controller
@@ -826,13 +846,7 @@ const AiAssistantPage: React.FC = () => {
           <div className={styles.composerDock}>
             <div className={styles.composerInner}>
               {showScrollFab && messages.length > 0 && (
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'center',
-                    marginBottom: 8,
-                  }}
-                >
+                <div className={styles.scrollFabWrap}>
                   <Button
                     type="default"
                     shape="circle"
