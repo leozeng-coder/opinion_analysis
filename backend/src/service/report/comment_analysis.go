@@ -81,11 +81,11 @@ func (s *Service) analyzeComments(ctx context.Context, comments []model.ArticleC
 	for _, c := range comments {
 		var dateKey string
 		if a, ok := articleMap[c.ArticleID]; ok && !a.PublishedAt.IsZero() {
-			dateKey = a.PublishedAt.Format("01-02")
+			dateKey = a.PublishedAt.Format("2006-01-02")
 		} else if !c.PublishedAt.IsZero() {
-			dateKey = c.PublishedAt.Format("01-02")
+			dateKey = c.PublishedAt.Format("2006-01-02")
 		} else {
-			dateKey = c.CreatedAt.Format("01-02")
+			dateKey = c.CreatedAt.Format("2006-01-02")
 		}
 		if dailyMap[dateKey] == nil {
 			dailyMap[dateKey] = &commentTrendPoint{Date: dateKey}

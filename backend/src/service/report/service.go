@@ -528,7 +528,7 @@ func (s *Service) computeStats(articles []model.Article, commentCount int, sampl
 		platformScoreSum[a.Platform] += a.SentScore
 		platformScoreCnt[a.Platform]++
 
-		dateKey := a.PublishedAt.Format("01-02")
+		dateKey := a.PublishedAt.Format("2006-01-02")
 		if dailyMap[dateKey] == nil {
 			dailyMap[dateKey] = &dailyTrendPoint{Date: dateKey}
 		}

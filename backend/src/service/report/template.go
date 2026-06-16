@@ -846,14 +846,16 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
 (function(){
   var c = mkChart('chart-trend'); if(!c)return;
   var dates = dailyTrendData.map(function(d){return d.date;});
+  var shortDates = dates.map(function(d){return d.slice(5);}); // "2025-11-12" → "11-12"
   var tipCfg = {backgroundColor:'rgba(15,23,42,0.95)',borderColor:'transparent',textStyle:{color:'#fff',fontSize:12}};
+  var trendTooltip = Object.assign({trigger:'axis',formatter:function(params){var d=dates[params[0].dataIndex];var s='<strong>'+d+'</strong><br/>';params.forEach(function(p){s+=p.marker+' '+p.seriesName+': '+p.value+'<br/>';});return s;}},tipCfg);
   var opt;
   if(variant.trendStyle==='area'){
     opt = {
-      tooltip:Object.assign({trigger:'axis'},tipCfg),
+      tooltip:trendTooltip,
       legend:{bottom:0,textStyle:{fontSize:10,color:'#64748b'}},
       grid:{top:10,bottom:50,left:'3%',right:'3%',containLabel:true},
-      xAxis:{type:'category',data:dates,axisLabel:{fontSize:9,rotate:30,color:'#64748b'},axisLine:{lineStyle:{color:'#cbd5e1'}}},
+      xAxis:{type:'category',data:shortDates,axisLabel:{fontSize:9,rotate:30,color:'#64748b'},axisLine:{lineStyle:{color:'#cbd5e1'}}},
       yAxis:{type:'value',axisLabel:{fontSize:10,color:'#64748b'},axisLine:{show:false},splitLine:{lineStyle:{color:'#f1f5f9'}}},
       series:[
         {name:'正面',type:'line',smooth:true,stack:'trend',areaStyle:{opacity:0.5,color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:sentColors[0]},{offset:1,color:softenColor(sentColors[0],0.6)}]}},data:dailyTrendData.map(function(d){return d.positive;}),itemStyle:{color:sentColors[0]},lineStyle:{color:sentColors[0],width:2},symbol:'circle',symbolSize:6},
@@ -863,10 +865,10 @@ function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').
     };
   } else {
     opt = {
-      tooltip:Object.assign({trigger:'axis'},tipCfg),
+      tooltip:trendTooltip,
       legend:{bottom:0,textStyle:{fontSize:10,color:'#64748b'}},
       grid:{top:10,bottom:50,left:'3%',right:'3%',containLabel:true},
-      xAxis:{type:'category',data:dates,axisLabel:{fontSize:9,rotate:30,color:'#64748b'},axisLine:{lineStyle:{color:'#cbd5e1'}}},
+      xAxis:{type:'category',data:shortDates,axisLabel:{fontSize:9,rotate:30,color:'#64748b'},axisLine:{lineStyle:{color:'#cbd5e1'}}},
       yAxis:{type:'value',axisLabel:{fontSize:10,color:'#64748b'},axisLine:{show:false},splitLine:{lineStyle:{color:'#f1f5f9'}}},
       series:[
         {name:'总量',type:'bar',data:dailyTrendData.map(function(d){return d.total;}),itemStyle:{color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:'#cbd5e1'},{offset:1,color:'#e2e8f0'}]},borderRadius:[6,6,0,0]},barMaxWidth:22},
@@ -1261,11 +1263,12 @@ renderRiskMatrix();
   if(!commentTrendData||!commentTrendData.length)return;
   var c = mkChart('chart-comment-trend'); if(!c)return;
   var dates=commentTrendData.map(function(d){return d.date;});
+  var shortDates=dates.map(function(d){return d.slice(5);});
   var opt = {
-    tooltip:{trigger:'axis',backgroundColor:'rgba(15,23,42,0.95)',borderColor:'transparent',textStyle:{color:'#fff',fontSize:12}},
+    tooltip:{trigger:'axis',backgroundColor:'rgba(15,23,42,0.95)',borderColor:'transparent',textStyle:{color:'#fff',fontSize:12},formatter:function(params){var d=dates[params[0].dataIndex];var s='<strong>'+d+'</strong><br/>';params.forEach(function(p){s+=p.marker+' '+p.seriesName+': '+p.value+'<br/>';});return s;}},
     legend:{bottom:0,textStyle:{fontSize:10,color:'#64748b'}},
     grid:{top:10,bottom:50,left:'3%',right:'3%',containLabel:true},
-    xAxis:{type:'category',data:dates,axisLabel:{fontSize:9,rotate:30,color:'#64748b'},axisLine:{lineStyle:{color:'#cbd5e1'}}},
+    xAxis:{type:'category',data:shortDates,axisLabel:{fontSize:9,rotate:30,color:'#64748b'},axisLine:{lineStyle:{color:'#cbd5e1'}}},
     yAxis:{type:'value',axisLabel:{fontSize:10,color:'#64748b'},axisLine:{show:false},splitLine:{lineStyle:{color:'#f1f5f9'}}},
     series:[
       {name:'正面',type:'line',smooth:true,stack:'ct',areaStyle:{opacity:0.5,color:{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{offset:0,color:sentColors[0]},{offset:1,color:softenColor(sentColors[0],0.6)}]}},data:commentTrendData.map(function(d){return d.positive;}),itemStyle:{color:sentColors[0]},lineStyle:{color:sentColors[0],width:2}},
