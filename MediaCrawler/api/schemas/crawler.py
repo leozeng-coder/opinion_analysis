@@ -108,6 +108,9 @@ class CrawlerStatusResponse(BaseModel):
 class LogEntry(BaseModel):
     """Log entry"""
     id: int
+    # 全局单调递增序号（跨平台唯一）。用于多平台并发时的统一时序排序与前端增量拉取，
+    # 区别于 id（per-平台自增，仅用于平台内显示/去重）。
+    seq: int = 0
     timestamp: str
     level: Literal["info", "warning", "error", "success", "debug"]
     message: str

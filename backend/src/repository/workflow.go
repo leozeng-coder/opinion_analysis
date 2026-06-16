@@ -159,7 +159,9 @@ func (r *WorkflowNodeExecutionRepository) Update(nodeExecution *model.WorkflowNo
 // ListByExecutionID 查询执行记录的所有节点执行日志
 func (r *WorkflowNodeExecutionRepository) ListByExecutionID(executionID int64) ([]model.WorkflowNodeExecution, error) {
 	var nodeExecutions []model.WorkflowNodeExecution
-	err := r.db.Where("execution_id = ?", executionID).Order("started_at asc").Find(&nodeExecutions).Error
+	// 以 id 作为 started_at 的次级排序键：并行节点常在同一秒启动，
+	// started_at（秒级精度）相同会导致顺序不确定，补 id asc 保证稳定有序。
+	err := r.db.Where("execution_id = ?", executionID).Order("started_at asc, id asc").Find(&nodeExecutions).Error
 	return nodeExecutions, err
 }
 

@@ -136,6 +136,7 @@ export interface CrawlerStatus {
 
 export interface CrawlerLog {
   id: number
+  seq?: number // 全局单调序号（跨平台），用于统一时序排序与增量拉取
   timestamp: string
   level: 'info' | 'warning' | 'error' | 'success' | 'debug'
   message: string

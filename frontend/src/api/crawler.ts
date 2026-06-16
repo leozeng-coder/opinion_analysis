@@ -49,6 +49,7 @@ export interface CrawlerStatus {
 
 export interface CrawlerLog {
   id: number
+  seq?: number // 全局单调序号（跨平台），用于统一时序排序与增量拉取
   timestamp: string
   level: 'info' | 'warning' | 'error' | 'success' | 'debug'
   message: string
@@ -94,10 +95,12 @@ export const crawlerApi = {
 
   /**
    * 获取日志
+   * @param limit 返回条数上限（兜底）
+   * @param afterSeq 增量拉取：只返回 seq > afterSeq 的日志；0/省略=全量
    */
-  getLogs: (limit = 100): Promise<{ logs: CrawlerLog[] }> =>
+  getLogs: (limit = 100, afterSeq = 0): Promise<{ logs: CrawlerLog[]; lastSeq: number }> =>
     crawlerRequest.get('/crawler/logs', {
-      params: { limit },
+      params: { limit, after_seq: afterSeq },
     }),
 
   /**

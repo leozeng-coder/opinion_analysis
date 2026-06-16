@@ -102,10 +102,17 @@ async def get_crawler_status():
 
 
 @router.get("/logs")
-async def get_logs(limit: int = 100):
-    """Get recent logs (legacy, returns aggregated)"""
-    logs = crawler_registry.get_all_logs(limit)
-    return {"logs": [log.model_dump() for log in logs]}
+async def get_logs(limit: int = 100, after_seq: int = 0):
+    """Get recent logs (legacy, returns aggregated).
+
+    Args:
+        limit: 返回条数上限（兜底）。
+        after_seq: 增量拉取，只返回 seq > after_seq 的日志；0 表示全量。
+                   响应额外返回 lastSeq（本批最大 seq），供前端下次增量请求使用。
+    """
+    logs = crawler_registry.get_all_logs(limit, after_seq)
+    last_seq = logs[-1].seq if logs else after_seq
+    return {"logs": [log.model_dump() for log in logs], "lastSeq": last_seq}
 
 
 # ==================== Utility routes ====================

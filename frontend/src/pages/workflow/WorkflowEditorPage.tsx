@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import ReactFlow, {
   Node,
@@ -1074,7 +1074,17 @@ const buildConsoleLines = (params: {
     })
   }
 
-  for (const log of nodeLogs) {
+  // 并行节点同秒启动时，已完成的快节点可能排在仍在运行的慢节点之前，
+  // 导致「执行完成」行压在 running 节点的实时输出下方、看似卡底。
+  // 这里做稳定重排：running 节点块统一移到最后，让实时输出始终锚定底部；
+  // 已完成节点保持后端 started_at/id 的原始顺序。
+  const orderedLogs = [...nodeLogs].sort((a, b) => {
+    const ar = a.status === 'running' ? 1 : 0
+    const br = b.status === 'running' ? 1 : 0
+    return ar - br
+  })
+
+  for (const log of orderedLogs) {
     const data = nodeMap.get(log.nodeId)
     const label = data ? nodeDisplayLabel(data) : log.nodeId
     const type = data?.type
@@ -1170,6 +1180,11 @@ const buildConsoleLines = (params: {
 // 控制台「最新一次执行」内容的浏览器缓存（按工作流 id），切换页面后仍可查看
 const CONSOLE_CACHE_PREFIX = 'wf_console_cache_'
 
+// 爬虫实时日志（不持久化，仅前端缓冲）的相关上限：
+const CRAWLER_LOG_BUFFER_MAX = 1000 // 内存环形缓冲上限：超出淘汰最老日志
+const CRAWLER_LOG_CACHE_MAX = 300 // localStorage 缓存上限：仅存最近 N 条
+const CONSOLE_RENDER_MAX = 300 // 控制台渲染窗口：只渲染最新 N 行，避免 DOM 过多卡顿
+
 interface ConsoleCache {
   execution: WorkflowExecution | null
   nodeLogs: WorkflowNodeExecution[]
@@ -1188,11 +1203,11 @@ const loadConsoleCache = (wfId: string): ConsoleCache | null => {
 
 const saveConsoleCache = (wfId: string, data: ConsoleCache) => {
   try {
-    // 爬虫实时日志只缓存最近 200 条，避免超出 localStorage 容量
+    // 爬虫实时日志只缓存最近 N 条，避免超出 localStorage 容量
     const trimmed: ConsoleCache = {
       execution: data.execution,
       nodeLogs: data.nodeLogs,
-      crawlerLogs: data.crawlerLogs.slice(-200),
+      crawlerLogs: data.crawlerLogs.slice(-CRAWLER_LOG_CACHE_MAX),
     }
     localStorage.setItem(CONSOLE_CACHE_PREFIX + wfId, JSON.stringify(trimmed))
   } catch {
@@ -1305,6 +1320,8 @@ const WorkflowEditorPage: React.FC = () => {
   const consoleEndRef = useRef<HTMLDivElement>(null)
   const panelContentRef = useRef<HTMLDivElement>(null)
   const currentExecIdRef = useRef<number | null>(null)
+  // 爬虫日志增量拉取游标：已拉取到的最大全局 seq。0 表示从头拉。
+  const crawlerLastSeqRef = useRef<number>(0)
   const autoRunHandledRef = useRef(false)
   const cacheRestoredRef = useRef(false)
 
@@ -1325,7 +1342,10 @@ const WorkflowEditorPage: React.FC = () => {
     if (cached) {
       setCurrentExecution(cached.execution)
       setNodeLogs(cached.nodeLogs || [])
-      setCrawlerLogs(cached.crawlerLogs || [])
+      const cachedCrawler = cached.crawlerLogs || []
+      setCrawlerLogs(cachedCrawler)
+      // 游标对齐缓存中最大 seq，避免增量拉取重复已缓存的日志
+      crawlerLastSeqRef.current = cachedCrawler.reduce((m, l) => Math.max(m, l.seq ?? 0), 0)
       if (cached.execution) currentExecIdRef.current = cached.execution.id
     }
   }, [isEdit, id])
@@ -1436,11 +1456,12 @@ const WorkflowEditorPage: React.FC = () => {
       const tasks: [
         Promise<{ list?: WorkflowExecution[] }>,
         Promise<WorkflowNodeExecution[]>,
-        Promise<{ logs: CrawlerLog[] }> | null,
+        Promise<{ logs: CrawlerLog[]; lastSeq: number }> | null,
       ] = [
         workflowApi.executions(Number(id), { page: 1, pageSize: 10 }),
         workflowApi.executionLogs(execId),
-        hasCrawlerNode ? crawlerApi.getLogs(200) : null,
+        // 增量拉取：只取 seq > 上次游标 的爬虫日志
+        hasCrawlerNode ? crawlerApi.getLogs(CRAWLER_LOG_BUFFER_MAX, crawlerLastSeqRef.current) : null,
       ]
       const [execRes, logs, crawlerRes] = await Promise.all([tasks[0], tasks[1], tasks[2]])
 
@@ -1449,7 +1470,25 @@ const WorkflowEditorPage: React.FC = () => {
       const exec = list.find((e) => e.id === execId) || null
       if (exec) setCurrentExecution(exec)
       setNodeLogs(logs || [])
-      if (crawlerRes) setCrawlerLogs(crawlerRes.logs || [])
+      if (crawlerRes) {
+        const incoming = crawlerRes.logs || []
+        // 检测 seq 回退（MediaCrawler 重启后全局 seq 归零）：游标重置并以本批为准
+        const minIncomingSeq = incoming.length ? (incoming[0].seq ?? 0) : 0
+        const restarted = minIncomingSeq > 0 && minIncomingSeq <= crawlerLastSeqRef.current
+        if (incoming.length > 0) {
+          setCrawlerLogs((prev) => {
+            const base = restarted ? [] : prev
+            // 增量 append + 环形缓冲淘汰最老日志
+            const merged = base.concat(incoming)
+            return merged.length > CRAWLER_LOG_BUFFER_MAX
+              ? merged.slice(-CRAWLER_LOG_BUFFER_MAX)
+              : merged
+          })
+          crawlerLastSeqRef.current = crawlerRes.lastSeq || crawlerLastSeqRef.current
+        } else if (restarted) {
+          crawlerLastSeqRef.current = 0
+        }
+      }
 
       // 终态：停止轮询并解除编辑锁定
       if (exec && exec.status !== 'running') {
@@ -1495,6 +1534,8 @@ const WorkflowEditorPage: React.FC = () => {
   const startMonitor = useCallback(
     (execId: number) => {
       currentExecIdRef.current = execId
+      // 新一段监控开始：重置爬虫日志增量游标，从头拉取本次运行的日志
+      crawlerLastSeqRef.current = 0
       stopPolling()
       pollOnce()
       pollTimerRef.current = setInterval(pollOnce, 2000)
@@ -1509,10 +1550,15 @@ const WorkflowEditorPage: React.FC = () => {
     }
   }, [consoleMode])
 
-  // 进入终态后自动滚动到底部（仅控制台模式）
+  // 自动滚动到底部（仅控制台模式）。
+  // 用 rAF 把滚动推迟到 DOM 更新后执行，避免读到旧高度；保留 smooth 顺滑效果
+  //（轮询 2s 一次，间隔远大于滚动动画时长，不会叠加抖动）。
   useEffect(() => {
     if (consoleMode !== 'console') return
-    consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const raf = requestAnimationFrame(() => {
+      consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(raf)
   }, [nodeLogs, crawlerLogs, currentExecution, consoleMode])
 
   // 控制台内容变化时写入浏览器缓存（仅在有执行记录时；清空由按钮显式处理）
@@ -1564,7 +1610,10 @@ const WorkflowEditorPage: React.FC = () => {
               // 拉取失败则保留缓存日志
             }
             // 爬虫实时日志来自内存缓冲，无法为非缓存的历史执行恢复
-            if (!sameAsCache) setCrawlerLogs([])
+            if (!sameAsCache) {
+              setCrawlerLogs([])
+              crawlerLastSeqRef.current = 0
+            }
           }
         }
       })
@@ -1974,12 +2023,27 @@ const WorkflowEditorPage: React.FC = () => {
   }, [nodeLogs])
 
   // 控制台实时日志行（工作流编排 + 爬虫实时日志合并）
-  const consoleLines = buildConsoleLines({
-    execution: currentExecution,
-    nodeLogs,
-    nodes,
-    crawlerLogs: hasCrawlerNode ? crawlerLogs : [],
-  })
+  // useMemo：仅在日志/执行/节点变化时重算，避免每次渲染全量重建（多平台高频日志下是卡顿主因）
+  const consoleLines = useMemo(
+    () =>
+      buildConsoleLines({
+        execution: currentExecution,
+        nodeLogs,
+        nodes,
+        crawlerLogs: hasCrawlerNode ? crawlerLogs : [],
+      }),
+    [currentExecution, nodeLogs, nodes, crawlerLogs, hasCrawlerNode]
+  )
+  // 渲染窗口：只渲染最新 N 行，DOM 行数受控，防止长列表卡死。
+  // 早于窗口的日志仍在内存/缓存中，但不进入 DOM。
+  const visibleConsoleLines = useMemo(
+    () =>
+      consoleLines.length > CONSOLE_RENDER_MAX
+        ? consoleLines.slice(-CONSOLE_RENDER_MAX)
+        : consoleLines,
+    [consoleLines]
+  )
+  const hiddenConsoleCount = consoleLines.length - visibleConsoleLines.length
   // 执行计划（线性顺序）
   const executionPlan = computePlan(nodes, edges.map((e) => ({ source: e.source, target: e.target })))
 
@@ -2072,7 +2136,7 @@ const WorkflowEditorPage: React.FC = () => {
             {replayExecId && !isExecuting && (
               <Button
                 icon={<CloseOutlined />}
-                onClick={() => { setReplayExecId(null); setNodeLogs([]); setCrawlerLogs([]) }}
+                onClick={() => { setReplayExecId(null); setNodeLogs([]); setCrawlerLogs([]); crawlerLastSeqRef.current = 0 }}
               >
                 退出记录
               </Button>
@@ -2461,6 +2525,7 @@ const WorkflowEditorPage: React.FC = () => {
                     onClick={() => {
                       setNodeLogs([])
                       setCrawlerLogs([])
+                      crawlerLastSeqRef.current = 0
                       setCurrentExecution(null)
                       currentExecIdRef.current = null
                       if (id) clearConsoleCache(id)
@@ -2516,19 +2581,26 @@ const WorkflowEditorPage: React.FC = () => {
                     暂无执行日志，点击右上角「执行」开始运行工作流
                   </span>
                 ) : (
-                  consoleLines.map((l) => (
-                    <div key={l.key}>
-                      {l.time && <span style={{ color: '#6a9955', marginRight: 8 }}>{l.time}</span>}
-                      <Tag
-                        color={consoleLevelColor(l.level)}
-                        style={{ marginRight: 6, minWidth: 44, textAlign: 'center', fontSize: 10, padding: '0 4px', lineHeight: '16px' }}
-                      >
-                        {l.level.toUpperCase()}
-                      </Tag>
-                      {l.tag && <span style={{ color: '#569cd6', marginRight: 8 }}>[{l.tag}]</span>}
-                      <span style={{ color: '#e0e0e0' }}>{l.message}</span>
-                    </div>
-                  ))
+                  <>
+                    {hiddenConsoleCount > 0 && (
+                      <div style={{ color: '#888', marginBottom: 8 }}>
+                        … 已折叠较早的 {hiddenConsoleCount} 行日志（仅展示最新 {CONSOLE_RENDER_MAX} 行）
+                      </div>
+                    )}
+                    {visibleConsoleLines.map((l) => (
+                      <div key={l.key}>
+                        {l.time && <span style={{ color: '#6a9955', marginRight: 8 }}>{l.time}</span>}
+                        <Tag
+                          color={consoleLevelColor(l.level)}
+                          style={{ marginRight: 6, minWidth: 44, textAlign: 'center', fontSize: 10, padding: '0 4px', lineHeight: '16px' }}
+                        >
+                          {l.level.toUpperCase()}
+                        </Tag>
+                        {l.tag && <span style={{ color: '#569cd6', marginRight: 8 }}>[{l.tag}]</span>}
+                        <span style={{ color: '#e0e0e0' }}>{l.message}</span>
+                      </div>
+                    ))}
+                  </>
                 )}
                 <div ref={consoleEndRef} />
               </div>

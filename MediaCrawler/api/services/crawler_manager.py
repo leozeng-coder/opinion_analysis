@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
+import itertools
 import subprocess
 import signal
 import os
@@ -8,6 +9,12 @@ from datetime import datetime
 from pathlib import Path
 
 from ..schemas import CrawlerStartRequest, LogEntry
+
+
+# 全局单调递增序号生成器：跨所有平台 manager 共享，保证多平台并发时日志有统一时序。
+# itertools.count 的 __next__ 在 CPython 下是原子操作（受 GIL 保护），无需额外加锁。
+# 进程生命周期内单调递增，重启后归零（前端需检测 seq 回退并重置 lastSeq）。
+_global_seq_counter = itertools.count(1)
 
 
 PLATFORM_NAMES: Dict[str, str] = {
@@ -81,6 +88,7 @@ class CrawlerManager:
             message = f"[{self.platform_label}] {message}"
         entry = LogEntry(
             id=self._log_id,
+            seq=next(_global_seq_counter),  # 全局时序：跨平台统一排序与增量拉取的依据
             timestamp=datetime.now().strftime("%H:%M:%S"),
             level=level,
             message=message,
@@ -384,12 +392,20 @@ class CrawlerManagerRegistry:
         """Get aggregated log queue (all platforms)"""
         return self._agg_queue
 
-    def get_all_logs(self, limit: int = 200) -> List[LogEntry]:
-        """Get recent logs from all managers, sorted by timestamp"""
+    def get_all_logs(self, limit: int = 200, after_seq: int = 0) -> List[LogEntry]:
+        """Get recent logs from all managers, sorted by global seq.
+
+        Args:
+            limit: 返回条数上限（兜底，防止首次/断线重连一次性灌入过多）；<=0 表示不限。
+            after_seq: 只返回 seq > after_seq 的日志（增量拉取）。0 表示全量。
+        """
         all_logs: List[LogEntry] = []
         for mgr in self._managers.values():
             all_logs.extend(mgr.logs)
-        all_logs.sort(key=lambda x: x.id)
+        # 按全局 seq 排序：多平台并发时保证统一时序，不再受 per-平台自增 id 干扰
+        all_logs.sort(key=lambda x: x.seq)
+        if after_seq > 0:
+            all_logs = [log for log in all_logs if log.seq > after_seq]
         return all_logs[-limit:] if limit > 0 else all_logs
 
 
