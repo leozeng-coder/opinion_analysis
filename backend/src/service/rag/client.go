@@ -55,8 +55,8 @@ func (c *Client) Search(ctx context.Context, query string, topK int, topics []st
 	if topK <= 0 {
 		topK = 8
 	}
-	if topK > 20 {
-		topK = 20
+	if topK > 30 {
+		topK = 30
 	}
 
 	// 1. 向量化 query（dense 路）；BM25 路由 Milvus 用原始文本分词

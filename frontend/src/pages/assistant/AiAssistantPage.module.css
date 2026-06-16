@@ -484,38 +484,94 @@
 }
 .composerPill {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 10px 10px 18px;
+  flex-direction: column;
+  gap: 0;
+  padding: 14px 14px 10px 18px;
   background: var(--app-surface);
-  border-radius: 24px;
+  border-radius: 18px;
   box-shadow:
     0 4px 24px rgba(15, 23, 42, 0.08),
-    0 0 0 1px rgba(15, 23, 42, 0.06);
+    0 0 0 1px rgba(15, 23, 42, 0.07);
   max-width: min(980px, 100%);
   margin: 0 auto;
   box-sizing: border-box;
 }
+
 .composerPill :global(.ant-input) {
   font-size: 15px;
-  line-height: 1.5;
-  padding: 8px 4px;
-  min-height: 44px !important;
+  line-height: 1.6;
+  padding: 0 4px 6px;
+  min-height: 28px !important;
 }
 
 .composerPill :global(.ant-input::placeholder) {
   color: rgba(0, 0, 0, 0.28);
 }
 
+/* toolbar row: chips left, send button right */
+.composerToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.composerChips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* Doubao-style pill chip */
+.composerChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  height: 30px;
+  font-size: 13px;
+  font-family: inherit;
+  color: rgba(0, 0, 0, 0.55);
+  background: transparent;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+  white-space: nowrap;
+  user-select: none;
+  outline: none;
+}
+
+.composerChip:hover {
+  background: rgba(0, 0, 0, 0.055);
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.composerChip:focus-visible {
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.35);
+}
+
+.composerChipActive {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.09);
+}
+
+.composerChipActive:hover {
+  background: rgba(22, 119, 255, 0.14);
+  color: #1677ff;
+}
+
 .sendCircle {
   flex-shrink: 0;
-  width: 44px !important;
-  height: 44px !important;
+  width: 36px !important;
+  height: 36px !important;
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
   border-radius: 50% !important;
-  margin-bottom: 2px;
 }
 
 .composerMeta {
@@ -543,4 +599,210 @@
 .scrollDown:hover {
   color: var(--c-blue) !important;
   border-color: rgba(22, 119, 255, 0.25);
+}
+
+/* ── Deep think card (Doubao style) ─────────── */
+.thinkCard {
+  margin-bottom: 14px;
+  border: 1px solid rgba(22, 119, 255, 0.14);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(240, 245, 255, 0.55);
+}
+
+/* header row */
+.thinkCardHeader {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.14s;
+}
+
+.thinkCardHeader:hover {
+  background: rgba(22, 119, 255, 0.055);
+}
+
+.thinkCardHeaderActive {
+  background: rgba(240, 245, 255, 0.9);
+}
+
+.thinkCardHeaderDone {
+  background: rgba(240, 245, 255, 0.55);
+}
+
+.thinkCardStatusIcon {
+  flex-shrink: 0;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+}
+
+.thinkCardLabel {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.thinkCardChevron {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s;
+  transform: rotate(90deg);
+}
+
+.thinkCardChevronOpen {
+  transform: rotate(270deg);
+}
+
+/* body */
+.thinkCardBody {
+  padding: 4px 14px 10px;
+  border-top: 1px solid rgba(22, 119, 255, 0.09);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* individual step row */
+.thinkStepRow {
+  padding: 3px 0;
+}
+
+.thinkStepHead {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.thinkStepIcon {
+  flex-shrink: 0;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.thinkStepTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.62);
+}
+
+.thinkStepBrief {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.thinkStepList {
+  margin: 4px 0 2px 24px;
+  padding: 0;
+  list-style: disc;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.thinkStepList li {
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+/* footer */
+.thinkCardFooter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(22, 119, 255, 0.08);
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.38);
+}
+
+/* ── Topic chip-select in composer toolbar ─── */
+.topicSelect {
+  min-width: 68px;
+  max-width: 200px;
+}
+
+/* ensure the popup dropdown is wide enough to read topic names */
+.topicSelect :global(.ant-select-dropdown) {
+  min-width: 180px !important;
+}
+
+/* override selector box to match chip look */
+.topicSelect :global(.ant-select-selector) {
+  padding: 0 10px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  border-radius: 20px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+  cursor: pointer;
+  transition: background 0.14s !important;
+}
+
+.topicSelect:hover :global(.ant-select-selector) {
+  background: rgba(0, 0, 0, 0.055) !important;
+}
+
+.topicSelect :global(.ant-select-selection-placeholder) {
+  color: rgba(0, 0, 0, 0.55) !important;
+  font-size: 13px !important;
+  line-height: 30px !important;
+  inset-inline-start: 10px !important;
+  inset-inline-end: 10px !important;
+}
+
+/* horizontal overflow — never wrap, let maxTagCount clip */
+.topicSelect :global(.ant-select-selection-overflow) {
+  flex-wrap: nowrap;
+  gap: 2px;
+  height: 30px;
+  align-items: center;
+}
+
+.topicSelect :global(.ant-select-selection-item) {
+  font-size: 12px !important;
+  height: 20px !important;
+  line-height: 20px !important;
+  border-radius: 10px !important;
+  padding: 0 6px !important;
+  margin-block: 0 !important;
+}
+
+/* hide default caret — chip doesn't need it */
+.topicSelect :global(.ant-select-arrow) {
+  display: none;
+}
+
+/* active (topics selected) — blue tint like the deep-think chip */
+.topicSelectActive :global(.ant-select-selector) {
+  background: rgba(22, 119, 255, 0.09) !important;
+}
+
+.topicSelectActive:hover :global(.ant-select-selector) {
+  background: rgba(22, 119, 255, 0.14) !important;
+}
+
+.topicSelectActive :global(.ant-select-selection-item) {
+  background: rgba(22, 119, 255, 0.1) !important;
+  border-color: rgba(22, 119, 255, 0.2) !important;
+  color: #1677ff !important;
+}
+
+.topicSelectActive :global(.ant-select-selection-overflow-item-suffix .ant-select-selection-item) {
+  color: #1677ff !important;
+  background: rgba(22, 119, 255, 0.1) !important;
 }

@@ -224,6 +224,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 				aiSessions.GET("", chatSessionH.ListSessions)
 				aiSessions.POST("", chatSessionH.CreateSession)
 				aiSessions.POST("/chat", chatSessionH.Chat)
+				aiSessions.POST("/chat/deep", chatSessionH.DeepChat)
 				aiSessions.GET("/:id", chatSessionH.GetSession)
 				aiSessions.DELETE("/:id", chatSessionH.DeleteSession)
 				aiSessions.PATCH("/:id", chatSessionH.RenameSession)

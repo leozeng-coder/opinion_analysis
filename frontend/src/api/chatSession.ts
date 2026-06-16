@@ -36,11 +36,19 @@ export interface ChatResponse {
   reply: string
 }
 
+export interface ThinkStep {
+  step: 'intent' | 'retrieval' | 'reasoning' | 'generate' | string
+  title: string
+  content?: string
+  status: 'running' | 'done' | 'skipped' | 'error'
+}
+
 export interface StreamChatCallbacks {
-  onSession?: (data: { sessionId: number; title: string; ragUsed: boolean }) => void
+  onSession?: (data: { sessionId: number; title: string; ragUsed: boolean; deepThink?: boolean }) => void
   onContent: (chunk: string) => void
   onDone?: (data: { done: boolean; title?: string }) => void
   onError?: (error: string) => void
+  onThinkStep?: (step: ThinkStep) => void
   signal?: AbortSignal
 }
 
@@ -53,6 +61,105 @@ function buildChatBody(data: ChatRequest): Record<string, unknown> {
   if (data.topics != null && data.topics.length > 0) body.topics = data.topics
   if (data.isRegenerate != null) body.isRegenerate = data.isRegenerate
   return body
+}
+
+function getAuthToken(): string {
+  const stored = localStorage.getItem('auth-storage')
+  if (!stored) return ''
+  try {
+    return JSON.parse(stored).state?.token || ''
+  } catch {
+    return ''
+  }
+}
+
+/** Shared SSE stream consumer used by both chatStream and deepChatStream. */
+async function consumeSSEStream(
+  url: string,
+  body: Record<string, unknown>,
+  callbacks: StreamChatCallbacks,
+  timeoutMs = 120000,
+): Promise<void> {
+  const authToken = getAuthToken()
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  if (callbacks.signal) {
+    callbacks.signal.addEventListener('abort', () => controller.abort())
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let streamCompleted = false
+    let lastEventType = ''
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) { streamCompleted = true; break }
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim() || line.startsWith(':')) continue
+
+          if (line.startsWith('event:')) {
+            lastEventType = line.substring(6).trim()
+            continue
+          }
+
+          if (line.startsWith('data:')) {
+            const rawData = line.substring(5).trim()
+            try {
+              const parsed = JSON.parse(rawData)
+
+              if (lastEventType === 'think_step') {
+                callbacks.onThinkStep?.(parsed as ThinkStep)
+              } else if (lastEventType === 'session' || parsed.sessionId !== undefined) {
+                callbacks.onSession?.(parsed)
+              } else if (lastEventType === 'done' || parsed.done === true) {
+                streamCompleted = true
+                callbacks.onDone?.(parsed)
+              } else if (lastEventType === 'error' || parsed.error !== undefined) {
+                callbacks.onError?.(parsed.error)
+                throw new Error(parsed.error)
+              } else if (parsed.content !== undefined) {
+                callbacks.onContent(parsed.content)
+              }
+            } catch (e) {
+              if (e instanceof Error && lastEventType === 'error') throw e
+              console.warn('Failed to parse SSE data:', rawData)
+            }
+            lastEventType = ''
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+
+    if (!streamCompleted) console.warn('Stream ended without done event')
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 export const chatSessionApi = {
@@ -89,112 +196,13 @@ export const chatSessionApi = {
 
   /** 流式聊天，通过回调接收增量内容 */
   chatStream: async (data: ChatRequest, callbacks: StreamChatCallbacks) => {
-    // 从 localStorage 获取 token（与 zustand store 同步）
-    const token = localStorage.getItem('auth-storage')
-    let authToken = ''
-    if (token) {
-      try {
-        const parsed = JSON.parse(token)
-        authToken = parsed.state?.token || ''
-      } catch {
-        // ignore
-      }
-    }
-
     const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
-    const url = `${baseURL}/ai/sessions/chat`
+    await consumeSSEStream(`${baseURL}/ai/sessions/chat`, buildChatBody(data), callbacks)
+  },
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 120000) // 2分钟超时
-
-    // 如果外部传入了 signal，监听它的 abort 事件
-    if (callbacks.signal) {
-      callbacks.signal.addEventListener('abort', () => controller.abort())
-    }
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify(buildChatBody(data)),
-        signal: controller.signal,
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('No response body')
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let streamCompleted = false
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) {
-            streamCompleted = true
-            break
-          }
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (!line.trim() || line.startsWith(':')) continue
-
-            if (line.startsWith('event:')) {
-              // 事件类型行，跳过
-              continue
-            }
-
-            if (line.startsWith('data:')) {
-              const data = line.substring(5).trim()
-              try {
-                const parsed = JSON.parse(data)
-
-                // 处理不同类型的事件
-                if (parsed.sessionId !== undefined) {
-                  // session 事件
-                  callbacks.onSession?.(parsed)
-                } else if (parsed.content !== undefined) {
-                  // 增量内容
-                  callbacks.onContent(parsed.content)
-                } else if (parsed.done === true) {
-                  // 完成事件
-                  streamCompleted = true
-                  callbacks.onDone?.(parsed)
-                } else if (parsed.error !== undefined) {
-                  // 错误事件
-                  callbacks.onError?.(parsed.error)
-                  throw new Error(parsed.error)
-                } else if (parsed.ragUsed !== undefined) {
-                  // meta 事件（无状态聊天）
-                  // 可以忽略或记录
-                }
-              } catch (e) {
-                console.warn('Failed to parse SSE data:', data, e)
-              }
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock()
-      }
-
-      if (!streamCompleted) {
-        console.warn('Stream ended without done event')
-      }
-    } finally {
-      clearTimeout(timeoutId)
-    }
+  /** 深度思考流式聊天：运行 ReAct 多轮推理检索流水线后再生成回答（耗时更长，超时放宽到 180s） */
+  deepChatStream: async (data: ChatRequest, callbacks: StreamChatCallbacks) => {
+    const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+    await consumeSSEStream(`${baseURL}/ai/sessions/chat/deep`, buildChatBody(data), callbacks, 180000)
   },
 }
