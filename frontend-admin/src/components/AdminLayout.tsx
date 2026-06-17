@@ -28,9 +28,9 @@ const menuItems: MenuProps['items'] = [
   {
     key: '/ai',
     icon: <RobotOutlined />,
-    label: 'AI 引擎',
+    label: 'AI 大模型',
     children: [
-      { key: '/ai/tagger', icon: <RobotOutlined />, label: <Link to="/ai/tagger">打标任务</Link> },
+      { key: '/ai/tagger', icon: <RobotOutlined />, label: <Link to="/ai/tagger">大模型配置</Link> },
       { key: '/ai/rag', icon: <DatabaseOutlined />, label: <Link to="/ai/rag">向量知识库</Link> },
     ],
   },
@@ -51,7 +51,7 @@ const routeLabels: Record<string, string> = {
   '/system': '系统概览',
   '/users': '用户管理',
   '/data/platform-sync': '平台同步',
-  '/ai/tagger': '打标任务',
+  '/ai/tagger': '大模型配置',
   '/ai/rag': '向量知识库',
   '/config/system': '基础设置',
   '/config/notify': '通知与告警',

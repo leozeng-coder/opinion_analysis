@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Descriptions,
   Divider,
   Form,
@@ -12,6 +13,7 @@ import {
   InputNumber,
   Popconfirm,
   Row,
+  Select,
   Space,
   Statistic,
   Switch,
@@ -24,15 +26,21 @@ import {
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CopyOutlined,
+  FileTextOutlined,
+  LoadingOutlined,
+  ReloadOutlined,
   RobotOutlined,
   SaveOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
+import dayjs, { type Dayjs } from 'dayjs'
 import { adminSystemApi } from '@/api/admin-system'
 import { adminAuditApi } from '@/api/admin-audit'
 import { taggerApi } from '@/api/tagger'
 import PageHeader from '@/components/common/PageHeader'
 import ui from '@/styles/page.module.css'
+import { useAuthStore } from '@/store/auth'
 import type {
   AuditLog,
   ConfigSnapshot,
@@ -41,7 +49,6 @@ import type {
   TaggerSnapshotConfig,
   UpdateTaggerPayload,
 } from '@/types'
-import dayjs from 'dayjs'
 
 const { Text } = Typography
 
@@ -390,18 +397,231 @@ const TaggerMonitorTab: React.FC = () => {
   )
 }
 
+// ─── AI 摘要分析 Tab ───────────────────────────────────────────────────────────
+
+const { RangePicker } = DatePicker
+
+interface DailyDigest {
+  date: string
+  text: string
+  keywords: string[]
+}
+
+const RANGE_PRESETS: { label: string; value: [Dayjs, Dayjs] }[] = [
+  { label: '最近 7 天', value: [dayjs().subtract(7, 'day'), dayjs()] },
+  { label: '最近 30 天', value: [dayjs().subtract(30, 'day'), dayjs()] },
+  { label: '最近 90 天', value: [dayjs().subtract(90, 'day'), dayjs()] },
+  { label: '最近 180 天', value: [dayjs().subtract(180, 'day'), dayjs()] },
+]
+
+interface SummaryFormValues {
+  dateRange?: [Dayjs, Dayjs]
+  topics?: string[]
+  platforms?: string[]
+  limit?: number
+}
+
+const AISummaryTab: React.FC = () => {
+  const [form] = Form.useForm<SummaryFormValues>()
+  const [topicOptions, setTopicOptions] = useState<{ value: string; label: string }[]>([])
+  const [platformOptions, setPlatformOptions] = useState<{ value: string; label: string }[]>([])
+  const [digest, setDigest] = useState<DailyDigest | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const token = useAuthStore.getState().token
+      const headers = { Authorization: `Bearer ${token ?? ''}` }
+
+      const [, topicsRes, platformsRes] = await Promise.allSettled([
+        fetch('/api/admin/ai/digest', { headers })
+          .then((r) => r.json() as Promise<{ code: number; data: DailyDigest | null }>)
+          .then((json) => { if (json.code === 0) setDigest(json.data) }),
+        fetch('/api/workflows/topics', { headers })
+          .then((r) => r.json() as Promise<{ code: number; data: { topics: string[] } }>),
+        fetch('/api/platform/list', { headers })
+          .then((r) => r.json() as Promise<{ code: number; data: { code: string; name: string }[] }>),
+      ])
+
+      if (topicsRes.status === 'fulfilled' && topicsRes.value.code === 0 && Array.isArray(topicsRes.value.data?.topics)) {
+        setTopicOptions(
+          topicsRes.value.data.topics.map((name) => ({ value: name, label: name })),
+        )
+      }
+      if (platformsRes.status === 'fulfilled' && platformsRes.value.code === 0 && Array.isArray(platformsRes.value.data)) {
+        setPlatformOptions(platformsRes.value.data.map((p) => ({ value: p.code, label: p.name })))
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+
+  const handleRegenerate = async (values: SummaryFormValues) => {
+    setRegenerating(true)
+    setErrorMsg('')
+    try {
+      const token = useAuthStore.getState().token
+      const body: Record<string, unknown> = {
+        topics: values.topics ?? [],
+        platforms: values.platforms ?? [],
+        limit: values.limit ?? 200,
+      }
+      if (values.dateRange) {
+        body.startDate = values.dateRange[0].format('YYYY-MM-DD')
+        body.endDate = values.dateRange[1].format('YYYY-MM-DD')
+      }
+
+      const res = await fetch('/api/admin/ai/digest/regenerate', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+      const json = await res.json() as { code: number; data?: DailyDigest; message?: string }
+      if (json.code === 0) {
+        if (json.data) setDigest(json.data)
+        void message.success('摘要已生成，用户端「今日 AI 摘要」已更新')
+      } else {
+        setErrorMsg(json.message ?? '生成失败')
+      }
+    } catch (err: unknown) {
+      setErrorMsg('请求异常：' + String(err))
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  return (
+    <Card bordered={false} className={ui.panelCard} title={<span><FileTextOutlined style={{ marginRight: 8 }} />AI 摘要分析</span>}>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={9}>
+          <Card type="inner" title="分析条件" style={{ height: '100%' }}>
+            <Form
+              form={form}
+              layout="vertical"
+              onFinish={(v) => void handleRegenerate(v)}
+              initialValues={{ limit: 200 }}
+            >
+              <Form.Item label="时间范围" name="dateRange">
+                <RangePicker
+                  style={{ width: '100%' }}
+                  presets={RANGE_PRESETS}
+                  disabledDate={(d) => d.isAfter(dayjs())}
+                  format="YYYY-MM-DD"
+                />
+              </Form.Item>
+              <Form.Item label="话题筛选（可选，多选）" name="topics" extra="不选则覆盖全部话题">
+                <Select
+                  mode="multiple"
+                  placeholder="全部话题"
+                  options={topicOptions}
+                  maxTagCount="responsive"
+                  allowClear
+                  showSearch
+                  filterOption={(input, opt) =>
+                    (opt?.label as string ?? '').toLowerCase().includes(input.toLowerCase())
+                  }
+                />
+              </Form.Item>
+              <Form.Item label="平台筛选" name="platforms" extra="不选则覆盖全部平台">
+                <Select
+                  mode="multiple"
+                  placeholder="全部平台"
+                  allowClear
+                  options={platformOptions}
+                  maxTagCount="responsive"
+                />
+              </Form.Item>
+              <Form.Item label="最多分析文章数" name="limit" extra="建议 100~200，过多会增加响应时间">
+                <InputNumber min={10} max={500} style={{ width: '100%' }} addonAfter="篇" />
+              </Form.Item>
+
+              {errorMsg && (
+                <Alert type="error" message={errorMsg} showIcon style={{ marginBottom: 12 }} closable onClose={() => setErrorMsg('')} />
+              )}
+
+              <Form.Item style={{ marginBottom: 0 }}>
+                <Space>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={regenerating ? <LoadingOutlined spin /> : <ReloadOutlined />}
+                    loading={regenerating}
+                  >
+                    生成摘要
+                  </Button>
+                  <Button onClick={() => form.resetFields()}>重置</Button>
+                </Space>
+              </Form.Item>
+            </Form>
+          </Card>
+        </Col>
+
+        <Col xs={24} lg={15}>
+          <Card
+            type="inner"
+            loading={loading}
+            title={
+              <Space>
+                <span>当前摘要</span>
+                {digest?.date && <Tag color="blue">{digest.date}</Tag>}
+              </Space>
+            }
+            extra={
+              digest?.text
+                ? <Button size="small" icon={<CopyOutlined />} onClick={() => void navigator.clipboard.writeText(digest.text).then(() => void message.success('已复制'))}>复制</Button>
+                : null
+            }
+          >
+            {!digest && !loading && (
+              <div style={{ textAlign: 'center', padding: '48px 0', color: '#bbb' }}>
+                <FileTextOutlined style={{ fontSize: 36, marginBottom: 10 }} />
+                <div><Text type="secondary">暂无摘要，设置条件后点击「生成摘要」</Text></div>
+              </div>
+            )}
+
+            {digest && (
+              <>
+                {digest.keywords?.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>关键词：</Text>
+                    {digest.keywords.map((kw) => <Tag key={kw}>{kw}</Tag>)}
+                  </div>
+                )}
+                <div style={{ background: 'var(--app-bg, #f7f8fa)', borderRadius: 8, padding: '14px 16px', border: '1px solid var(--app-border, #e8e8e8)' }}>
+                  <Text style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: '1.75', display: 'block' }}>
+                    {digest.text}
+                  </Text>
+                </div>
+              </>
+            )}
+          </Card>
+        </Col>
+      </Row>
+    </Card>
+  )
+}
+
 // ─── 主页面 ────────────────────────────────────────────────────────────────────
 const TaggerPage: React.FC = () => (
   <div className={ui.pageShell}>
     <PageHeader
-      title="打标任务"
-      subtitle="大模型配置与 AI 打标任务监控"
+      title="大模型配置"
+      subtitle="AI 大模型接入配置、打标任务监控与摘要分析"
       icon={<RobotOutlined />}
     />
     <Tabs
       items={[
         { key: 'config', label: '配置', children: <TaggerConfigTab /> },
-        { key: 'monitor', label: '任务监控', children: <TaggerMonitorTab /> },
+        { key: 'monitor', label: 'AI 打标', children: <TaggerMonitorTab /> },
+        { key: 'summary', label: 'AI 摘要分析', children: <AISummaryTab /> },
       ]}
     />
   </div>

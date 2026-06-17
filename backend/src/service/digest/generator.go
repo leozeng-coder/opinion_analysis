@@ -34,37 +34,94 @@ func NewGenerator(db *gorm.DB, digestRepo *repository.DigestRepository, taggerSv
 	}
 }
 
-// GenerateRecentDigest 生成近期舆情AI分析摘要（基于最近500条数据）
+// FilterOptions 摘要生成过滤条件（均为可选）
+type FilterOptions struct {
+	Topics    []string // 话题过滤（OR 关系）
+	Platforms []string // 平台过滤（OR 关系），传入 /api/platform/list 的 code
+	StartDate string   // 格式 "2006-01-02"，为空则不限
+	EndDate   string   // 格式 "2006-01-02"，为空则不限
+	Limit     int      // 最多取多少条，0 则默认 500
+}
+
+// platformCodeToColumn 将 /api/platform/list 返回的简写 code 映射为
+// 文章表 platform 列中实际存储的值（见 service/platform_syncers.go）。
+// 未知 code 原样返回，兼容直接传入完整值的情况。
+var platformCodeToColumn = map[string]string{
+	"xhs":   "xhs",
+	"dy":    "douyin",
+	"bili":  "bilibili",
+	"wb":    "weibo",
+	"ks":    "kuaishou",
+	"tieba": "tieba",
+	"zhihu": "zhihu",
+}
+
+func normalizePlatform(code string) string {
+	if v, ok := platformCodeToColumn[code]; ok {
+		return v
+	}
+	return code
+}
+
+// GenerateRecentDigest 生成近期舆情AI分析摘要（基于最近500条数据，无过滤条件）
 func (g *Generator) GenerateRecentDigest(ctx context.Context) error {
+	return g.GenerateWithFilters(ctx, FilterOptions{})
+}
+
+// GenerateWithFilters 按指定过滤条件生成摘要并保存到 Redis
+func (g *Generator) GenerateWithFilters(ctx context.Context, opts FilterOptions) error {
 	if g.digest == nil {
 		log.Printf("[digest] redis not available, skip digest generation")
 		return nil
 	}
 
-	log.Printf("[digest] 开始生成近期舆情AI分析摘要...")
+	limit := opts.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
 
-	// 1. 查询最近500条文章
+	log.Printf("[digest] 开始生成舆情AI分析摘要 (limit=%d, platforms=%v, topics=%v, start=%s, end=%s)...",
+		limit, opts.Platforms, opts.Topics, opts.StartDate, opts.EndDate)
+
+	query := g.db.Model(&model.Article{}).Order("published_at DESC").Limit(limit)
+
+	if opts.StartDate != "" {
+		query = query.Where("published_at >= ?", opts.StartDate+" 00:00:00")
+	}
+	if opts.EndDate != "" {
+		query = query.Where("published_at <= ?", opts.EndDate+" 23:59:59")
+	}
+	if len(opts.Platforms) > 0 {
+		cols := make([]string, 0, len(opts.Platforms))
+		for _, p := range opts.Platforms {
+			cols = append(cols, normalizePlatform(p))
+		}
+		if len(cols) == 1 {
+			query = query.Where("platform = ?", cols[0])
+		} else {
+			query = query.Where("platform IN ?", cols)
+		}
+	}
+	if len(opts.Topics) == 1 {
+		query = query.Where("topic = ?", opts.Topics[0])
+	} else if len(opts.Topics) > 1 {
+		query = query.Where("topic IN ?", opts.Topics)
+	}
+
 	var articles []model.Article
-	err := g.db.
-		Order("published_at DESC").
-		Limit(500).
-		Find(&articles).Error
-
-	if err != nil {
-		return fmt.Errorf("query recent articles: %w", err)
+	if err := query.Find(&articles).Error; err != nil {
+		return fmt.Errorf("query articles: %w", err)
 	}
 
 	if len(articles) == 0 {
-		log.Printf("[digest] 没有文章数据，跳过摘要生成")
-		return nil
+		log.Printf("[digest] 没有符合条件的文章，跳过摘要生成")
+		return fmt.Errorf("no articles found for given filters")
 	}
 
 	log.Printf("[digest] 查询到 %d 条文章，开始分析...", len(articles))
 
-	// 2. 统计数据
 	stats := g.analyzeArticles(articles)
 
-	// 3. 调用LLM生成摘要
 	summary, keywords, err := g.generateSummaryWithLLM(ctx, articles, stats)
 	if err != nil {
 		log.Printf("[digest] LLM生成摘要失败: %v，使用统计摘要", err)
@@ -72,7 +129,6 @@ func (g *Generator) GenerateRecentDigest(ctx context.Context) error {
 		keywords = stats.TopKeywords
 	}
 
-	// 4. 保存到Redis
 	today := time.Now().Format("2006-01-02")
 	digestData := &repository.DailyDigest{
 		Date:     today,
@@ -84,9 +140,7 @@ func (g *Generator) GenerateRecentDigest(ctx context.Context) error {
 		return fmt.Errorf("save digest to redis: %w", err)
 	}
 
-	log.Printf("[digest] ✅ 近期舆情AI分析摘要生成成功")
-	log.Printf("[digest] 摘要长度: %d 字符, 关键词: %v", len(summary), keywords)
-
+	log.Printf("[digest] ✅ 摘要生成成功，长度: %d 字符, 关键词: %v", len(summary), keywords)
 	return nil
 }
 

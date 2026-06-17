@@ -106,6 +106,7 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 	adminRagH := adminhandler.NewRAGHandler(store, ragProc, milvusService, embedClient, syncerSvc)
 	adminDSH := adminhandler.NewDataSourceHandler(store)
 	adminAuditH := adminhandler.NewAuditHandler(store)
+	adminAISummaryH := adminhandler.NewAISummaryHandler(db, taggerSvc, store.Digest)
 
 	// 工作流引擎和调度器
 	workflowEngine := workflow.NewEngine(db, store, logger, taggerSvc, ragProc, syncerSvc, alertEngine, reportSvc)
@@ -339,6 +340,11 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 					adminDSH.Delete)
 
 				admin.GET("/audit-logs", adminAuditH.List)
+
+				admin.GET("/ai/digest", adminAISummaryH.Get)
+				admin.POST("/ai/digest/regenerate",
+					middleware.Audit(db, "ai_summary", "generate"),
+					adminAISummaryH.Regenerate)
 			}
 
 			// 分析报告下载

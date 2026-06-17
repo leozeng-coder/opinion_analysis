@@ -238,6 +238,19 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 		// 步骤②：全量深度挖掘
 		insights := s.deepAnalyzeAll(ctx, articles, comments, stats, cfg, tc)
 
+		// 全局风险洞察（基于全量 insights）
+		progress("全局风险与矛盾分析...")
+		briefingsForGlobal := make([]ArticleBriefing, len(insights))
+		for i, ins := range insights {
+			briefingsForGlobal[i] = ArticleBriefing{
+				ArticleID: ins.ArticleID,
+				Opinion:   ins.CoreNeed,
+				AgeDays:   ins.AgeDays,
+				Tags:      ins.PainPoints,
+			}
+		}
+		globalInsight = s.globalAnalyzeInsights(ctx, briefingsForGlobal, stats, cfg)
+
 		// 步骤③：语义聚类
 		progress("语义聚类中...")
 		clusters := s.clusterInsights(ctx, insights, cfg, tc)
@@ -255,7 +268,7 @@ func (s *Service) Generate(ctx context.Context, articleIDs []int64, crawlerRunID
 
 		// 结论
 		progress("生成综合结论...")
-		cs, err := s.buildConclusionStructured(ctx, stats, topicSummariesStructured, nil, cfg)
+		cs, err := s.buildConclusionStructured(ctx, stats, topicSummariesStructured, globalInsight, cfg)
 		if err != nil {
 			log.Printf("[Report] 深度模式结论失败: %v", err)
 		} else {
