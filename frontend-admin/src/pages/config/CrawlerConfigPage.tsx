@@ -30,20 +30,11 @@ import {
 } from '@ant-design/icons'
 import { adminCrawlerApi, type CrawlerConfigResponse } from '@/api/admin-crawler'
 import { platformSyncApi, type PlatformInfo, type PlatformSyncProgress } from '@/api/crawler'
+import { PLATFORMS } from '@/utils/platform'
 import PageHeader from '@/components/common/PageHeader'
 import ui from '@/styles/page.module.css'
 
 const { Text } = Typography
-
-const PLATFORMS = [
-  { code: 'xhs', name: '小红书', color: '#ff2442' },
-  { code: 'dy', name: '抖音', color: '#161823' },
-  { code: 'ks', name: '快手', color: '#ff5500' },
-  { code: 'bili', name: 'B站', color: '#00a1d6' },
-  { code: 'wb', name: '微博', color: '#e6162d' },
-  { code: 'tieba', name: '贴吧', color: '#2468f2' },
-  { code: 'zhihu', name: '知乎', color: '#0066ff' },
-]
 
 const XHS_SORT_OPTIONS = [
   { value: 'time_descending', label: '最新发布' },
@@ -465,7 +456,7 @@ const CrawlerConfigPage: React.FC = () => {
               description="Cookie 以加密方式存储于数据库，展示时已脱敏。更新后立即对下次爬虫任务生效，无需重启服务。"
               type="info" showIcon style={{ marginBottom: 16 }} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {PLATFORMS.map(({ code, name, color }) => {
+              {PLATFORMS.map(({ code, label, brandColor }) => {
                 const info = cookies[code]
                 const isSet = info?.set ?? false
                 return (
@@ -476,9 +467,9 @@ const CrawlerConfigPage: React.FC = () => {
                   }}>
                     <div style={{
                       width: 8, height: 8, borderRadius: '50%',
-                      background: color, flexShrink: 0,
+                      background: brandColor, flexShrink: 0,
                     }} />
-                    <Text strong style={{ width: 72, flexShrink: 0 }}>{name}</Text>
+                    <Text strong style={{ width: 72, flexShrink: 0 }}>{label}</Text>
                     {isSet ? (
                       <>
                         <Tag className={ui.softTagSage} style={{ fontFamily: 'monospace', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -491,12 +482,12 @@ const CrawlerConfigPage: React.FC = () => {
                     )}
                     <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
                       <Button size="small" type="primary" ghost
-                        onClick={() => handleOpenCookieModal(code, name)}>
+                        onClick={() => handleOpenCookieModal(code, label)}>
                         {isSet ? '更新' : '设置'} Cookie
                       </Button>
                       {isSet && (
                         <Button size="small" danger ghost
-                          onClick={() => void handleClearCookie(code, name)}>
+                          onClick={() => void handleClearCookie(code, label)}>
                           清除
                         </Button>
                       )}

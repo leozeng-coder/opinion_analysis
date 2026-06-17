@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"opinion-analysis/pkg/platform"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/service/digest"
 )
@@ -323,14 +324,14 @@ func (s *PlatformSyncService) GetLastSyncTime(platform string) (time.Time, error
 
 // GetPlatformList 获取所有支持的平台列表
 func (s *PlatformSyncService) GetPlatformList() []PlatformInfo {
-	platforms := []PlatformInfo{
-		{Code: "xhs", Name: "小红书", Table: "xhs_note"},
-		{Code: "dy", Name: "抖音", Table: "douyin_aweme"},
-		{Code: "bili", Name: "B站", Table: "bilibili_video"},
-		{Code: "wb", Name: "微博", Table: "weibo_note"},
-		{Code: "ks", Name: "快手", Table: "kuaishou_video"},
-		{Code: "tieba", Name: "贴吧", Table: "tieba_note"},
-		{Code: "zhihu", Name: "知乎", Table: "zhihu_content"},
+	platforms := make([]PlatformInfo, 0, len(platform.All))
+	for _, p := range platform.All {
+		platforms = append(platforms, PlatformInfo{
+			Code:            p.Code,
+			Name:            p.DisplayName,
+			ArticlePlatform: p.Article,
+			Table:           p.SourceTable,
+		})
 	}
 
 	// 为每个平台添加最后同步时间
@@ -344,10 +345,11 @@ func (s *PlatformSyncService) GetPlatformList() []PlatformInfo {
 
 // PlatformInfo 平台信息
 type PlatformInfo struct {
-	Code         string    `json:"code"`
-	Name         string    `json:"name"`
-	Table        string    `json:"table"`
-	LastSyncTime time.Time `json:"lastSyncTime"`
+	Code            string    `json:"code"`            // 短码，如 wb
+	Name            string    `json:"name"`            // 中文展示名，如 微博
+	ArticlePlatform string    `json:"articlePlatform"` // articles.platform 入库值，如 weibo
+	Table           string    `json:"table"`
+	LastSyncTime    time.Time `json:"lastSyncTime"`
 }
 
 // progressToResult 将进度转换为结果

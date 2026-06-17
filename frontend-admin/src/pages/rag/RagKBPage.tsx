@@ -30,6 +30,7 @@ import {
 } from '@ant-design/icons'
 import { adminRagApi } from '@/api/admin-rag'
 import { workflowApi } from '@/api/workflow'
+import { platformLabel, PLATFORMS } from '@/utils/platform'
 import PageHeader from '@/components/common/PageHeader'
 import ui from '@/styles/page.module.css'
 import type { RagKBArticle, RagKBArticleDetail, RagKBChunk } from '@/types'
@@ -229,11 +230,7 @@ const RagKBPage: React.FC = () => {
           <Button onClick={handleSearch} type="primary">搜索</Button>
           <Select style={{ width: 140 }} placeholder="平台筛选" allowClear
             value={platform || undefined} onChange={v => setPlatform(v ?? '')}
-            options={[
-              { label: 'weibo', value: 'weibo' }, { label: 'xhs', value: 'xhs' },
-              { label: 'zhihu', value: 'zhihu' }, { label: 'bilibili', value: 'bilibili' },
-              { label: 'douyin', value: 'douyin' }, { label: 'tieba', value: 'tieba' },
-            ]}
+            options={PLATFORMS.map((p) => ({ label: p.label, value: p.article }))}
           />
           <Select style={{ width: 140 }} placeholder="话题筛选" allowClear
             value={topic || undefined} onChange={v => setTopic(v ?? '')}
@@ -307,7 +304,7 @@ const RagKBPage: React.FC = () => {
         {!detailLoading && detail && (
           <Space direction="vertical" style={{ width: '100%' }} size={24}>
             <Descriptions size="small" bordered column={2}>
-              <Descriptions.Item label="平台">{detail.article.platform || '-'}</Descriptions.Item>
+              <Descriptions.Item label="平台">{detail.article.platform ? platformLabel(detail.article.platform) : '-'}</Descriptions.Item>
               <Descriptions.Item label="作者">{detail.article.author || '-'}</Descriptions.Item>
               <Descriptions.Item label="发布时间">
                 {detail.article.publishedAt ? dayjs(detail.article.publishedAt).format('YYYY-MM-DD HH:mm') : '-'}

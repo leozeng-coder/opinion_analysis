@@ -28,6 +28,7 @@ import {
 import { adminRagApi } from '@/api/admin-rag'
 import { adminSystemApi } from '@/api/admin-system'
 import type { RagStatus, SystemHealth, TaggerConfig, PlatformDiff } from '@/types'
+import { platformLabel } from '@/utils/platform'
 import PageHeader from '@/components/common/PageHeader'
 import page from '@/styles/page.module.css'
 import dayjs from 'dayjs'
@@ -42,10 +43,6 @@ const StatusTag: React.FC<{ probe?: { ok: boolean; message?: string; latencyMs: 
       <Tag icon={<CloseCircleOutlined />} color="error">{probe.message && probe.message.length < 20 ? probe.message : '异常'}</Tag>
     </Tooltip>
   )
-}
-
-const PLATFORM_NAMES: Record<string, string> = {
-  xhs: '小红书', dy: '抖音', ks: '快手', bili: '哔哩哔哩', wb: '微博', tieba: '贴吧', zhihu: '知乎',
 }
 
 const SystemPage: React.FC = () => {
@@ -205,7 +202,7 @@ const SystemPage: React.FC = () => {
                     title: '平台',
                     dataIndex: 'code',
                     width: 100,
-                    render: (code: string) => PLATFORM_NAMES[code] ?? code,
+                    render: (code: string) => platformLabel(code),
                   },
                   {
                     title: '源表',

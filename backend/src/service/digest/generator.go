@@ -13,6 +13,7 @@ import (
 
 	"gorm.io/gorm"
 	"opinion-analysis/config"
+	"opinion-analysis/pkg/platform"
 	"opinion-analysis/src/model"
 	"opinion-analysis/src/repository"
 	"opinion-analysis/src/service/tagger"
@@ -37,30 +38,10 @@ func NewGenerator(db *gorm.DB, digestRepo *repository.DigestRepository, taggerSv
 // FilterOptions 摘要生成过滤条件（均为可选）
 type FilterOptions struct {
 	Topics    []string // 话题过滤（OR 关系）
-	Platforms []string // 平台过滤（OR 关系），传入 /api/platform/list 的 code
+	Platforms []string // 平台过滤（OR 关系），可传短码或入库值，内部统一归一
 	StartDate string   // 格式 "2006-01-02"，为空则不限
 	EndDate   string   // 格式 "2006-01-02"，为空则不限
 	Limit     int      // 最多取多少条，0 则默认 500
-}
-
-// platformCodeToColumn 将 /api/platform/list 返回的简写 code 映射为
-// 文章表 platform 列中实际存储的值（见 service/platform_syncers.go）。
-// 未知 code 原样返回，兼容直接传入完整值的情况。
-var platformCodeToColumn = map[string]string{
-	"xhs":   "xhs",
-	"dy":    "douyin",
-	"bili":  "bilibili",
-	"wb":    "weibo",
-	"ks":    "kuaishou",
-	"tieba": "tieba",
-	"zhihu": "zhihu",
-}
-
-func normalizePlatform(code string) string {
-	if v, ok := platformCodeToColumn[code]; ok {
-		return v
-	}
-	return code
 }
 
 // GenerateRecentDigest 生成近期舆情AI分析摘要（基于最近500条数据，无过滤条件）
@@ -92,10 +73,7 @@ func (g *Generator) GenerateWithFilters(ctx context.Context, opts FilterOptions)
 		query = query.Where("published_at <= ?", opts.EndDate+" 23:59:59")
 	}
 	if len(opts.Platforms) > 0 {
-		cols := make([]string, 0, len(opts.Platforms))
-		for _, p := range opts.Platforms {
-			cols = append(cols, normalizePlatform(p))
-		}
+		cols := platform.ResolveArticleValues(opts.Platforms)
 		if len(cols) == 1 {
 			query = query.Where("platform = ?", cols[0])
 		} else {

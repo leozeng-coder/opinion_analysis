@@ -10,6 +10,7 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { platformDataApi, type PlatformDataItem } from '@/api/platform-data'
 import { platformCommentApi, type PlatformCommentItem } from '@/api/platform-comment'
+import { PLATFORMS, platformLabel, platformColor } from '@/utils/platform'
 
 const { Text, Link } = Typography
 const { RangePicker } = DatePicker
@@ -42,27 +43,8 @@ const parseAllImageUrls = (coverUrl?: string): string[] => {
   return [coverUrl]
 }
 
-// 平台选项
-const PLATFORM_OPTIONS = [
-  { label: '小红书', value: 'xhs' },
-  { label: '抖音', value: 'dy' },
-  { label: 'B站', value: 'bili' },
-  { label: '微博', value: 'wb' },
-  { label: '快手', value: 'ks' },
-  { label: '贴吧', value: 'tieba' },
-  { label: '知乎', value: 'zhihu' },
-]
-
-// 平台颜色映射
-const PLATFORM_COLORS: Record<string, string> = {
-  xhs: 'red',
-  dy: 'blue',
-  bili: 'cyan',
-  wb: 'orange',
-  ks: 'orange',
-  tieba: 'purple',
-  zhihu: 'blue',
-}
+// 平台选项（value 用短码，与 /api/platform/data 接口一致）
+const PLATFORM_OPTIONS = PLATFORMS.map((p) => ({ label: p.label, value: p.code }))
 
 const getCommentStatLabel = (platform: string) => (platform === 'tieba' ? '回复' : '评论')
 
@@ -152,8 +134,8 @@ const PlatformDataPage: React.FC = () => {
       width: 80,
       fixed: 'left',
       render: (p: string) => (
-        <Tag color={PLATFORM_COLORS[p] || 'default'}>
-          {PLATFORM_OPTIONS.find(opt => opt.value === p)?.label || p}
+        <Tag color={platformColor(p)}>
+          {platformLabel(p)}
         </Tag>
       ),
     },
@@ -329,8 +311,8 @@ const PlatformDataPage: React.FC = () => {
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions column={2} bordered size="small">
               <Descriptions.Item label="平台" span={1}>
-                <Tag color={PLATFORM_COLORS[selectedItem.platform] || 'default'}>
-                  {PLATFORM_OPTIONS.find(opt => opt.value === selectedItem.platform)?.label || selectedItem.platform}
+                <Tag color={platformColor(selectedItem.platform)}>
+                  {platformLabel(selectedItem.platform)}
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="发布时间" span={1}>
