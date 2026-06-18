@@ -22,6 +22,9 @@ var SettingKeys = []string{
 	settingPrefix + "interval_seconds",
 	settingPrefix + "batch_size",
 	settingPrefix + "max_per_tick",
+	settingPrefix + "web_search_enabled",
+	settingPrefix + "web_search_api_key",
+	settingPrefix + "web_search_count",
 }
 
 // LoadConfig 用 system_settings 表里的覆盖值合并 base（来自 config.yaml 默认值）。
@@ -40,22 +43,28 @@ func LoadConfig(db *gorm.DB, base config.TaggerConfig) config.TaggerConfig {
 // SaveConfig 把 cfg 中的字段批量写回 system_settings 表，并记录完整配置快照。
 func SaveConfig(db *gorm.DB, cfg config.TaggerConfig, updatedBy uint, updatedByName string) error {
 	pairs := map[string]string{
-		settingPrefix + "enabled":          boolToStr(cfg.Enabled),
-		settingPrefix + "llm_api_key":      cfg.LLMApiKey,
-		settingPrefix + "llm_base_url":     cfg.LLMBaseURL,
-		settingPrefix + "llm_model":        cfg.LLMModel,
-		settingPrefix + "interval_seconds": strconv.Itoa(cfg.IntervalSeconds),
-		settingPrefix + "batch_size":       strconv.Itoa(cfg.BatchSize),
-		settingPrefix + "max_per_tick":     strconv.Itoa(cfg.MaxPerTick),
+		settingPrefix + "enabled":            boolToStr(cfg.Enabled),
+		settingPrefix + "llm_api_key":        cfg.LLMApiKey,
+		settingPrefix + "llm_base_url":       cfg.LLMBaseURL,
+		settingPrefix + "llm_model":          cfg.LLMModel,
+		settingPrefix + "interval_seconds":   strconv.Itoa(cfg.IntervalSeconds),
+		settingPrefix + "batch_size":         strconv.Itoa(cfg.BatchSize),
+		settingPrefix + "max_per_tick":       strconv.Itoa(cfg.MaxPerTick),
+		settingPrefix + "web_search_enabled": boolToStr(cfg.WebSearchEnabled),
+		settingPrefix + "web_search_api_key": cfg.WebSearchApiKey,
+		settingPrefix + "web_search_count":   strconv.Itoa(cfg.WebSearchCount),
 	}
 	descs := map[string]string{
-		settingPrefix + "enabled":          "AI 自动打标后台任务是否启用",
-		settingPrefix + "llm_api_key":      "LLM API Key（敏感）",
-		settingPrefix + "llm_base_url":     "LLM API Base URL（OpenAI 兼容）",
-		settingPrefix + "llm_model":        "LLM 模型名",
-		settingPrefix + "interval_seconds": "轮询间隔（秒）",
-		settingPrefix + "batch_size":       "单次 LLM 请求条数",
-		settingPrefix + "max_per_tick":     "单次轮询最多处理条数",
+		settingPrefix + "enabled":            "AI 自动打标后台任务是否启用",
+		settingPrefix + "llm_api_key":        "LLM API Key（敏感）",
+		settingPrefix + "llm_base_url":       "LLM API Base URL（OpenAI 兼容）",
+		settingPrefix + "llm_model":          "LLM 模型名",
+		settingPrefix + "interval_seconds":   "轮询间隔（秒）",
+		settingPrefix + "batch_size":         "单次 LLM 请求条数",
+		settingPrefix + "max_per_tick":       "单次轮询最多处理条数",
+		settingPrefix + "web_search_enabled": "联网搜索工具是否启用（深度思考模式）",
+		settingPrefix + "web_search_api_key": "联网搜索 API Key（博查 Bocha，敏感）",
+		settingPrefix + "web_search_count":   "联网搜索单次返回结果数",
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		for k, v := range pairs {
@@ -139,6 +148,14 @@ func applySetting(cfg *config.TaggerConfig, key, val string) {
 	case settingPrefix + "max_per_tick":
 		if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n > 0 {
 			cfg.MaxPerTick = n
+		}
+	case settingPrefix + "web_search_enabled":
+		cfg.WebSearchEnabled = parseBool(val)
+	case settingPrefix + "web_search_api_key":
+		cfg.WebSearchApiKey = val
+	case settingPrefix + "web_search_count":
+		if n, err := strconv.Atoi(strings.TrimSpace(val)); err == nil && n > 0 {
+			cfg.WebSearchCount = n
 		}
 	}
 }

@@ -48,6 +48,8 @@ type PipelineState struct {
 	Observations []Observation
 	// ReasoningChain 记录每一轮 Reason 的思考，供综合与展示。
 	ReasoningChain []string
+	// WebResults 联网搜索工具累积的结果（按 URL 去重）。
+	WebResults []WebResult
 
 	// 兼容字段：单轮检索结果（ReAct 内部每轮临时填充）
 	RetrievedChunks []string
@@ -69,6 +71,15 @@ type Observation struct {
 	Extract   string // LLM 提炼的与问题相关的摘要
 	Score     int    // 相关性打分 1-5
 	Round     int    // 第几轮检索得到
+}
+
+// WebResult 是一条联网搜索结果。
+type WebResult struct {
+	Title     string // 标题
+	URL       string // 原文链接
+	Summary   string // 正文摘要 / 片段
+	SiteName  string // 来源站点
+	Published string // 发布时间（可空）
 }
 
 // ChatMessage mirrors tagger.ChatMessage to avoid a circular import.

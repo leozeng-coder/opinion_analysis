@@ -22,8 +22,23 @@ type deepChatReq struct {
 	Content      string   `json:"content"`
 	PageHint     string   `json:"pageHint"`
 	UseRAG       *bool    `json:"useRag"`
+	WebSearch    *bool    `json:"webSearch"`
 	Topics       []string `json:"topics"`
 	IsRegenerate bool     `json:"isRegenerate"`
+}
+
+// Capabilities 返回深度思考模式下用户可用的能力开关，供前端决定是否展示对应入口。
+// 目前包含联网搜索：仅当管理员启用总开关且已配置 API Key 时为 true。
+func (h *ChatSessionHandler) Capabilities(c *gin.Context) {
+	webSearch := false
+	if h.taggerSvc != nil {
+		cfg, _ := h.taggerSvc.GetConfig()
+		// 联网搜索可用 = 管理员启用总开关 且 已配置博查 API Key。
+		webSearch = cfg.WebSearchEnabled && strings.TrimSpace(cfg.WebSearchApiKey) != ""
+	}
+	response.OK(c, gin.H{
+		"webSearch": webSearch,
+	})
 }
 
 // DeepChat is the SSE handler for the /chat/deep endpoint.
@@ -95,6 +110,12 @@ func (h *ChatSessionHandler) DeepChat(c *gin.Context) {
 		ragClient = h.ragClient
 	}
 
+	// 用户本次是否请求联网搜索；实际是否生效还取决于管理员后台总开关与 Key（在 pipeline 内判定）。
+	webSearch := false
+	if req.WebSearch != nil {
+		webSearch = *req.WebSearch
+	}
+
 	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -125,6 +146,7 @@ func (h *ChatSessionHandler) DeepChat(c *gin.Context) {
 		strings.TrimSpace(req.PageHint),
 		req.Topics,
 		ragClient,
+		webSearch,
 	)
 
 	var fullReply strings.Builder

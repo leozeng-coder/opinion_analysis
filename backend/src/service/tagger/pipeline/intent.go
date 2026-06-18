@@ -135,6 +135,12 @@ func NewFilterLLMCall(baseURL, apiKey, model string, httpClient *http.Client) LL
 	return newLLMCall(baseURL, apiKey, model, httpClient, 1500)
 }
 
+// NewSynthesizeLLMCall creates an LLMCallFn with a generous token budget (2800).
+// 综合推理要产出用户需求洞察 + 多个分析维度 + 多条带证据的关键洞察，输出较长，需更大预算避免被截断。
+func NewSynthesizeLLMCall(baseURL, apiKey, model string, httpClient *http.Client) LLMCallFn {
+	return newLLMCall(baseURL, apiKey, model, httpClient, 2800)
+}
+
 // newLLMCall is the shared implementation behind the public constructors.
 func newLLMCall(baseURL, apiKey, model string, httpClient *http.Client, maxTokens int) LLMCallFn {
 	return func(ctx context.Context, msgs []map[string]string) (string, error) {

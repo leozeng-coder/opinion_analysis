@@ -5,6 +5,7 @@ import {
   AuditOutlined,
   CloudServerOutlined,
   DatabaseOutlined,
+  GlobalOutlined,
   LogoutOutlined,
   RobotOutlined,
   SettingOutlined,
@@ -32,6 +33,7 @@ const menuItems: MenuProps['items'] = [
     children: [
       { key: '/ai/tagger', icon: <RobotOutlined />, label: <Link to="/ai/tagger">大模型配置</Link> },
       { key: '/ai/rag', icon: <DatabaseOutlined />, label: <Link to="/ai/rag">向量知识库</Link> },
+      { key: '/ai/web-search', icon: <GlobalOutlined />, label: <Link to="/ai/web-search">联网搜索能力</Link> },
     ],
   },
   {
@@ -53,6 +55,7 @@ const routeLabels: Record<string, string> = {
   '/data/platform-sync': '平台同步',
   '/ai/tagger': '大模型配置',
   '/ai/rag': '向量知识库',
+  '/ai/web-search': '联网搜索能力',
   '/config/system': '基础设置',
   '/config/notify': '通知与告警',
   '/config/crawler': '爬虫配置',

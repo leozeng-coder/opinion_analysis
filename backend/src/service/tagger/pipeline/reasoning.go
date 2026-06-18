@@ -8,19 +8,22 @@ import (
 )
 
 const synthesizeSystemPrompt = `你是一位资深舆情分析师。给定用户问题、推理过程，以及经检索筛选后累积的相关内容，
-请先洞察用户的真实需求，再做一次深度综合分析。
+请先洞察用户的真实需求，再做一次深度综合分析，为后续撰写一篇成体系的分析报告打好骨架。
 
 输出 JSON（无其它文字）：
 {
   "user_need": "分析用户提这个问题的真实意图：他深层想了解什么、关注的核心是什么（1-2句，要具体）",
-  "dimensions": ["回答应覆盖的分析维度1", "维度2", "维度3"],
+  "dimensions": ["回答应覆盖的分析维度1", "维度2", "维度3", "维度4"],
   "insights": ["关键洞察1", "关键洞察2", "..."]
 }
 
 要求：
 - user_need 要超越问题字面，推断用户的真实关切（如问"口碑"可能关心是否值得信任/购买）
-- dimensions 给出 3-4 个回答该问题应展开的角度（如：舆论倾向、争议焦点、情绪强度、传播趋势等），需贴合本问题
-- insights 输出 4-6 条关键洞察，每条一句话、直接支撑回答；综合多条来源，指出共识、分歧、矛盾与趋势，而非罗列
+- dimensions 给出 4-5 个回答该问题应展开的角度（如：舆论倾向、争议焦点、情绪强度、传播趋势、各方立场、潜在影响等），需贴合本问题、彼此不重复
+- insights 输出 6-9 条关键洞察，覆盖 dimensions 的各个角度，确保后续回答有足够素材：
+  · 每条一句话，但要具体、有信息量，能直接支撑某个分析维度
+  · 尽量带上支撑证据的指向（如"多数评论认为…""某文章指出…""联网来源显示…"）和具体数据/比例
+  · 综合多条来源去归纳，指出共识、分歧、矛盾与趋势变化，而非罗列原文
 - 区分"文章立场"与"评论观点"；涉及数据/比例时尽量具体；证据不足时点明不确定性
 - 只输出 JSON，不要任何额外说明`
 
@@ -46,7 +49,7 @@ func (n *SynthesizeNode) Name() string  { return "synthesize" }
 func (n *SynthesizeNode) Title() string { return "综合推理" }
 
 func (n *SynthesizeNode) Execute(ctx context.Context, state *PipelineState, emit EmitFn) error {
-	if len(state.Observations) == 0 {
+	if len(state.Observations) == 0 && len(state.WebResults) == 0 {
 		emit(ThinkStep{Step: n.Name(), Title: n.Title(), Content: "无检索内容，跳过综合推理", Status: StatusSkipped})
 		buildDeepContext(state)
 		return nil
@@ -71,7 +74,7 @@ func (n *SynthesizeNode) Execute(ctx context.Context, state *PipelineState, emit
 	sb.WriteString("\n相关内容（共 ")
 	sb.WriteString(fmt.Sprintf("%d", len(state.Observations)))
 	sb.WriteString(" 条，按相关度提炼）：\n")
-	const maxRunes = 9000
+	const maxRunes = 12000
 	total := 0
 	for i, o := range state.Observations {
 		text := o.Extract
@@ -85,6 +88,24 @@ func (n *SynthesizeNode) Execute(ctx context.Context, state *PipelineState, emit
 		}
 		sb.WriteString(entry)
 		total += len(r)
+	}
+
+	// 联网搜索结果并入综合输入
+	if len(state.WebResults) > 0 {
+		sb.WriteString("\n联网搜索结果（来自互联网，需注意时效与可信度）：\n")
+		for i, w := range state.WebResults {
+			line := w.Summary
+			if line == "" {
+				line = w.Title
+			}
+			entry := fmt.Sprintf("W%d. %s（%s）：%s\n", i+1, w.Title, w.SiteName, truncateStr(line, 200))
+			r := []rune(entry)
+			if total+len(r) > maxRunes {
+				break
+			}
+			sb.WriteString(entry)
+			total += len(r)
+		}
 	}
 
 	msgs := []map[string]string{
@@ -235,6 +256,41 @@ func buildDeepContext(state *PipelineState) {
 			sb.WriteString("\n")
 			total += len(r)
 		}
+		sb.WriteString("\n")
+	}
+
+	if len(state.WebResults) > 0 {
+		sb.WriteString("【联网搜索结果】（来自互联网，引用时请注明来源链接，注意时效与可信度）\n")
+		const maxWebRunes = 6000
+		total := 0
+		for i, w := range state.WebResults {
+			summary := w.Summary
+			if summary == "" {
+				summary = w.Title
+			}
+			var block strings.Builder
+			block.WriteString(fmt.Sprintf("[W%d] %s", i+1, w.Title))
+			if w.SiteName != "" {
+				block.WriteString("（来源：" + w.SiteName + "）")
+			}
+			if w.Published != "" {
+				block.WriteString(" [" + w.Published + "]")
+			}
+			block.WriteString("\n")
+			block.WriteString(truncateStr(summary, 500))
+			block.WriteString("\n")
+			if w.URL != "" {
+				block.WriteString("链接：" + w.URL + "\n")
+			}
+			r := []rune(block.String())
+			if total+len(r) > maxWebRunes {
+				break
+			}
+			sb.WriteString("---\n")
+			sb.WriteString(block.String())
+			total += len(r)
+		}
+		sb.WriteString("\n")
 	}
 
 	state.FinalContext = sb.String()

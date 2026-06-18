@@ -135,6 +135,10 @@ export interface TaggerConfig {
   intervalSeconds: number
   batchSize: number
   maxPerTick: number
+  webSearchEnabled: boolean
+  webSearchApiKey: string
+  webSearchKeySet: boolean
+  webSearchCount: number
 }
 
 export interface SystemConfigResponse {
@@ -150,6 +154,9 @@ export interface UpdateTaggerPayload {
   intervalSeconds?: number
   batchSize?: number
   maxPerTick?: number
+  webSearchEnabled?: boolean
+  webSearchApiKey?: string
+  webSearchCount?: number
 }
 
 export interface RagConfig {

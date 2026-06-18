@@ -32,6 +32,10 @@ type TaggerSnapshotPayload struct {
 	IntervalSeconds int    `json:"interval_seconds"`
 	BatchSize       int    `json:"batch_size"`
 	MaxPerTick      int    `json:"max_per_tick"`
+
+	WebSearchEnabled bool   `json:"web_search_enabled"`
+	WebSearchApiKey  string `json:"web_search_api_key"`
+	WebSearchCount   int    `json:"web_search_count"`
 }
 
 func RagConfigToSnapshotPayload(cfg RagConfigData) RagSnapshotPayload {
@@ -75,6 +79,10 @@ func TaggerConfigToSnapshotPayload(cfg config.TaggerConfig) TaggerSnapshotPayloa
 		IntervalSeconds: cfg.IntervalSeconds,
 		BatchSize:       cfg.BatchSize,
 		MaxPerTick:      cfg.MaxPerTick,
+
+		WebSearchEnabled: cfg.WebSearchEnabled,
+		WebSearchApiKey:  cfg.WebSearchApiKey,
+		WebSearchCount:   cfg.WebSearchCount,
 	}
 }
 
@@ -87,6 +95,10 @@ func (p TaggerSnapshotPayload) ToTaggerConfig() config.TaggerConfig {
 		IntervalSeconds: p.IntervalSeconds,
 		BatchSize:       p.BatchSize,
 		MaxPerTick:      p.MaxPerTick,
+
+		WebSearchEnabled: p.WebSearchEnabled,
+		WebSearchApiKey:  p.WebSearchApiKey,
+		WebSearchCount:   p.WebSearchCount,
 	}
 }
 
@@ -99,6 +111,7 @@ func maskRagSnapshot(p RagSnapshotPayload) RagSnapshotPayload {
 func maskTaggerSnapshot(p TaggerSnapshotPayload) TaggerSnapshotPayload {
 	out := p
 	out.LLMApiKey = utils.MaskString(p.LLMApiKey)
+	out.WebSearchApiKey = utils.MaskString(p.WebSearchApiKey)
 	return out
 }
 

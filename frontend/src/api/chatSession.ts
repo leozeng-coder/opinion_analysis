@@ -26,6 +26,7 @@ export interface ChatRequest {
   content: string
   pageHint?: string
   useRag?: boolean
+  webSearch?: boolean
   topics?: string[]
   isRegenerate?: boolean
 }
@@ -58,6 +59,7 @@ function buildChatBody(data: ChatRequest): Record<string, unknown> {
   if (data.pageHint != null && data.pageHint !== '')
     body.pageHint = data.pageHint
   if (data.useRag != null) body.useRag = data.useRag
+  if (data.webSearch != null) body.webSearch = data.webSearch
   if (data.topics != null && data.topics.length > 0) body.topics = data.topics
   if (data.isRegenerate != null) body.isRegenerate = data.isRegenerate
   return body
@@ -200,9 +202,13 @@ export const chatSessionApi = {
     await consumeSSEStream(`${baseURL}/ai/sessions/chat`, buildChatBody(data), callbacks)
   },
 
-  /** 深度思考流式聊天：运行 ReAct 多轮推理检索流水线后再生成回答（耗时更长，超时放宽到 180s） */
+  /** 深度思考流式聊天：运行多轮工具调用推理流水线后再生成回答（耗时更长，超时放宽到 180s） */
   deepChatStream: async (data: ChatRequest, callbacks: StreamChatCallbacks) => {
     const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
     await consumeSSEStream(`${baseURL}/ai/sessions/chat/deep`, buildChatBody(data), callbacks, 180000)
   },
+
+  /** 查询深度思考模式可用能力（如联网搜索是否由管理员启用） */
+  capabilities: async () =>
+    (await request.get('/ai/sessions/capabilities')) as { webSearch: boolean },
 }

@@ -25,6 +25,7 @@ import {
   CopyOutlined,
   RedoOutlined,
   ThunderboltOutlined,
+  GlobalOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
   MinusCircleOutlined,
@@ -149,6 +150,9 @@ const AiAssistantPage: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [deepThink, setDeepThink] = useState(false)
+  // 联网搜索：webSearchAvailable 由后台总开关决定是否展示按钮；webSearch 为用户本轮是否点亮
+  const [webSearchAvailable, setWebSearchAvailable] = useState(false)
+  const [webSearch, setWebSearch] = useState(false)
   // thinkSteps: keyed by the assistant placeholder message id
   const [thinkStepsMap, setThinkStepsMap] = useState<Map<number, ThinkStep[]>>(new Map())
   // thinkDoneSet: msgIds where the thinking phase has finished (content started)
@@ -194,6 +198,9 @@ const AiAssistantPage: React.FC = () => {
   useEffect(() => {
     void loadSessions()
     void loadTopics()
+    void chatSessionApi.capabilities()
+      .then((cap) => setWebSearchAvailable(!!cap.webSearch))
+      .catch(() => setWebSearchAvailable(false))
   }, [loadSessions])
 
   const loadTopics = useCallback(async () => {
@@ -400,6 +407,7 @@ const AiAssistantPage: React.FC = () => {
           sessionId: currentSessionId ?? undefined,
           content: text,
           topics: selectedTopics.length > 0 ? selectedTopics : undefined,
+          webSearch: deepThink && webSearchAvailable ? webSearch : undefined,
         },
         {
           onSession: (data) => {
@@ -485,7 +493,7 @@ const AiAssistantPage: React.FC = () => {
       setLoadingSessionId(null)
       abortControllerRef.current = null
     }
-  }, [input, loading, currentSessionId, loadSessions, selectedTopics, deepThink])
+  }, [input, loading, currentSessionId, loadSessions, selectedTopics, deepThink, webSearch, webSearchAvailable])
 
   const handleCopy = useCallback((messageId: number, content: string) => {
     navigator.clipboard.writeText(content).then(() => {
@@ -575,6 +583,7 @@ const AiAssistantPage: React.FC = () => {
           sessionId: currentSessionId,
           content: lastUserMsg.content,
           topics: selectedTopics.length > 0 ? selectedTopics : undefined,
+          webSearch: deepThink && webSearchAvailable ? webSearch : undefined,
           isRegenerate: true,
         },
         {
@@ -662,7 +671,7 @@ const AiAssistantPage: React.FC = () => {
       setLoadingSessionId(null)
       abortControllerRef.current = null
     }
-  }, [loading, messages, currentSessionId, loadSessions, selectedTopics, deepThink])
+  }, [loading, messages, currentSessionId, loadSessions, selectedTopics, deepThink, webSearch, webSearchAvailable])
 
   const handleStop = useCallback(() => {
     if (abortControllerRef.current) {
@@ -893,6 +902,19 @@ const AiAssistantPage: React.FC = () => {
                         <span>深度思考</span>
                       </button>
                     </Tooltip>
+                    {deepThink && webSearchAvailable && (
+                      <Tooltip title={webSearch ? '关闭联网搜索' : '开启联网搜索（深度思考时可用实时信息）'}>
+                        <button
+                          className={`${styles.composerChip} ${webSearch ? styles.composerChipActive : ''}`}
+                          onClick={() => setWebSearch((v) => !v)}
+                          aria-label="联网搜索"
+                          aria-pressed={webSearch}
+                        >
+                          <GlobalOutlined style={{ fontSize: 13 }} />
+                          <span>联网搜索</span>
+                        </button>
+                      </Tooltip>
+                    )}
                     {topicOptions.length > 0 && (
                       <Select
                         mode="multiple"

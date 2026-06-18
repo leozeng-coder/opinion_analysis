@@ -51,6 +51,11 @@ type TaggerConfig struct {
 	IntervalSeconds int    `mapstructure:"intervalSeconds"`
 	BatchSize       int    `mapstructure:"batchSize"`
 	MaxPerTick      int    `mapstructure:"maxPerTick"`
+
+	// 联网搜索（深度思考模式的 web_search 工具）。Key 以数据库 system_settings 为准。
+	WebSearchEnabled bool   `mapstructure:"webSearchEnabled"`
+	WebSearchApiKey  string `mapstructure:"webSearchApiKey"`
+	WebSearchCount   int    `mapstructure:"webSearchCount"`
 }
 
 type ServerConfig struct {
@@ -93,6 +98,8 @@ func Load(path string) {
 	viper.SetDefault("tagger.intervalSeconds", 120)
 	viper.SetDefault("tagger.batchSize", 20)
 	viper.SetDefault("tagger.maxPerTick", 200)
+	viper.SetDefault("tagger.webSearchEnabled", false)
+	viper.SetDefault("tagger.webSearchCount", 5)
 	viper.SetDefault("rag.enabled", false)
 	viper.SetDefault("rag.embedding_service_url", "http://127.0.0.1:5055")
 	viper.SetDefault("rag.milvus_uri", "http://localhost:19530")

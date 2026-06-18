@@ -52,14 +52,18 @@ func (h *SystemHandler) Config(c *gin.Context) {
 	cfg, keySet := h.taggerSvc.GetConfig()
 	out := gin.H{
 		"tagger": gin.H{
-			"enabled":         cfg.Enabled,
-			"llmModel":        cfg.LLMModel,
-			"llmBaseUrl":      cfg.LLMBaseURL,
-			"llmApiKey":       utils.MaskString(cfg.LLMApiKey),
-			"apiKeySet":       keySet,
-			"intervalSeconds": cfg.IntervalSeconds,
-			"batchSize":       cfg.BatchSize,
-			"maxPerTick":      cfg.MaxPerTick,
+			"enabled":          cfg.Enabled,
+			"llmModel":         cfg.LLMModel,
+			"llmBaseUrl":       cfg.LLMBaseURL,
+			"llmApiKey":        utils.MaskString(cfg.LLMApiKey),
+			"apiKeySet":        keySet,
+			"intervalSeconds":  cfg.IntervalSeconds,
+			"batchSize":        cfg.BatchSize,
+			"maxPerTick":       cfg.MaxPerTick,
+			"webSearchEnabled": cfg.WebSearchEnabled,
+			"webSearchApiKey":  utils.MaskString(cfg.WebSearchApiKey),
+			"webSearchKeySet":  cfg.WebSearchApiKey != "",
+			"webSearchCount":   cfg.WebSearchCount,
 		},
 		"note": "修改后立即对后台 AI 自动打标任务生效；变更持久化到 system_settings 表，重启不丢失。",
 	}
@@ -78,6 +82,10 @@ type updateTaggerReq struct {
 	IntervalSeconds *int    `json:"intervalSeconds"`
 	BatchSize       *int    `json:"batchSize"`
 	MaxPerTick      *int    `json:"maxPerTick"`
+
+	WebSearchEnabled *bool   `json:"webSearchEnabled"`
+	WebSearchApiKey  *string `json:"webSearchApiKey"`
+	WebSearchCount   *int    `json:"webSearchCount"`
 }
 
 // UpdateTagger 持久化 tagger 配置并热更新后台服务。
@@ -126,6 +134,19 @@ func (h *SystemHandler) UpdateTagger(c *gin.Context) {
 		}
 		merged.MaxPerTick = *req.MaxPerTick
 	}
+	if req.WebSearchEnabled != nil {
+		merged.WebSearchEnabled = *req.WebSearchEnabled
+	}
+	if req.WebSearchApiKey != nil {
+		merged.WebSearchApiKey = strings.TrimSpace(*req.WebSearchApiKey)
+	}
+	if req.WebSearchCount != nil {
+		if *req.WebSearchCount < 1 || *req.WebSearchCount > 20 {
+			response.Fail(c, 400, "webSearchCount 应在 1~20 之间")
+			return
+		}
+		merged.WebSearchCount = *req.WebSearchCount
+	}
 
 	uid, _ := c.Get("userID")
 	cu, _ := uid.(uint)
@@ -146,14 +167,18 @@ func (h *SystemHandler) UpdateTagger(c *gin.Context) {
 	cfg, keySet := h.taggerSvc.GetConfig()
 	response.OK(c, gin.H{
 		"tagger": gin.H{
-			"enabled":         cfg.Enabled,
-			"llmModel":        cfg.LLMModel,
-			"llmBaseUrl":      cfg.LLMBaseURL,
-			"llmApiKey":       utils.MaskString(cfg.LLMApiKey),
-			"apiKeySet":       keySet,
-			"intervalSeconds": cfg.IntervalSeconds,
-			"batchSize":       cfg.BatchSize,
-			"maxPerTick":      cfg.MaxPerTick,
+			"enabled":          cfg.Enabled,
+			"llmModel":         cfg.LLMModel,
+			"llmBaseUrl":       cfg.LLMBaseURL,
+			"llmApiKey":        utils.MaskString(cfg.LLMApiKey),
+			"apiKeySet":        keySet,
+			"intervalSeconds":  cfg.IntervalSeconds,
+			"batchSize":        cfg.BatchSize,
+			"maxPerTick":       cfg.MaxPerTick,
+			"webSearchEnabled": cfg.WebSearchEnabled,
+			"webSearchApiKey":  utils.MaskString(cfg.WebSearchApiKey),
+			"webSearchKeySet":  cfg.WebSearchApiKey != "",
+			"webSearchCount":   cfg.WebSearchCount,
 		},
 	})
 }

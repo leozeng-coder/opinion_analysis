@@ -12,6 +12,7 @@ const NotifyPage = lazy(() => import('@/pages/config/NotifyPage'))
 const PlatformSyncPage = lazy(() => import('@/pages/platform/PlatformSyncPage'))
 const TaggerPage = lazy(() => import('@/pages/ai/TaggerPage'))
 const RagPage = lazy(() => import('@/pages/ai/RagPage'))
+const WebSearchPage = lazy(() => import('@/pages/ai/WebSearchPage'))
 const AuditPage = lazy(() => import('@/pages/audit/AuditPage'))
 const CrawlerConfigPage = lazy(() => import('@/pages/config/CrawlerConfigPage'))
 
@@ -32,6 +33,7 @@ const App: React.FC = () => (
             {/* AI 引擎 */}
             <Route path="/ai/tagger" element={<TaggerPage />} />
             <Route path="/ai/rag" element={<RagPage />} />
+            <Route path="/ai/web-search" element={<WebSearchPage />} />
             {/* 系统设置 */}
             <Route path="/config/system" element={<SystemConfigPage />} />
             <Route path="/config/notify" element={<NotifyPage />} />

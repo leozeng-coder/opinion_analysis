@@ -61,6 +61,7 @@ func (s *Service) RunDeepPipeline(
 	pageHint string,
 	topics []string,
 	ragClient *rag.Client,
+	webSearch bool,
 ) DeepChatResult {
 	contentCh := make(chan string, 20)
 	stepCh := make(chan pipeline.ThinkStep, 16)
@@ -89,6 +90,8 @@ func (s *Service) RunDeepPipeline(
 		// Build dependency-injected functions
 		lightLLM := pipeline.NewLightLLMCall(baseURL, apiKey, model, s.client)
 		filterLLM := pipeline.NewFilterLLMCall(baseURL, apiKey, model, s.client)
+		synthesizeLLM := pipeline.NewSynthesizeLLMCall(baseURL, apiKey, model, s.client)
+		toolCall := s.makeToolCallFn(baseURL, apiKey, model)
 
 		var ragSearch pipeline.RAGSearchFn
 		if ragClient != nil {
@@ -128,10 +131,25 @@ func (s *Service) RunDeepPipeline(
 			}
 		}
 
+		// 注册工具：本地知识库检索（始终）+ 联网搜索（按配置开关）。
+		// seen 在工具间共享，实现跨多次工具调用的 article 去重。
+		registry := pipeline.NewRegistry()
+		seen := make(map[int]struct{})
+		if ragSearch != nil {
+			registry.Register(pipeline.NewLocalSearchTool(ragSearch, filterLLM, topics, "", userQuestion, seen))
+		}
+		// 联网搜索需同时满足：管理员配置启用（总开关 + Key）且用户本次勾选。
+		// budget 取后台配置的总条数上限，topics 传入实现话题关联。
+		if cfg.WebSearchEnabled && webSearch {
+			if webFn := s.newWebSearchFn(cfg.WebSearchApiKey); webFn != nil {
+				registry.Register(pipeline.NewWebSearchTool(webFn, cfg.WebSearchCount, topics))
+			}
+		}
+
 		p := pipeline.NewPipeline(
 			pipeline.NewIntentNode(lightLLM),
-			pipeline.NewReActNode(ragSearch, filterLLM),
-			pipeline.NewSynthesizeNode(filterLLM),
+			pipeline.NewAgentNode(registry, toolCall, 5),
+			pipeline.NewSynthesizeNode(synthesizeLLM),
 			pipeline.NewGenerateNode(streamFn, contentCh, baseSystemPrompt),
 		)
 
@@ -161,7 +179,7 @@ func (s *Service) makePipelineStreamFn(baseURL, apiKey, model string) pipeline.S
 				"model":       model,
 				"messages":    msgs,
 				"temperature": 0.6,
-				"max_tokens":  4000,
+				"max_tokens":  8000, // 深度思考模式：放宽输出上限，容纳分维度的长篇分析
 				"top_p":       0.9,
 				"stream":      true,
 			}
