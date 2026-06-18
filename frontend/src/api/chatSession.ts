@@ -41,7 +41,7 @@ export interface ThinkStep {
   step: 'intent' | 'retrieval' | 'reasoning' | 'generate' | string
   title: string
   content?: string
-  status: 'running' | 'done' | 'skipped' | 'error'
+  status: 'running' | 'done' | 'skipped' | 'error' | 'stopped'
 }
 
 export interface StreamChatCallbacks {

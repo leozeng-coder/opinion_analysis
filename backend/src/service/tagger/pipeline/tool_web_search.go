@@ -161,7 +161,7 @@ func (t *WebSearchTool) Invoke(ctx context.Context, raw json.RawMessage) (ToolRe
 	titles := make([]string, 0, len(fresh))
 	for _, r := range fresh {
 		if r.Title != "" {
-			titles = append(titles, "• "+r.Title)
+			titles = append(titles, r.Title)
 		}
 	}
 	display := fmt.Sprintf("联网搜索「%s」→ %d 条（累计 %d/%d）", truncateStr(query, 30), len(fresh), t.used, t.budget)

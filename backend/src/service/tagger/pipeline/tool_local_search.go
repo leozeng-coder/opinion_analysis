@@ -133,7 +133,7 @@ func (t *LocalSearchTool) Invoke(ctx context.Context, raw json.RawMessage) (Tool
 	titles := make([]string, 0, len(obs))
 	for _, o := range obs {
 		if tl := extractTitle(o.Chunk); tl != "" {
-			titles = append(titles, "• "+tl)
+			titles = append(titles, tl)
 		}
 	}
 	display := fmt.Sprintf("检索「%s」→ 采纳 %d 条", truncateStr(query, 30), len(obs))

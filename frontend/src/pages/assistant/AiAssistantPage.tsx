@@ -54,11 +54,24 @@ const WELCOME_DETAIL =
 
 const HERO_HEADING = '有什么我能帮你的吗？'
 
+const STOP_SQUARE = (
+  <span
+    style={{
+      display: 'inline-block',
+      width: 9,
+      height: 9,
+      backgroundColor: '#ff4d4f',
+      borderRadius: 2,
+    }}
+  />
+)
+
 const STEP_ICON: Record<string, React.ReactNode> = {
   running: <LoadingOutlined style={{ fontSize: 13, color: '#1677ff' }} />,
   done: <CheckCircleOutlined style={{ fontSize: 13, color: '#52c41a' }} />,
   skipped: <MinusCircleOutlined style={{ fontSize: 13, color: '#bfbfbf' }} />,
   error: <MinusCircleOutlined style={{ fontSize: 13, color: '#ff4d4f' }} />,
+  stopped: STOP_SQUARE,
 }
 
 function ThinkStepRow({ step }: { step: ThinkStep }) {
@@ -89,30 +102,36 @@ function ThinkStepRow({ step }: { step: ThinkStep }) {
 function ThinkPanel({
   steps,
   isDone,
+  isStopped,
   expanded,
   onToggle,
 }: {
   steps: ThinkStep[]
   isDone: boolean
+  isStopped: boolean
   expanded: boolean
   onToggle: () => void
 }) {
-  if (steps.length === 0 && !isDone) return null
+  if (steps.length === 0 && !isDone && !isStopped) return null
+
+  const settled = isDone || isStopped
 
   return (
     <div className={styles.thinkCard}>
       <button
-        className={`${styles.thinkCardHeader} ${isDone ? styles.thinkCardHeaderDone : styles.thinkCardHeaderActive}`}
+        className={`${styles.thinkCardHeader} ${settled ? styles.thinkCardHeaderDone : styles.thinkCardHeaderActive}`}
         onClick={onToggle}
         aria-expanded={expanded}
       >
-        {isDone ? (
+        {isStopped ? (
+          <span className={styles.thinkCardStatusIcon}>{STOP_SQUARE}</span>
+        ) : isDone ? (
           <CheckCircleOutlined className={styles.thinkCardStatusIcon} style={{ color: '#52c41a' }} />
         ) : (
           <LoadingOutlined className={styles.thinkCardStatusIcon} style={{ color: '#1677ff' }} />
         )}
         <span className={styles.thinkCardLabel}>
-          {isDone ? '已完成思考' : '思考中'}
+          {isStopped ? '已停止思考' : isDone ? '已完成思考' : '思考中'}
         </span>
         <RightOutlined
           className={`${styles.thinkCardChevron} ${expanded ? styles.thinkCardChevronOpen : ''}`}
@@ -124,12 +143,17 @@ function ThinkPanel({
           {steps.map((s, i) => (
             <ThinkStepRow key={i} step={s} />
           ))}
-          {isDone && (
+          {isStopped ? (
+            <div className={styles.thinkCardFooter}>
+              {STOP_SQUARE}
+              <span>已停止</span>
+            </div>
+          ) : isDone ? (
             <div className={styles.thinkCardFooter}>
               <CheckCircleOutlined style={{ fontSize: 12, color: '#52c41a' }} />
               <span>已完成</span>
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>
@@ -157,6 +181,8 @@ const AiAssistantPage: React.FC = () => {
   const [thinkStepsMap, setThinkStepsMap] = useState<Map<number, ThinkStep[]>>(new Map())
   // thinkDoneSet: msgIds where the thinking phase has finished (content started)
   const [thinkDoneSet, setThinkDoneSet] = useState<Set<number>>(new Set())
+  // thinkStoppedSet: msgIds where generation was stopped during the thinking phase
+  const [thinkStoppedSet, setThinkStoppedSet] = useState<Set<number>>(new Set())
   // thinkExpandedSet: msgIds where the think card is manually expanded
   const [thinkExpandedSet, setThinkExpandedSet] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -171,6 +197,8 @@ const AiAssistantPage: React.FC = () => {
   const threadRef = useRef<HTMLElement>(null)
   const sessionMessagesRef = useRef<Map<number, ChatMessage[]>>(new Map())
   const abortControllerRef = useRef<AbortController | null>(null)
+  // 当前正在生成（含深度思考）的助手消息 id，用于停止时把未完成的思考步骤标记为暂停
+  const activeAssistantMsgIdRef = useRef<number | null>(null)
   // 是否“黏底”：用户在底部时自动跟随滚动；上滑查看历史时停止自动滚动
   const stickToBottomRef = useRef(true)
   // 记录上次滚动位置，用于判断滚动方向（向上滚立即脱离黏底）
@@ -391,6 +419,7 @@ const AiAssistantPage: React.FC = () => {
 
     // Init think steps for this message
     if (deepThink) {
+      activeAssistantMsgIdRef.current = assistantMsgId
       setThinkStepsMap((prev) => new Map(prev).set(assistantMsgId, []))
     }
 
@@ -492,6 +521,7 @@ const AiAssistantPage: React.FC = () => {
       setLoading(false)
       setLoadingSessionId(null)
       abortControllerRef.current = null
+      activeAssistantMsgIdRef.current = null
     }
   }, [input, loading, currentSessionId, loadSessions, selectedTopics, deepThink, webSearch, webSearchAvailable])
 
@@ -571,6 +601,7 @@ const AiAssistantPage: React.FC = () => {
 
       // Init think steps for this message if deep think is active
       if (deepThink) {
+        activeAssistantMsgIdRef.current = assistantMsgId
         setThinkStepsMap((prev) => new Map(prev).set(assistantMsgId, []))
       }
 
@@ -670,6 +701,7 @@ const AiAssistantPage: React.FC = () => {
       setLoading(false)
       setLoadingSessionId(null)
       abortControllerRef.current = null
+      activeAssistantMsgIdRef.current = null
     }
   }, [loading, messages, currentSessionId, loadSessions, selectedTopics, deepThink, webSearch, webSearchAvailable])
 
@@ -677,6 +709,34 @@ const AiAssistantPage: React.FC = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
+    }
+    // 把当前生成消息中仍处于「运行中」的思考步骤标记为「已停止」，避免永远转圈
+    const activeId = activeAssistantMsgIdRef.current
+    if (activeId != null) {
+      // 若思考阶段尚未结束（还没开始输出正文），把整体状态置为「已停止」
+      setThinkDoneSet((prev) => {
+        if (prev.has(activeId)) return prev
+        setThinkStoppedSet((s) => {
+          if (s.has(activeId)) return s
+          return new Set(s).add(activeId)
+        })
+        return prev
+      })
+      setThinkStepsMap((prev) => {
+        const steps = prev.get(activeId)
+        if (!steps || steps.length === 0) return prev
+        let changed = false
+        const next: ThinkStep[] = steps.map((s) => {
+          if (s.status === 'running') {
+            changed = true
+            return { ...s, status: 'stopped' as const, content: s.content || '已停止' }
+          }
+          return s
+        })
+        if (!changed) return prev
+        return new Map(prev).set(activeId, next)
+      })
+      activeAssistantMsgIdRef.current = null
     }
   }, [])
 
@@ -797,6 +857,7 @@ const AiAssistantPage: React.FC = () => {
                             <ThinkPanel
                               steps={thinkStepsMap.get(m.id)!}
                               isDone={thinkDoneSet.has(m.id)}
+                              isStopped={thinkStoppedSet.has(m.id)}
                               expanded={!thinkDoneSet.has(m.id) || thinkExpandedSet.has(m.id)}
                               onToggle={() => setThinkExpandedSet((prev) => {
                                 const next = new Set(prev)
