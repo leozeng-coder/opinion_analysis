@@ -1122,14 +1122,19 @@ const buildConsoleLines = (params: {
     }
 
     // 节点内部进度日志（由节点在执行过程中写入 output.progress）
+    // 按行首图标推断级别：✗→error(红) / ⚠→warning(橙) / ✓→success(绿) / 其它→info(蓝)
     const progressLines: string[] = Array.isArray(log.output?.progress) ? log.output.progress : []
     for (let pi = 0; pi < progressLines.length; pi++) {
+      const msg = progressLines[pi]
+      const head = msg.trimStart().charAt(0)
+      const level: ConsoleLevel =
+        head === '✗' ? 'error' : head === '⚠' ? 'warning' : head === '✓' ? 'success' : 'info'
       lines.push({
         key: `node-${log.id}-progress-${pi}`,
         time: fmtTime(log.startedAt),
-        level: 'info',
+        level,
         tag: label,
-        message: progressLines[pi],
+        message: msg,
       })
     }
 

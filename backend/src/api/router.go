@@ -48,6 +48,9 @@ func NewRouter(db *gorm.DB, rdb *redis.Client, logger *zap.Logger, taggerSvc *ta
 		embedURL := strings.TrimSpace(config.Cfg.RAG.EmbeddingServiceURL)
 		embedClient = milvussvc.NewEmbedderClient(embedURL)
 
+		// 深度分析报告聚类复用 embedding 服务做确定性语义聚类
+		reportSvc.SetEmbedder(embedClient)
+
 		syncerSvc = milvussvc.NewSyncer(db, milvusService, embedClient, store.RAG)
 		// 从 DB 加载当前配置，覆盖写死的默认值
 		if ragCfg, err := store.RAG.GetRagConfig(); err == nil {
