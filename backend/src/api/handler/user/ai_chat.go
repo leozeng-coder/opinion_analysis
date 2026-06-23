@@ -71,18 +71,22 @@ func (h *AIChatHandler) Chat(c *gin.Context) {
 
 	var retrievalCtx string
 	var ragUsed bool
+	var ragConfidence float64
 	if useRAG && h.ragClient != nil {
 		q := lastUserQuestion(hist)
 		if q != "" {
-			chunks, err := h.ragClient.Search(c.Request.Context(), q, 8, req.Topics)
+			// 使用带置信度的检索
+			result, err := h.ragClient.SearchWithConfidence(c.Request.Context(), q, 8, req.Topics)
 			if err != nil {
 				log.Printf("[ai-chat] RAG search error: %v", err)
-			} else if len(chunks) == 0 {
+			} else if result == nil || len(result.Chunks) == 0 {
 				log.Printf("[ai-chat] RAG search returned 0 chunks for query: %q", q)
 			} else {
-				log.Printf("[ai-chat] RAG search returned %d chunks for query: %q", len(chunks), q)
-				retrievalCtx = rag.FormatContext(chunks)
+				log.Printf("[ai-chat] RAG search returned %d chunks (confidence=%.2f, expanded %d queries) for query: %q",
+					len(result.Chunks), result.Confidence, result.QueryCount, q)
+				retrievalCtx = rag.FormatContext(result.Chunks)
 				ragUsed = true
+				ragConfidence = result.Confidence
 			}
 		}
 	} else if useRAG && h.ragClient == nil {
@@ -101,9 +105,10 @@ func (h *AIChatHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// 先发送元信息
+	// 先发送元信息（包含置信度）
 	metaInfo := map[string]interface{}{
-		"ragUsed": ragUsed,
+		"ragUsed":      ragUsed,
+		"confidence":   ragConfidence,
 	}
 	metaJSON, _ := json.Marshal(metaInfo)
 	fmt.Fprintf(c.Writer, "event: meta\ndata: %s\n\n", metaJSON)

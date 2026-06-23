@@ -44,11 +44,9 @@ func NewWebSearchTool(search WebSearchFn, budget int, topics []string) *WebSearc
 func (t *WebSearchTool) Name() string { return "web_search" }
 
 func (t *WebSearchTool) Description() string {
-	return "联网搜索互联网上的实时与外部信息，用于补充本地舆情知识库覆盖不到的内容。" +
-		"适用场景：最新动态、近期事件、外部背景资料，以及主流自媒体/游戏社区上的玩家真实声音" +
-		"（如小红书、贴吧、抖音、TapTap、小黑盒等）。" +
-		"建议在本地检索后、确认仍有信息缺口时再调用，并通过 count 指明本次大约需要补充多少条。" +
-		"返回网页标题、摘要与链接。"
+	return "联网搜索实时信息，补充本地知识库未覆盖的内容。" +
+		"**必须在query中明确包含当前话题名称**，避免泛化搜索导致结果偏离主题。" +
+		"适用场景：最新动态、外部资料、主流社区（小红书/贴吧/B站/TapTap）的玩家声音。"
 }
 
 func (t *WebSearchTool) Parameters() map[string]any {
@@ -56,13 +54,13 @@ func (t *WebSearchTool) Parameters() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"query": map[string]any{
-				"type":        "string",
-				"description": "联网搜索的查询词，使用自然、完整的关键词（系统会自动并入当前话题，无需重复话题名）",
+				"type": "string",
+				"description": "搜索查询词。**必须包含话题名称**。" +
+					"错误：'S1赛季对比'；正确：'赛尔号 S1赛季 S2赛季 对比'",
 			},
 			"count": map[string]any{
-				"type": "integer",
-				"description": "本次大约需要补充的结果条数，按信息缺口大小评估；" +
-					"系统会在后台配置的总预算内渐进式放行，超出部分自动截断",
+				"type":        "integer",
+				"description": "需要的结果数（系统会在预算内自动调整）",
 			},
 		},
 		"required": []string{"query"},
@@ -89,8 +87,8 @@ func (t *WebSearchTool) Invoke(ctx context.Context, raw json.RawMessage) (ToolRe
 	remaining := t.budget - t.used
 	if remaining <= 0 {
 		return ToolResult{
-			Content: fmt.Sprintf("联网搜索预算已用尽（上限 %d 条），请基于已有信息回答。", t.budget),
-			Display: "联网搜索预算已用尽",
+			Content: fmt.Sprintf("联网搜索次数已用尽（上限 %d 条），请基于已有信息回答。", t.budget),
+			Display: "联网搜索次数已用尽",
 		}, nil
 	}
 	want := args.Count
@@ -113,9 +111,30 @@ func (t *WebSearchTool) Invoke(ctx context.Context, raw json.RawMessage) (ToolRe
 		}, nil
 	}
 
+	// 话题相关性过滤：移除标题中不包含任何话题关键词的结果
+	var filtered []WebResult
+	if len(t.topics) > 0 {
+		for _, r := range results {
+			titleLower := strings.ToLower(r.Title)
+			var matched bool
+			for _, topic := range t.topics {
+				topicLower := strings.ToLower(strings.TrimSpace(topic))
+				if topicLower != "" && strings.Contains(titleLower, topicLower) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				filtered = append(filtered, r)
+			}
+		}
+	} else {
+		filtered = results
+	}
+
 	// 按 URL 去重
 	var fresh []WebResult
-	for _, r := range results {
+	for _, r := range filtered {
 		key := strings.TrimSpace(r.URL)
 		if key != "" {
 			if _, ok := t.seen[key]; ok {
@@ -178,6 +197,7 @@ func (t *WebSearchTool) Invoke(ctx context.Context, raw json.RawMessage) (ToolRe
 
 // composeQuery 把当前会话话题并入查询词，确保联网结果锚定在话题上。
 // 已包含话题名的查询不重复追加。
+// 同时添加引号强制精确匹配，避免通用词（如"S1 S2"）被过度发散。
 func (t *WebSearchTool) composeQuery(query string) string {
 	if len(t.topics) == 0 {
 		return query
@@ -192,5 +212,19 @@ func (t *WebSearchTool) composeQuery(query string) string {
 	if len(missing) == 0 {
 		return query
 	}
-	return strings.Join(missing, " ") + " " + query
+
+	// 话题名加引号强制精确匹配，避免发散
+	// 例如："洛克王国世界" S1赛季 S2赛季 对比
+	// 而非：洛克王国世界 S1赛季 S2赛季 对比（会匹配到所有游戏的S1 S2）
+	quotedTopics := make([]string, len(missing))
+	for i, tp := range missing {
+		// 如果话题名包含空格或多个词，用引号括起来
+		if strings.Contains(tp, " ") || len([]rune(tp)) > 4 {
+			quotedTopics[i] = `"` + tp + `"`
+		} else {
+			quotedTopics[i] = tp
+		}
+	}
+
+	return strings.Join(quotedTopics, " ") + " " + query
 }

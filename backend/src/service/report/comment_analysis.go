@@ -221,7 +221,9 @@ func (s *Service) llmCommentSentiment(ctx context.Context, sample []model.Articl
 	}
 
 	var sb strings.Builder
-	sb.WriteString("请对以下评论逐条标注情感倾向（positive/neutral/negative），以JSON数组格式返回，每项格式为{\"id\":序号,\"s\":\"positive\"}。只返回JSON，不要其他文字。\n\n")
+	sb.WriteString("请对以下评论逐条标注情感倾向（positive/neutral/negative），以JSON数组格式返回，每项格式为{\"id\":序号,\"s\":\"positive\"}。只返回JSON，不要其他文字。\n")
+	sb.WriteString(jsonArrayContract) // 使用无前言契约
+	sb.WriteString("\n")
 	for i, c := range sample {
 		content := c.Content
 		if len([]rune(content)) > 80 {
@@ -230,26 +232,27 @@ func (s *Service) llmCommentSentiment(ctx context.Context, sample []model.Articl
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, content))
 	}
 
-	resp, err := callLLM(ctx, sb.String(), cfg, 800)
-	if err != nil {
-		log.Printf("[CommentAnalysis] sentiment LLM failed: %v", err)
-		return sent, hot
-	}
-
 	type sentItem struct {
 		ID int    `json:"id"`
 		S  string `json:"s"`
 	}
 	var items []sentItem
-	resp = strings.TrimSpace(resp)
-	if idx := strings.Index(resp, "["); idx >= 0 {
-		resp = resp[idx:]
+
+	// 使用callLLMJSON + 自适应token（每条评论~30 tokens输出，基础400）
+	outputBudget := 400 + len(sample)*35
+	if outputBudget < 800 {
+		outputBudget = 800
 	}
-	if idx := strings.LastIndex(resp, "]"); idx >= 0 {
-		resp = resp[:idx+1]
+	if outputBudget > 3000 {
+		outputBudget = 3000
 	}
-	if err := json.Unmarshal([]byte(resp), &items); err != nil {
-		log.Printf("[CommentAnalysis] parse sentiment JSON failed: %v", err)
+
+	tc := &TokenCounter{} // 临时计数器
+	r := callLLMJSON(ctx, sb.String(), cfg, outputBudget, tc, "评论情感标注",
+		salvageArray, func(s string) error { return json.Unmarshal([]byte(s), &items) })
+
+	if !r.OK {
+		log.Printf("[CommentAnalysis] sentiment 解析失败，返回空")
 		return sent, hot
 	}
 
@@ -337,20 +340,15 @@ func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map
 		sb.WriteString("3. 深度解析（3-5条，深挖用户评论背后的隐含诉求、矛盾焦点、趋势信号，如「大量用户抱怨XXX说明……」「评论中的对立情绪源于……」）\n")
 		sb.WriteString("4. 归纳主要情绪标签（3-5个，如：愤怒、期待、失望、兴奋、疑惑）\n")
 		sb.WriteString("观点要覆盖不同立场，让决策者能快速了解用户真实想法。\n")
-		sb.WriteString("以JSON返回（pos/neu/neg必须是整数）：{\"pos\":正面条数,\"neu\":中性条数,\"neg\":负面条数,\"opinions\":[\"观点1\",...],\"deepInsights\":[\"解析1\",...],\"mainEmotions\":[\"情绪1\"...]}\n\n")
+		sb.WriteString("以JSON返回（pos/neu/neg必须是整数）：{\"pos\":正面条数,\"neu\":中性条数,\"neg\":负面条数,\"opinions\":[\"观点1\",...],\"deepInsights\":[\"解析1\",...],\"mainEmotions\":[\"情绪1\"...]}\n")
+		sb.WriteString(jsonObjectContract)
+		sb.WriteString("\n")
 		for i, c := range sample {
 			content := c.Content
 			if len([]rune(content)) > 80 {
 				content = string([]rune(content)[:80]) + "..."
 			}
 			sb.WriteString(fmt.Sprintf("%d. [赞%d] %s\n", i+1, c.LikeCount, content))
-		}
-
-		resp, err := callLLM(ctx, sb.String(), cfg, 500)
-		if err != nil {
-			log.Printf("[CommentAnalysis] topic opinions LLM failed for %s: %v", topic, err)
-			views = append(views, view)
-			continue
 		}
 
 		// 用 float64 接收，避免 LLM 有时返回浮点比例（如 0.6）导致 int 解析失败
@@ -362,15 +360,20 @@ func (s *Service) llmTopicCommentOpinions(ctx context.Context, topicComments map
 			DeepInsights []string `json:"deepInsights"`
 			MainEmotions []string `json:"mainEmotions"`
 		}
-		resp = strings.TrimSpace(resp)
-		if idx := strings.Index(resp, "{"); idx >= 0 {
-			resp = resp[idx:]
+
+		// 输出schema很重（opinions 6条×50字 + deepInsights 4条×100字 ≈ 1300 tokens），不能只给500
+		budget := 1200 + len(sample)*20
+		if budget < 1500 {
+			budget = 1500
 		}
-		if idx := strings.LastIndex(resp, "}"); idx >= 0 {
-			resp = resp[:idx+1]
+		if budget > 5000 {
+			budget = 5000
 		}
-		if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
-			log.Printf("[CommentAnalysis] parse topic JSON failed for %s: %v", topic, err)
+
+		tc := &TokenCounter{}
+		r := callLLMJSON(ctx, sb.String(), cfg, budget, tc, "话题评论观点("+topic+")",
+			extractJSONObject, func(s string) error { return json.Unmarshal([]byte(s), &parsed) })
+		if !r.OK {
 			views = append(views, view)
 			continue
 		}

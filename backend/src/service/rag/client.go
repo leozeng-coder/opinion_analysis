@@ -21,6 +21,14 @@ type Chunk struct {
 	Score     float64 `json:"score"`
 	Source    string  `json:"source"`     // hybrid | vector | bm25
 	ChunkType string  `json:"chunk_type"` // content | comment
+	URL       string  `json:"url"`        // 原文章链接
+}
+
+// SearchResult 检索结果（带置信度评分）
+type SearchResult struct {
+	Chunks     []Chunk `json:"chunks"`
+	Confidence float64 `json:"confidence"` // 0-1，检索质量置信度
+	QueryCount int     `json:"query_count"` // 扩展query数量（用于调试）
 }
 
 // Client 多路召回检索客户端。
@@ -103,6 +111,30 @@ func (c *Client) Search(ctx context.Context, query string, topK int, topics []st
 	if len(out) > topK {
 		out = out[:topK]
 	}
+
+	// 4. 从数据库查询文章URL
+	if c.db != nil && len(out) > 0 {
+		articleIDs := make([]uint, len(out))
+		for i, ch := range out {
+			articleIDs[i] = ch.ArticleID
+		}
+
+		var articles []struct {
+			ID  uint
+			URL string
+		}
+		c.db.Table("articles").Select("id, url").Where("id IN ?", articleIDs).Find(&articles)
+
+		urlMap := make(map[uint]string, len(articles))
+		for _, a := range articles {
+			urlMap[a.ID] = a.URL
+		}
+
+		for i := range out {
+			out[i].URL = urlMap[out[i].ArticleID]
+		}
+	}
+
 	return out, nil
 }
 
@@ -124,8 +156,9 @@ func FormatContext(chunks []Chunk) string {
 		if chType == "comment" {
 			label = "用户评论"
 		}
-		fmt.Fprintf(&b, "[#%d id=%d platform=%s type=%s score=%.4f src=%s]\n标题：%s\n%s：%s",
-			i+1, ch.ArticleID, ch.Platform, label, ch.Score, ch.Source, ch.Title, label, ch.Snippet)
+		// 提供足够信息让LLM用自然语言描述来源
+		fmt.Fprintf(&b, "[来源：%s平台 | 类型：%s | 相关度：%.2f]\n标题：%s\n内容：%s",
+			ch.Platform, label, ch.Score, ch.Title, ch.Snippet)
 	}
 	return b.String()
 }
@@ -142,4 +175,82 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// SearchWithConfidence 检索并返回置信度评分
+func (c *Client) SearchWithConfidence(ctx context.Context, query string, topK int, topics []string) (*SearchResult, error) {
+	chunks, err := c.Search(ctx, query, topK, topics)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &SearchResult{
+		Chunks:     chunks,
+		QueryCount: 1, // 不再扩展query，固定为1
+	}
+
+	// 计算置信度
+	result.Confidence = calculateConfidence(chunks, query)
+
+	return result, nil
+}
+
+// calculateConfidence 根据检索结果质量评估置信度（0-1）
+func calculateConfidence(chunks []Chunk, query string) float64 {
+	if len(chunks) == 0 {
+		return 0.0
+	}
+	
+	// 因子1: 召回数量（至少3条才算基本可信）
+	countFactor := float64(len(chunks)) / 8.0 // 8条=1.0
+	if countFactor > 1.0 {
+		countFactor = 1.0
+	}
+	
+	// 因子2: 平均分数（RRF分数越高越可信）
+	var totalScore float64
+	for _, ch := range chunks {
+		totalScore += ch.Score
+	}
+	avgScore := totalScore / float64(len(chunks))
+	scoreFactor := avgScore / 0.8 // 0.8分=1.0
+	if scoreFactor > 1.0 {
+		scoreFactor = 1.0
+	}
+	
+	// 因子3: 分数方差（分数接近说明质量一致，方差小=1.0）
+	var variance float64
+	for _, ch := range chunks {
+		diff := ch.Score - avgScore
+		variance += diff * diff
+	}
+	variance /= float64(len(chunks))
+	varianceFactor := 1.0 - variance // variance小→factor高
+	if varianceFactor < 0 {
+		varianceFactor = 0
+	}
+	
+	// 因子4: 内容充实度（snippet长度，避免都是短片段）
+	var totalLen int
+	for _, ch := range chunks {
+		totalLen += len([]rune(ch.Snippet))
+	}
+	avgLen := float64(totalLen) / float64(len(chunks))
+	lengthFactor := avgLen / 200.0 // 平均200字=1.0
+	if lengthFactor > 1.0 {
+		lengthFactor = 1.0
+	}
+	
+	// 综合置信度（加权平均）
+	confidence := countFactor*0.3 + scoreFactor*0.4 + varianceFactor*0.1 + lengthFactor*0.2
+	
+	// 边界保护
+	if confidence < 0 {
+		confidence = 0
+	}
+	if confidence > 1.0 {
+		confidence = 1.0
+	}
+	
+	return round4(confidence)
 }

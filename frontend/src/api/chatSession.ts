@@ -45,7 +45,7 @@ export interface ThinkStep {
 }
 
 export interface StreamChatCallbacks {
-  onSession?: (data: { sessionId: number; title: string; ragUsed: boolean; deepThink?: boolean }) => void
+  onSession?: (data: { sessionId: number; title: string; ragUsed: boolean; confidence?: number; deepThink?: boolean }) => void
   onContent: (chunk: string) => void
   onDone?: (data: { done: boolean; title?: string }) => void
   onError?: (error: string) => void
@@ -135,6 +135,14 @@ async function consumeSSEStream(
 
               if (lastEventType === 'think_step') {
                 callbacks.onThinkStep?.(parsed as ThinkStep)
+              } else if (lastEventType === 'meta') {
+                // meta事件包含ragUsed和confidence
+                callbacks.onSession?.({
+                  sessionId: 0, // meta事件不包含sessionId，用0占位
+                  title: '',
+                  ragUsed: parsed.ragUsed ?? false,
+                  confidence: parsed.confidence,
+                })
               } else if (lastEventType === 'session' || parsed.sessionId !== undefined) {
                 callbacks.onSession?.(parsed)
               } else if (lastEventType === 'done' || parsed.done === true) {

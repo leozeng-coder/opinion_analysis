@@ -194,6 +194,8 @@ const AiAssistantPage: React.FC = () => {
   const [loadingTopics, setLoadingTopics] = useState(false)
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [loadingSessionId, setLoadingSessionId] = useState<number | null>(null)
+  // RAG置信度：key=messageId, value=confidence(0-1)
+  const [ragConfidenceMap, setRagConfidenceMap] = useState<Map<number, number>>(new Map())
   const threadRef = useRef<HTMLElement>(null)
   const sessionMessagesRef = useRef<Map<number, ChatMessage[]>>(new Map())
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -444,6 +446,14 @@ const AiAssistantPage: React.FC = () => {
             newTitle = data.title
             setCurrentSessionId(data.sessionId)
             setLoadingSessionId(data.sessionId)
+            // 保存置信度（低于0.7时记录，用于后续显示警告）
+            if (data.confidence !== undefined && data.confidence < 0.7) {
+              setRagConfidenceMap((prev) => {
+                const next = new Map(prev)
+                next.set(assistantMsgId, data.confidence!)
+                return next
+              })
+            }
           },
           onThinkStep: (step) => {
             setThinkStepsMap((prev) => {
@@ -621,6 +631,14 @@ const AiAssistantPage: React.FC = () => {
           onSession: (data) => {
             if (data.title) {
               newTitle = data.title
+            }
+            // 保存置信度（重新生成时也需要记录）
+            if (data.confidence !== undefined && data.confidence < 0.7) {
+              setRagConfidenceMap((prev) => {
+                const next = new Map(prev)
+                next.set(assistantMsgId, data.confidence!)
+                return next
+              })
             }
           },
           onThinkStep: (step) => {
@@ -866,6 +884,29 @@ const AiAssistantPage: React.FC = () => {
                                 return next
                               })}
                             />
+                          )}
+                          {/* 置信度警告（低于0.7时显示） */}
+                          {ragConfidenceMap.has(m.id) && ragConfidenceMap.get(m.id)! < 0.7 && (
+                            <div style={{
+                              padding: '10px 14px',
+                              marginBottom: '12px',
+                              background: '#fff7e6',
+                              border: '1px solid #ffd591',
+                              borderRadius: '8px',
+                              fontSize: '13px',
+                              color: '#d46b08',
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '8px',
+                              lineHeight: 1.6,
+                            }}>
+                              <span style={{ fontSize: '16px', marginTop: '1px' }}>⚠️</span>
+                              <span>
+                                {ragConfidenceMap.get(m.id)! < 0.5
+                                  ? 'AI回答置信度很低（知识库召回质量不足），可能存在推测成分，建议核实'
+                                  : 'AI回答置信度较低，建议补充知识库资料或多角度验证'}
+                              </span>
+                            </div>
                           )}
                           <div className={styles.assistantProse}>
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
