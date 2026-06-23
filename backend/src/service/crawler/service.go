@@ -223,7 +223,7 @@ func (s *Service) callMediaCrawlerAPI(ctx context.Context, logID uint, params Tr
 		platform = s.mapSpiderToPlatform(params.Spiders[0])
 	}
 	if platform == "" {
-		platform = "zhihu"
+		platform = "tieba"
 	}
 
 	// 爬取类型

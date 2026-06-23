@@ -174,7 +174,7 @@ func (t *WebSearchTool) Invoke(ctx context.Context, raw json.RawMessage) (ToolRe
 		}
 	}
 	if t.used >= t.budget {
-		sb.WriteString("（联网搜索预算已用尽，如仍不足请基于已有信息作答）\n")
+		sb.WriteString("（联网搜索次数已用尽，如仍不足请基于已有信息作答）\n")
 	}
 
 	titles := make([]string, 0, len(fresh))

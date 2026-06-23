@@ -51,7 +51,7 @@ const getCommentStatLabel = (platform: string) => (platform === 'tieba' ? 'å›žå¤
 const PlatformDataPage: React.FC = () => {
   const [list, setList] = useState<PlatformDataItem[]>([])
   const [loading, setLoading] = useState(false)
-  const [platform, setPlatform] = useState('zhihu')
+  const [platform, setPlatform] = useState('tieba')
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null)
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 })
   const [detailVisible, setDetailVisible] = useState(false)
@@ -94,7 +94,7 @@ const PlatformDataPage: React.FC = () => {
   }
 
   const handleReset = () => {
-    setPlatform('zhihu')
+    setPlatform('tieba')
     setDateRange(null)
     setPagination({ current: 1, pageSize: 20, total: 0 })
   }
