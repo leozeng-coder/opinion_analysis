@@ -9,7 +9,6 @@ const UsersPage = lazy(() => import('@/pages/users/UsersPage'))
 const SystemPage = lazy(() => import('@/pages/system/SystemPage'))
 const SystemConfigPage = lazy(() => import('@/pages/config/SystemConfigPage'))
 const NotifyPage = lazy(() => import('@/pages/config/NotifyPage'))
-const PlatformSyncPage = lazy(() => import('@/pages/platform/PlatformSyncPage'))
 const TaggerPage = lazy(() => import('@/pages/ai/TaggerPage'))
 const RagPage = lazy(() => import('@/pages/ai/RagPage'))
 const WebSearchPage = lazy(() => import('@/pages/ai/WebSearchPage'))
@@ -29,7 +28,6 @@ const App: React.FC = () => (
           <Route element={<AdminLayout />}>
             <Route path="/system" element={<SystemPage />} />
             <Route path="/users" element={<UsersPage />} />
-            <Route path="/data/platform-sync" element={<PlatformSyncPage />} />
             {/* AI 引擎 */}
             <Route path="/ai/tagger" element={<TaggerPage />} />
             <Route path="/ai/rag" element={<RagPage />} />
@@ -43,7 +41,6 @@ const App: React.FC = () => (
             <Route path="/config" element={<Navigate to="/config/system" replace />} />
             <Route path="/settings" element={<Navigate to="/config/system" replace />} />
             <Route path="/tagger" element={<Navigate to="/ai/tagger" replace />} />
-            <Route path="/crawler" element={<Navigate to="/data/platform-sync" replace />} />
             <Route path="/" element={<Navigate to="/system" replace />} />
           </Route>
         </Route>

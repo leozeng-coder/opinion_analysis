@@ -312,14 +312,14 @@ func (s *PlatformSyncService) GetAllSyncProgress() []SyncProgress {
 // GetLastSyncTime 获取平台的最后同步时间
 func (s *PlatformSyncService) GetLastSyncTime(platform string) (time.Time, error) {
 	var article model.Article
-	err := s.db.Where("platform = ?", platform).Order("published_at DESC").First(&article).Error
+	err := s.db.Where("platform = ?", platform).Order("created_at DESC").First(&article).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return time.Time{}, nil
 		}
 		return time.Time{}, err
 	}
-	return article.PublishedAt, nil
+	return article.CreatedAt, nil
 }
 
 // GetPlatformList 获取所有支持的平台列表
@@ -334,10 +334,24 @@ func (s *PlatformSyncService) GetPlatformList() []PlatformInfo {
 		})
 	}
 
-	// 为每个平台添加最后同步时间
+	// 为每个平台添加最后同步时间和数据统计
 	for i := range platforms {
-		lastSyncTime, _ := s.GetLastSyncTime(platforms[i].Code)
+		lastSyncTime, _ := s.GetLastSyncTime(platforms[i].ArticlePlatform)
 		platforms[i].LastSyncTime = lastSyncTime
+
+		// 查询源表数量
+		var sourceCount int64
+		if platforms[i].Table != "" {
+			s.db.Table(platforms[i].Table).Count(&sourceCount)
+			platforms[i].SourceCount = int(sourceCount)
+		}
+
+		// 查询中心表数量
+		var centralCount int64
+		if platforms[i].ArticlePlatform != "" {
+			s.db.Model(&model.Article{}).Where("platform = ?", platforms[i].ArticlePlatform).Count(&centralCount)
+			platforms[i].CentralCount = int(centralCount)
+		}
 	}
 
 	return platforms
@@ -350,6 +364,8 @@ type PlatformInfo struct {
 	ArticlePlatform string    `json:"articlePlatform"` // articles.platform 入库值，如 weibo
 	Table           string    `json:"table"`
 	LastSyncTime    time.Time `json:"lastSyncTime"`
+	SourceCount     int       `json:"sourceCount"`  // 源表（MediaCrawler平台表）记录数
+	CentralCount    int       `json:"centralCount"` // 中心表（articles）记录数
 }
 
 // progressToResult 将进度转换为结果

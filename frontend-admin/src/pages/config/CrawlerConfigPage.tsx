@@ -138,7 +138,8 @@ const CrawlerConfigPage: React.FC = () => {
   useEffect(() => {
     void loadPlatforms()
     void loadCrawlerConfig()
-  }, [loadPlatforms, loadCrawlerConfig])
+    void loadSyncProgress()
+  }, [loadPlatforms, loadCrawlerConfig, loadSyncProgress])
 
   const startProgressPolling = useCallback(() => {
     if (progressInterval) return
@@ -191,6 +192,7 @@ const CrawlerConfigPage: React.FC = () => {
 
   const handleSyncSelected = async () => {
     if (selectedPlatforms.length === 0) { message.warning('请至少选择一个平台'); return }
+    console.log('[同步选中平台] 选中的平台:', selectedPlatforms)
     setSyncing(true); startProgressPolling()
     try {
       const results = await platformSyncApi.syncPlatforms(selectedPlatforms)
@@ -232,14 +234,6 @@ const CrawlerConfigPage: React.FC = () => {
     const p = syncProgress[platform]
     return (!p || p.totalCount === 0) ? 0 : Math.round((p.processedCount / p.totalCount) * 100)
   }
-  const getProgressStatus = (platform: string): 'success' | 'exception' | 'active' | 'normal' => {
-    const p = syncProgress[platform]
-    if (!p) return 'normal'
-    if (p.status === 'completed') return 'success'
-    if (p.status === 'failed') return 'exception'
-    if (p.status === 'running') return 'active'
-    return 'normal'
-  }
 
   const syncColumns = [
     {
@@ -260,7 +254,9 @@ const CrawlerConfigPage: React.FC = () => {
     {
       title: '最后同步时间', dataIndex: 'lastSyncTime', key: 'lastSyncTime',
       render: (time: string) => {
-        if (!time) return <Text type="secondary">从未同步</Text>
+        if (!time || time.startsWith('0001-') || time.startsWith('1-1-') || time === '1/1/1') {
+          return <Text type="secondary">从未同步</Text>
+        }
         const diff = Date.now() - new Date(time).getTime()
         const mins = Math.floor(diff / 60000)
         if (mins < 1) return '刚刚'
@@ -273,16 +269,55 @@ const CrawlerConfigPage: React.FC = () => {
       title: '同步进度', key: 'progress',
       render: (_: unknown, record: PlatformInfo) => {
         const p = syncProgress[record.code]
-        if (!p || p.status === 'pending') return <Text type="secondary">-</Text>
+
+        // 有正在进行的同步：显示实时进度
+        if (p && p.status !== 'pending') {
+          return (
+            <div style={{ maxWidth: 180 }}>
+              <Progress
+                percent={getProgressPercent(record.code)}
+                strokeColor={p.status === 'failed' ? '#ffccc7' : '#adc6ff'}
+                strokeWidth={6}
+                showInfo={false}
+                size="small"
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {p.status === 'running' && `处理中: ${p.processedCount}/${p.totalCount}`}
+                {p.status === 'completed' && `完成: 新增 ${p.newCount}, 跳过 ${p.skippedCount}`}
+                {p.status === 'failed' && `失败: ${p.errorMessage}`}
+              </Text>
+            </div>
+          )
+        }
+
+        // 无正在进行的同步：显示数据差异进度条
+        const sourceCount = record.sourceCount ?? 0
+        const centralCount = record.centralCount ?? 0
+
+        if (sourceCount === 0) {
+          return <Text type="secondary" style={{ fontSize: 12 }}>源表无数据</Text>
+        }
+
+        const syncPercent = Math.min(100, Math.round((centralCount / sourceCount) * 100))
+        const diffCount = Math.max(0, sourceCount - centralCount)
+        const strokeColor = syncPercent === 100 ? '#b7eb8f' : syncPercent >= 80 ? '#adc6ff' : '#ffd591'
+
         return (
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Progress percent={getProgressPercent(record.code)} status={getProgressStatus(record.code)} size="small" />
+          <div style={{ maxWidth: 180 }}>
+            <Progress
+              percent={syncPercent}
+              strokeColor={strokeColor}
+              strokeWidth={6}
+              showInfo={false}
+              size="small"
+            />
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {p.status === 'running' && `处理中: ${p.processedCount}/${p.totalCount}`}
-              {p.status === 'completed' && `完成: 新增 ${p.newCount}, 跳过 ${p.skippedCount}`}
-              {p.status === 'failed' && `失败: ${p.errorMessage}`}
+              {diffCount === 0
+                ? `已同步 ${centralCount.toLocaleString()} 条`
+                : `未同步 ${diffCount.toLocaleString()} 条 / 共 ${sourceCount.toLocaleString()}`
+              }
             </Text>
-          </Space>
+          </div>
         )
       },
     },

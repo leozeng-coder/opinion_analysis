@@ -6,6 +6,8 @@ export interface PlatformInfo {
   name: string
   table: string
   lastSyncTime?: string
+  sourceCount: number  // 源表（MediaCrawler平台表）记录数
+  centralCount: number // 中心表（articles）记录数
 }
 
 export interface PlatformSyncProgress {

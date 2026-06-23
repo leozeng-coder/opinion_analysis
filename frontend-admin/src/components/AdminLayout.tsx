@@ -12,7 +12,6 @@ import {
   TeamOutlined,
   ThunderboltOutlined,
   BellOutlined,
-  CloudSyncOutlined,
 } from '@ant-design/icons'
 import { Avatar, Breadcrumb, Layout, Menu, Space, Typography } from 'antd'
 import type { MenuProps } from 'antd'
@@ -25,7 +24,6 @@ const { Text } = Typography
 const menuItems: MenuProps['items'] = [
   { key: '/system', icon: <ThunderboltOutlined />, label: <Link to="/system">系统概览</Link> },
   { key: '/users', icon: <TeamOutlined />, label: <Link to="/users">用户管理</Link> },
-  { key: '/data/platform-sync', icon: <CloudSyncOutlined />, label: <Link to="/data/platform-sync">平台同步</Link> },
   {
     key: '/ai',
     icon: <RobotOutlined />,
@@ -52,7 +50,6 @@ const menuItems: MenuProps['items'] = [
 const routeLabels: Record<string, string> = {
   '/system': '系统概览',
   '/users': '用户管理',
-  '/data/platform-sync': '平台同步',
   '/ai/tagger': '大模型配置',
   '/ai/rag': '向量知识库',
   '/ai/web-search': '联网搜索能力',
