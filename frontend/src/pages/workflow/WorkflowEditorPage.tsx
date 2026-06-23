@@ -67,6 +67,69 @@ const ExecutionStatusContext = React.createContext<Record<string, string>>({})
 
 // 节点类型注册表
 export const NODE_REGISTRY = {
+  data_query: {
+    label: '数据查询',
+    description: '从数据库查询文章数据，输出文章ID到下游',
+    color: '#52c41a',
+    icon: '🔍',
+    configSchema: [
+      { name: 'topics', label: '话题', type: 'tags', required: false, placeholder: '输入话题后按回车添加' },
+      {
+        name: 'platforms',
+        label: '平台',
+        type: 'select-multiple',
+        required: false,
+        options: [
+          { label: '小红书', value: 'xiaohongshu' },
+          { label: '微博', value: 'weibo' },
+          { label: '抖音', value: 'douyin' },
+          { label: '快手', value: 'kuaishou' },
+          { label: 'B站', value: 'bilibili' },
+          { label: '贴吧', value: 'tieba' },
+          { label: '知乎', value: 'zhihu' },
+        ],
+        placeholder: '选择平台（可多选）',
+      },
+      {
+        name: 'sentiments',
+        label: '情感倾向',
+        type: 'select-multiple',
+        required: false,
+        options: [
+          { label: '正面', value: 'positive' },
+          { label: '中性', value: 'neutral' },
+          { label: '负面', value: 'negative' },
+        ],
+        placeholder: '选择情感倾向（可多选）',
+      },
+      { name: 'keyword', label: '关键词', type: 'text', required: false, placeholder: '标题或内容包含关键词' },
+      { name: 'startDate', label: '开始日期', type: 'date', required: false, placeholder: '格式：2024-01-01' },
+      { name: 'endDate', label: '结束日期', type: 'date', required: false, placeholder: '格式：2024-12-31' },
+      { name: 'limit', label: '返回数量限制', type: 'number', required: false, default: 1000, min: 1, max: 10000 },
+      {
+        name: 'orderBy',
+        label: '排序字段',
+        type: 'select',
+        required: false,
+        default: 'published_at',
+        options: [
+          { label: '发布时间', value: 'published_at' },
+          { label: '创建时间', value: 'created_at' },
+        ],
+      },
+      {
+        name: 'orderDir',
+        label: '排序方向',
+        type: 'select',
+        required: false,
+        default: 'desc',
+        options: [
+          { label: '降序', value: 'desc' },
+          { label: '升序', value: 'asc' },
+        ],
+      },
+    ],
+  },
   ai_tagger: {
     label: 'AI 打标',
     description: '自动为文章添加 AI 标签',
@@ -551,6 +614,7 @@ const CONDITION_FIELD_SUGGESTIONS = [
 
 // 节点分类
 const NODE_CATEGORY: Record<string, 'source' | 'sync' | 'process' | 'ops'> = {
+  data_query:       'source',
   crawler_run:      'source',
   data_patch:       'source',
   platform_sync:    'sync',

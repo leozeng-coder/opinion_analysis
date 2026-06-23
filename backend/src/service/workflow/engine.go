@@ -22,6 +22,7 @@ import (
 	actionNodes "opinion-analysis/src/service/workflow/nodes/action"
 	controlNodes "opinion-analysis/src/service/workflow/nodes/control"
 	crawlerNodes "opinion-analysis/src/service/workflow/nodes/crawler"
+	datasourceNodes "opinion-analysis/src/service/workflow/nodes/datasource"
 	"opinion-analysis/src/service/workflow/nodes"
 	processorNodes "opinion-analysis/src/service/workflow/nodes/processor"
 )
@@ -83,6 +84,9 @@ func NewEngine(
 
 // registerNodes 注册所有节点执行器
 func (e *Engine) registerNodes() {
+	// 数据源类节点
+	MustRegisterNode(datasourceNodes.NewQueryNode(e.db))
+
 	// 爬虫类节点
 	MustRegisterNode(crawlerNodes.NewRunNode(e.db, e.store.Crawler, e.store.System))
 	MustRegisterNode(crawlerNodes.NewScheduleNode(e.store.Crawler))
